@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  build:
+
+    strategy:
+      matrix:
+        configuration: [Release]
+
+    runs-on: ubuntu-latest
+                             # https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
+
+    env:
+      Solution_Name: src/MatrixTextClient.sln
+      Test_Project_Path: src/MatrixTextClient.Tests/MatrixTextClient.Tests.csproj
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    # Install the .NET Core workload
+    - name: Install .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 9.0.x
+
+    # Restore the application to populate the obj folder with RuntimeIdentifiers
+    - name: Restore the application
+      run: dotnet restore
+    
+    # Execute all unit tests in the solution
+    - name: Execute unit tests
+      run: dotnet test
