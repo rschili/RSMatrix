@@ -14,13 +14,9 @@ if (string.IsNullOrWhiteSpace(userid) || string.IsNullOrWhiteSpace(password) || 
 }
 
 //set up dependency injection
-var host = new HostBuilder()
-    .ConfigureServices(services =>
-    {
-        services.AddHttpClient();
-        services.AddLogging(services => services.AddSimpleConsole());
-    })
-    .Build();
+var services = new ServiceCollection()
+    .AddHttpClient()
+    .AddLogging(services => services.AddSimpleConsole()).BuildServiceProvider();
 
 //Using CancellationToken as a shutdown mechanism
 var cancellationTokenSource = new CancellationTokenSource();
@@ -32,7 +28,7 @@ Console.CancelKeyPress += (sender, e) =>
 
 try
 {
-    using var client = await MatrixClient.ConnectAsync(userid, password, device, host.Services.GetRequiredService<IHttpClientFactory>(), host.Services.GetRequiredService<ILogger<MatrixClient>>());
+    using var client = await MatrixClient.ConnectAsync(userid, password, device, services.GetRequiredService<IHttpClientFactory>(), services.GetRequiredService<ILogger<MatrixClient>>());
     client.BeginSyncLoop();
     await Task.Delay(Timeout.Infinite, cancellationTokenSource.Token); // Keep the console open
     //Alternatives would be using a SemaphoreSlim or ManualResetEventSlim, but this seems most intuitive
@@ -47,12 +43,5 @@ catch (Exception ex)
 }
 finally
 {
-    if (host is IAsyncDisposable asyncDisposable)
-    {
-        await asyncDisposable.DisposeAsync();
-    }
-    else if (host is IDisposable disposable)
-    {
-        disposable.Dispose();
-    }
+    await services.DisposeAsync();
 }

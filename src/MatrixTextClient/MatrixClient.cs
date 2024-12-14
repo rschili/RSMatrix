@@ -7,14 +7,6 @@ using System.Threading.Tasks;
 
 namespace MatrixTextClient
 {
-    /// <summary>
-    /// Represents the connection parameters required to connect to the Matrix service.
-    /// </summary>
-    /// <param name="UserId">The user ID in the format '@user:server'.</param>
-    /// <param name="Password">The password for the user.</param>
-    /// <param name="DeviceId">The device ID for the connection.</param>
-    public record ConnectionParameters(string UserId, string Password, string DeviceId);
-
     public sealed class MatrixClient : IDisposable
     {
         public IHttpClientFactory HttpClientFactory { get; }
