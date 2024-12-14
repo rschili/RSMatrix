@@ -28,12 +28,6 @@ namespace MatrixTextClient
                 }
 
                 logger.LogInformation("Response for path {Path} has media type {MediaType}", path, response.Content.Headers.ContentType?.MediaType);
-                /*if (response.Content.Headers.ContentType?.MediaType?.Equals(MediaTypeNames.Application.Json, StringComparison.OrdinalIgnoreCase) ?? false)
-                {
-                    logger.LogError("Unexpected content type. Expected 'application/json' but got: {ContentType}", response.Content.Headers.ContentType?.MediaType ?? "undefined");
-                    throw new HttpRequestException($"Unexpected content type: {response.Content.Headers.ContentType?.MediaType ?? "undefined"}");
-                }*/
-
                 using var contentStream = await response.Content.ReadAsStreamAsync();
                 var jsonDocument = await JsonDocument.ParseAsync(contentStream);
 

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace MatrixTextClient
 {
-    internal class UserId
+    public class UserId
     {
         public string Name { get; private set; }
         public string Server { get; private set; }
@@ -18,6 +18,8 @@ namespace MatrixTextClient
             Name = name;
             Server = server;
         }
+
+        public bool IsValid => !string.IsNullOrWhiteSpace(Name) && !string.IsNullOrWhiteSpace(Server);
 
         public static bool TryParse(string input, out UserId? userId)
         {

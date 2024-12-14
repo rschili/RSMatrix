@@ -19,16 +19,27 @@ var host = new HostBuilder()
     {
         services.AddHttpClient();
         services.AddLogging(services => services.AddSimpleConsole());
-        services.AddTransient<MatrixService>();
     })
     .Build();
 
+//Using CancellationToken as a shutdown mechanism
+var cancellationTokenSource = new CancellationTokenSource();
+Console.CancelKeyPress += (sender, e) =>
+{ // allows shutting down the app using Ctrl+C
+    e.Cancel = true;
+    cancellationTokenSource.Cancel();
+};
+
 try
 {
-    var matrix = host.Services.GetRequiredService<MatrixService>();
-    var connectionParameters = new ConnectionParameters(userid, password, device);
-    var connection = await matrix.ConnectAsync(connectionParameters);
-    Console.WriteLine(connection.Content);
+    using var client = await MatrixClient.ConnectAsync(userid, password, device, host.Services.GetRequiredService<IHttpClientFactory>(), host.Services.GetRequiredService<ILogger<MatrixClient>>());
+    client.BeginSyncLoop();
+    await Task.Delay(Timeout.Infinite, cancellationTokenSource.Token); // Keep the console open
+    //Alternatives would be using a SemaphoreSlim or ManualResetEventSlim, but this seems most intuitive
+}
+catch (OperationCanceledException)
+{
+    Console.WriteLine("Shutdown requested...");
 }
 catch (Exception ex)
 {
