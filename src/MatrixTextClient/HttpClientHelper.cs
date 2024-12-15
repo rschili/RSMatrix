@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Mime;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace MatrixTextClient
@@ -23,15 +24,32 @@ namespace MatrixTextClient
                 var status = response.StatusCode;
                 if (status != HttpStatusCode.OK)
                 {
-                    logger.LogError("Initial connect failed. Expected status 200 for {Url}, but got: {StatusCode}", baseUri, status);
-                    throw new HttpRequestException($"Failed to connect to {baseUri}, status code: {status}");
+                    if (response.Content != null && response.Content.Headers.ContentLength > 0)
+                    {
+                        using var errorStream = await response.Content.ReadAsStreamAsync();
+                        var error = JsonSerializer.Deserialize<MatrixError>(errorStream);
+                        if (error != null)
+                        {
+                            logger.LogError("{Path} failed with error: {ErrorCode}, {ErrorMessage}", path, error.ErrorCode, error.ErrorMessage);
+                            throw new MatrixResponseException(error.ErrorCode, error.ErrorMessage);
+                        }
+                    }
+
+                    logger.LogError("{Path} failed with status code {Status}, no further details provided.", path, status);
+                    throw new HttpRequestException($"{path} failed with status code {status.ToString()}.");
                 }
 
-                logger.LogInformation("Response for path {Path} has media type {MediaType}", path, response.Content.Headers.ContentType?.MediaType);
+                if (response.Content == null || response.Content.Headers.ContentLength == 0)
+                {
+                    logger.LogError("Response content is empty for {Url}", baseUri);
+                    throw new HttpRequestException($"Response content is empty for {baseUri}");
+                }
+
                 using var contentStream = await response.Content.ReadAsStreamAsync();
                 var jsonDocument = await JsonDocument.ParseAsync(contentStream);
 
                 return jsonDocument;
+
             }
             catch (Exception ex)
             {
@@ -40,4 +58,8 @@ namespace MatrixTextClient
             }
         }
     }
+
+
+
+
 }
