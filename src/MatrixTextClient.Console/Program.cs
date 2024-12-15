@@ -30,7 +30,6 @@ try
     using var client = await MatrixClient.ConnectAsync(userid, password, device, services.GetRequiredService<IHttpClientFactory>(), services.GetRequiredService<ILogger<MatrixClient>>());
     client.BeginSyncLoop();
     await Task.Delay(Timeout.Infinite, cancellationTokenSource.Token); // Keep the console open
-    //Alternatives would be using a SemaphoreSlim or ManualResetEventSlim, but this seems most intuitive
 }
 catch (OperationCanceledException)
 {
