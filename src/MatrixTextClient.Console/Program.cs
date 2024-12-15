@@ -1,6 +1,5 @@
 ﻿using MatrixTextClient;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 // load environment variables or a .env file
