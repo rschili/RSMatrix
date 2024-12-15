@@ -7,7 +7,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MatrixTextClient", "MatrixT
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MatrixTextClient.Console", "MatrixTextClient.Console\MatrixTextClient.Console.csproj", "{187D56EB-1648-4112-A28C-61978B2D0464}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MatrixTextClient.Tests", "MatrixTestClient.Tests\MatrixTextClient.Tests.csproj", "{A893D334-35A8-4EAA-9E5E-EE2AEFDFA28E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MatrixTextClient.Tests", "MatrixTextClient.Tests\MatrixTextClient.Tests.csproj", "{A893D334-35A8-4EAA-9E5E-EE2AEFDFA28E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
