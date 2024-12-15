@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace MatrixTextClient
@@ -13,15 +14,23 @@ namespace MatrixTextClient
         public ILogger Logger { get; }
         public UserId UserId { get; }
         public string DeviceId { get; }
+        public IList<string> Versions { get; }
         internal string BearerToken { get; }
         internal string BaseUri { get; }
 
-        internal MatrixClient(IHttpClientFactory httpClientFactory, UserId userId, string bearerToken, string baseUri, string deviceId, ILogger? logger = null)
+        internal MatrixClient(IHttpClientFactory httpClientFactory,
+            UserId userId,
+            string bearerToken,
+            string baseUri,
+            string deviceId,
+            IList<string> versions,
+            ILogger? logger = null)
         {
             HttpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             Logger = logger ?? NullLogger<MatrixClient>.Instance;
             UserId = userId ?? throw new ArgumentNullException(nameof(userId));
             DeviceId = deviceId ?? throw new ArgumentNullException(nameof(deviceId));
+            Versions = versions ?? throw new ArgumentNullException(nameof(versions));
             BearerToken = bearerToken ?? throw new ArgumentNullException(nameof(bearerToken));
             BaseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
         }
@@ -62,34 +71,59 @@ namespace MatrixTextClient
                 throw new ArgumentException("The server address seems invalid, it should be a well formed Uri.", nameof(userId));
             }
             logger.LogInformation("Connecting to {Url}", baseUri);
-
-            using var jsonResponse = await HttpClientHelper.GetJsonAsync(httpClientFactory, baseUri, "/.well-known/matrix/client", logger);
-
-            if (!jsonResponse.RootElement.TryGetProperty("m.homeserver", out var homeServerElement) ||
-               !homeServerElement.TryGetProperty("base_url", out var baseUrlElement))
+            var wkUri = await FetchWellKnownUri(baseUri, httpClientFactory, logger);
+            if (wkUri.HomeServer == null || string.IsNullOrEmpty(wkUri.HomeServer.BaseUrl))
             {
-                logger.LogError("The JSON response does not contain a valid 'm.homeserver' object with a 'base_url' property.");
-                throw new InvalidOperationException("The JSON response does not contain a valid 'm.homeserver' object with a 'base_url' property.");
+                logger.LogError("Failed to load home server uri from provided server.");
+                throw new InvalidOperationException("Failed to load home server uri from provided server.");
             }
-            if(baseUrlElement.ValueKind != JsonValueKind.String)
+            baseUri = wkUri.HomeServer.BaseUrl;
+            if (string.IsNullOrEmpty(baseUri))
             {
-                logger.LogError("The 'base_url' property is not a string.");
-                throw new InvalidOperationException("The 'base_url' property is not a string.");
+                logger.LogError("The 'base_url' returned by server property is empty.");
+                throw new InvalidOperationException("The 'base_url' property returned by the server is empty.");
             }
-            baseUri = baseUrlElement.GetString();
+            if (baseUri.EndsWith('/')) // according to doc, it may end with a trailing slash
+                baseUri = baseUri.Substring(0, baseUri.Length - 1);
+
             logger.LogInformation("Resolved Base URL: {BaseUrl}", baseUri);
+
             if (!Uri.IsWellFormedUriString(baseUri, UriKind.Absolute))
             {
                 logger.LogError("The server address '{Url}' seems invalid, it should look like : 'https://matrix.org'.", baseUri);
                 throw new InvalidOperationException("The resolved base uri seems invalid, it should be a well formed Uri.");
             }
 
-            // Example response:
-            //"m.homeserver": {
-            //    "base_url": "https://matrix-client.matrix.org" <-- This is the base URL we want to connect to
+            var versions = await FetchClientVersions(baseUri, httpClientFactory, logger);
+            if (versions.Versions == null || versions.Versions.Count == 0)
+            {
+                logger.LogError("Failed to load client versions from server.");
+                throw new InvalidOperationException("Failed to load client versions from server.");
+            }
 
-            var client = new MatrixClient(httpClientFactory, parsedUserId, password, baseUri, deviceId, logger);
+            var client = new MatrixClient(httpClientFactory, parsedUserId, password, baseUri, deviceId, versions.Versions, logger);
             return client;
+        }
+
+        /// <summary>
+        /// Fetches the well-known URI from the server
+        /// This is a low level method, it is implicitly called by ConnectAsync
+        /// </summary>
+        public static async Task<WellKnownUriResponse> FetchWellKnownUri(string serverUri, IHttpClientFactory httpClientFactory, ILogger logger)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(serverUri, nameof(serverUri));
+            ArgumentNullException.ThrowIfNull(httpClientFactory, nameof(httpClientFactory));
+            ArgumentNullException.ThrowIfNull(logger, nameof(logger));
+
+            return await HttpClientHelper.GetJsonAsync<WellKnownUriResponse>(httpClientFactory, serverUri, "/.well-known/matrix/client", logger);
+        }
+
+        public static async Task<ClientVersionsResponse> FetchClientVersions(string baseUri, IHttpClientFactory httpClientFactory, ILogger logger)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(baseUri, nameof(baseUri));
+            ArgumentNullException.ThrowIfNull(httpClientFactory, nameof(httpClientFactory));
+            ArgumentNullException.ThrowIfNull(logger, nameof(logger));
+            return await HttpClientHelper.GetJsonAsync<ClientVersionsResponse>(httpClientFactory, baseUri, "/_matrix/client/versions", logger);
         }
 
         public void Dispose()
@@ -102,4 +136,5 @@ namespace MatrixTextClient
             // Start Sync loop
         }
     }
+
 }
