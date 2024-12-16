@@ -18,5 +18,6 @@
     public static class Constants
     {
         public const string HTTP_CLIENT_NAME = "MatrixService"; // the name used to obtain clients from the factory
+        public const string PASSWORD_LOGIN_FLOW = "m.login.password"; // the login flow type for password-based login
     }
 }
