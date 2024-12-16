@@ -50,7 +50,7 @@ namespace MatrixTextClient
         }
     }
 
-    public class ClientVersion : IComparable<ClientVersion>, IEquatable<ClientVersion>
+    public class SpecVersion : IComparable<SpecVersion>, IEquatable<SpecVersion>
     {
         public int X { get; private set; }
         public int Y { get; private set; }
@@ -59,7 +59,7 @@ namespace MatrixTextClient
 
         public string VersionString { get; }
 
-        public ClientVersion(int x, int y, int? z, string? metadata)
+        public SpecVersion(int x, int y, int? z, string? metadata)
         {
             X = x;
             Y = y;
@@ -75,7 +75,7 @@ namespace MatrixTextClient
                 : $"v{X}.{Y}" + (Metadata != null ? $"-{Metadata}" : string.Empty);
         }
 
-        public static bool TryParse(string input, out ClientVersion? version)
+        public static bool TryParse(string input, out SpecVersion? version)
         {
             version = null;
             if (string.IsNullOrWhiteSpace(input))
@@ -99,25 +99,25 @@ namespace MatrixTextClient
             else if(prefix == "v" && z != null)
                 return false;
 
-            version = new ClientVersion(x, y, z, metadata);
+            version = new SpecVersion(x, y, z, metadata);
             return true;
         }
 
-        public int CompareTo(ClientVersion? other)
+        public int CompareTo(SpecVersion? other)
         {
             return Comparer.Instance.Compare(this, other);
         }
 
         public override bool Equals(object? obj)
         {
-            if (obj is ClientVersion other)
+            if (obj is SpecVersion other)
             {
                 return Equals(other);
             }
             return false;
         }
 
-        public bool Equals(ClientVersion? other)
+        public bool Equals(SpecVersion? other)
         {
             if (other == null) return false;
 
@@ -134,12 +134,12 @@ namespace MatrixTextClient
             return VersionString;
         }
 
-        public sealed class Comparer : IComparer<ClientVersion?>
+        public sealed class Comparer : IComparer<SpecVersion?>
         {
             public static Comparer Instance { get; } = new();
             private Comparer() { }
 
-            public int Compare(ClientVersion? x, ClientVersion? y)
+            public int Compare(SpecVersion? x, SpecVersion? y)
             {
                 if (x == null) return y == null ? 0 : -1;
                 if (y == null) return 1;

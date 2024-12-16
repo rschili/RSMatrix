@@ -14,7 +14,8 @@ namespace MatrixTextClient
         public ILogger Logger { get; }
         public UserId UserId { get; }
         public string DeviceId { get; }
-        public IList<ClientVersion> Versions { get; }
+        public IList<SpecVersion> SupportedSpecVersions { get; }
+        public static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 12, null, null);
         internal string BearerToken { get; }
         internal string BaseUri { get; }
 
@@ -23,14 +24,14 @@ namespace MatrixTextClient
             string bearerToken,
             string baseUri,
             string deviceId,
-            IList<ClientVersion> versions,
+            IList<SpecVersion> supportedSpecVersions,
             ILogger? logger = null)
         {
             HttpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
             Logger = logger ?? NullLogger<MatrixClient>.Instance;
             UserId = userId ?? throw new ArgumentNullException(nameof(userId));
             DeviceId = deviceId ?? throw new ArgumentNullException(nameof(deviceId));
-            Versions = versions ?? throw new ArgumentNullException(nameof(versions));
+            SupportedSpecVersions = supportedSpecVersions ?? throw new ArgumentNullException(nameof(supportedSpecVersions));
             BearerToken = bearerToken ?? throw new ArgumentNullException(nameof(bearerToken));
             BaseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
         }
@@ -94,15 +95,19 @@ namespace MatrixTextClient
                 throw new InvalidOperationException("The resolved base uri seems invalid, it should be a well formed Uri.");
             }
 
-            var versions = await FetchClientVersions(baseUri, httpClientFactory, logger);
+            var versions = await FetchSupportedSpecVersions(baseUri, httpClientFactory, logger);
             if (versions.Versions == null || versions.Versions.Count == 0)
             {
-                logger.LogError("Failed to load client versions from server.");
-                throw new InvalidOperationException("Failed to load client versions from server.");
+                logger.LogError("Failed to load supported spec versions from server.");
+                throw new InvalidOperationException("Failed to load supported spec versions from server.");
             }
 
-            var parsedVersions = versions.Versions.Select(v => ClientVersion.TryParse(v, out var cv) ? cv! : throw new FormatException($"Failed to parse version number {v}"))
-                .OrderBy(v => v, ClientVersion.Comparer.Instance).ToList();
+            var parsedVersions = versions.Versions.Select(v => SpecVersion.TryParse(v, out var cv) ? cv! : throw new FormatException($"Failed to parse version number {v}"))
+                .OrderBy(v => v, SpecVersion.Comparer.Instance).ToList();
+
+            if (!parsedVersions.Contains(CurrentSpecVersion))
+                logger.LogWarning("The server does not support the spec version which was used to implement this library ({ExpectedVersion}), so errors may occur. Supported versions by the server are: {SupportedVersions}",
+                    CurrentSpecVersion.VersionString, string.Join(',', parsedVersions));
 
             var client = new MatrixClient(httpClientFactory, parsedUserId, password, baseUri, deviceId, parsedVersions, logger);
             return client;
@@ -121,7 +126,7 @@ namespace MatrixTextClient
             return await HttpClientHelper.GetJsonAsync<WellKnownUriResponse>(httpClientFactory, serverUri, "/.well-known/matrix/client", logger);
         }
 
-        public static async Task<ClientVersionsResponse> FetchClientVersions(string baseUri, IHttpClientFactory httpClientFactory, ILogger logger)
+        public static async Task<ClientVersionsResponse> FetchSupportedSpecVersions(string baseUri, IHttpClientFactory httpClientFactory, ILogger logger)
         {
             ArgumentException.ThrowIfNullOrEmpty(baseUri, nameof(baseUri));
             ArgumentNullException.ThrowIfNull(httpClientFactory, nameof(httpClientFactory));
