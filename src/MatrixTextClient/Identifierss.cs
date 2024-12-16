@@ -129,6 +129,11 @@ namespace MatrixTextClient
             return HashCode.Combine(X, Y, Z ?? 0, Metadata?.GetHashCode() ?? 0);
         }
 
+        public override string ToString()
+        {
+            return VersionString;
+        }
+
         public sealed class Comparer : IComparer<ClientVersion?>
         {
             public static Comparer Instance { get; } = new();

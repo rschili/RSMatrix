@@ -14,7 +14,7 @@ namespace MatrixTextClient
         public ILogger Logger { get; }
         public UserId UserId { get; }
         public string DeviceId { get; }
-        public IList<string> Versions { get; }
+        public IList<ClientVersion> Versions { get; }
         internal string BearerToken { get; }
         internal string BaseUri { get; }
 
@@ -23,7 +23,7 @@ namespace MatrixTextClient
             string bearerToken,
             string baseUri,
             string deviceId,
-            IList<string> versions,
+            IList<ClientVersion> versions,
             ILogger? logger = null)
         {
             HttpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
@@ -101,7 +101,10 @@ namespace MatrixTextClient
                 throw new InvalidOperationException("Failed to load client versions from server.");
             }
 
-            var client = new MatrixClient(httpClientFactory, parsedUserId, password, baseUri, deviceId, versions.Versions, logger);
+            var parsedVersions = versions.Versions.Select(v => ClientVersion.TryParse(v, out var cv) ? cv! : throw new FormatException($"Failed to parse version number {v}"))
+                .OrderBy(v => v, ClientVersion.Comparer.Instance).ToList();
+
+            var client = new MatrixClient(httpClientFactory, parsedUserId, password, baseUri, deviceId, parsedVersions, logger);
             return client;
         }
 
