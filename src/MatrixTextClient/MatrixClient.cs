@@ -75,7 +75,7 @@ namespace MatrixTextClient
                 throw new ArgumentException("The server address seems invalid, it should be a well formed Uri.", nameof(userId));
             }
             logger.LogInformation("Connecting to {Url}", baseUri);
-            var wkUri = await FetchWellKnownUriAsync(baseUri, httpClientFactory, logger);
+            var wkUri = await FetchWellKnownUriAsync(baseUri, httpClientFactory, logger).ConfigureAwait(false);
             if (wkUri.HomeServer == null || string.IsNullOrEmpty(wkUri.HomeServer.BaseUrl))
             {
                 logger.LogError("Failed to load home server uri from provided server.");
@@ -98,7 +98,7 @@ namespace MatrixTextClient
                 throw new InvalidOperationException("The resolved base uri seems invalid, it should be a well formed Uri.");
             }
 
-            var versions = await FetchSupportedSpecVersionsAsync(baseUri, httpClientFactory, logger);
+            var versions = await FetchSupportedSpecVersionsAsync(baseUri, httpClientFactory, logger).ConfigureAwait(false);
             if (versions.Versions == null || versions.Versions.Count == 0)
             {
                 logger.LogError("Failed to load supported spec versions from server.");
@@ -112,14 +112,14 @@ namespace MatrixTextClient
                 logger.LogWarning("The server does not support the spec version which was used to implement this library ({ExpectedVersion}), so errors may occur. Supported versions by the server are: {SupportedVersions}",
                     CurrentSpecVersion.VersionString, string.Join(',', parsedVersions));
 
-            var authFlows = await FetchSupportedAuthFlowsAsync(baseUri, httpClientFactory, logger);
+            var authFlows = await FetchSupportedAuthFlowsAsync(baseUri, httpClientFactory, logger).ConfigureAwait(false);
             if(!authFlows.Contains(Constants.PASSWORD_LOGIN_FLOW))
             {
                 logger.LogError("The server does not support password based authentication. Supported types: {Types}", string.Join(", ", authFlows));
                 throw new InvalidOperationException("The server does not support password based authentication.");
             }
 
-            var loginResponse = await PasswordLoginAsync(baseUri, httpClientFactory, userId, password, deviceId, logger);
+            var loginResponse = await PasswordLoginAsync(baseUri, httpClientFactory, userId, password, deviceId, logger).ConfigureAwait(false);
 
             var client = new MatrixClient(httpClientFactory, parsedUserId, loginResponse.AccessToken, baseUri, deviceId, parsedVersions, logger);
             return client;
@@ -135,7 +135,7 @@ namespace MatrixTextClient
             ArgumentNullException.ThrowIfNull(httpClientFactory, nameof(httpClientFactory));
             ArgumentNullException.ThrowIfNull(logger, nameof(logger));
 
-            return await HttpClientHelper.GetJsonAsync<WellKnownUriResponse>(httpClientFactory, serverUri, "/.well-known/matrix/client", logger);
+            return await HttpClientHelper.GetJsonAsync<WellKnownUriResponse>(httpClientFactory, serverUri, "/.well-known/matrix/client", logger).ConfigureAwait(false);
         }
 
         public static async Task<SpecVersionsResponse> FetchSupportedSpecVersionsAsync(string baseUri, IHttpClientFactory httpClientFactory, ILogger logger)
@@ -143,7 +143,7 @@ namespace MatrixTextClient
             ArgumentException.ThrowIfNullOrEmpty(baseUri, nameof(baseUri));
             ArgumentNullException.ThrowIfNull(httpClientFactory, nameof(httpClientFactory));
             ArgumentNullException.ThrowIfNull(logger, nameof(logger));
-            return await HttpClientHelper.GetJsonAsync<SpecVersionsResponse>(httpClientFactory, baseUri, "/_matrix/client/versions", logger);
+            return await HttpClientHelper.GetJsonAsync<SpecVersionsResponse>(httpClientFactory, baseUri, "/_matrix/client/versions", logger).ConfigureAwait(false);
         }
 
         public static async Task<List<string>> FetchSupportedAuthFlowsAsync(string baseUri, IHttpClientFactory httpClientFactory, ILogger logger)
@@ -151,7 +151,7 @@ namespace MatrixTextClient
             ArgumentException.ThrowIfNullOrEmpty(baseUri, nameof(baseUri));
             ArgumentNullException.ThrowIfNull(httpClientFactory, nameof(httpClientFactory));
             ArgumentNullException.ThrowIfNull(logger, nameof(logger));
-            var response = await HttpClientHelper.GetJsonAsync<AuthFlowsResponse>(httpClientFactory, baseUri, "/_matrix/client/v3/login", logger, HttpStatusCode.OK, HttpMethod.Get);
+            var response = await HttpClientHelper.GetJsonAsync<AuthFlowsResponse>(httpClientFactory, baseUri, "/_matrix/client/v3/login", logger, HttpStatusCode.OK, HttpMethod.Get).ConfigureAwait(false);
             if(response != null)
                 return response.Flows.Select(f => f.Type).ToList();
 
@@ -178,7 +178,7 @@ namespace MatrixTextClient
                 InitialDeviceDisplayName = "MatrixTextClient Device",
                 Type = "m.login.password"
             };
-            return await HttpClientHelper.PostJsonAsync<LoginResponse, LoginRequest>(httpClientFactory, baseUri, "/_matrix/client/v3/login", request, logger);
+            return await HttpClientHelper.PostJsonAsync<LoginResponse, LoginRequest>(httpClientFactory, baseUri, "/_matrix/client/v3/login", request, logger).ConfigureAwait(false);
         }
 
         public void Dispose()

@@ -21,13 +21,13 @@ namespace MatrixTextClient
             var request = new HttpRequestMessage(method ?? HttpMethod.Get, string.Concat(baseUri, path));
             request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
 
-            using var response = await client.SendAsync(request);
+            using var response = await client.SendAsync(request).ConfigureAwait(false);
             var status = response.StatusCode;
             if (status != expectedStatusCode)
             {
                 if (!response.IsSuccessStatusCode && response.Content != null && response.Content.Headers.ContentLength > 0)
                 {
-                    using var errorStream = await response.Content.ReadAsStreamAsync();
+                    using var errorStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
                     var error = JsonSerializer.Deserialize<MatrixErrorResponse>(errorStream);
                     if (error != null)
                     {
@@ -46,8 +46,8 @@ namespace MatrixTextClient
                 throw new HttpRequestException($"Response content is empty for {baseUri}");
             }
 
-            using var contentStream = await response.Content.ReadAsStreamAsync();
-            var result = await JsonSerializer.DeserializeAsync<T>(contentStream);
+            using var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            var result = await JsonSerializer.DeserializeAsync<T>(contentStream).ConfigureAwait(false);
             if (result != null)
                 return result;
 
@@ -60,14 +60,14 @@ namespace MatrixTextClient
             using var client = httpClientFactory.CreateClient(Constants.HTTP_CLIENT_NAME);
             client.MaxResponseContentBufferSize = 1024 * 1024 * 2; // 2 MB;  
 
-            using var response = await client.PostAsJsonAsync(string.Concat(baseUri, path), request);
+            using var response = await client.PostAsJsonAsync(string.Concat(baseUri, path), request).ConfigureAwait(false);
             var status = response.StatusCode;
             if (status != HttpStatusCode.OK)
             {
                 if (!response.IsSuccessStatusCode && response.Content != null && response.Content.Headers.ContentLength > 0)
                 {
-                    using var errorStream = await response.Content.ReadAsStreamAsync();
-                    var error = await JsonSerializer.DeserializeAsync<MatrixErrorResponse>(errorStream);
+                    using var errorStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                    var error = await JsonSerializer.DeserializeAsync<MatrixErrorResponse>(errorStream).ConfigureAwait(false);
                     if (error != null)
                     {
                         logger.LogError("{Path} failed with error: {ErrorCode}, {ErrorMessage}", path, error.ErrorCode, error.ErrorMessage);
@@ -85,8 +85,8 @@ namespace MatrixTextClient
                 throw new HttpRequestException($"Response content is empty for {baseUri}");
             }
 
-            using var contentStream = await response.Content.ReadAsStreamAsync();
-            var result = await JsonSerializer.DeserializeAsync<T1>(contentStream);
+            using var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            var result = await JsonSerializer.DeserializeAsync<T1>(contentStream).ConfigureAwait(false);
             if (result != null)
                 return result;
 
