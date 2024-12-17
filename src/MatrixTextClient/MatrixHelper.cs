@@ -64,5 +64,30 @@ namespace MatrixTextClient
             var content = JsonContent.Create(request);
             return await HttpClientHelper.SendAsync<LoginResponse>(parameters, "/_matrix/client/v3/login", HttpMethod.Post, content).ConfigureAwait(false);
         }
+
+        public static async Task<CapabilitiesResponse> FetchCapabilitiesAsync(HttpClientParameters parameters)
+        {
+            ArgumentNullException.ThrowIfNull(parameters);
+            return await HttpClientHelper.SendAsync<CapabilitiesResponse>(parameters, "/_matrix/client/v3/capabilities").ConfigureAwait(false);
+        }
+
+        public static async Task<FilterResponse> PostFilterAsync(HttpClientParameters parameters, UserId user, Filter filter)
+        {
+            ArgumentNullException.ThrowIfNull(parameters);
+            ArgumentNullException.ThrowIfNull(user);
+            ArgumentNullException.ThrowIfNull(filter);
+            var content = JsonContent.Create(filter);
+            string path = $"/_matrix/client/v3/user/{user.FullId}/filter";
+            return await HttpClientHelper.SendAsync<FilterResponse>(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
+        }
+
+        public static async Task<Filter> GetFilterAsync(HttpClientParameters parameters, UserId user, string filterId)
+        {
+            ArgumentNullException.ThrowIfNull(parameters);
+            ArgumentNullException.ThrowIfNull(user);
+            ArgumentException.ThrowIfNullOrEmpty(filterId, nameof(filterId));
+            string path = $"/_matrix/client/v3/user/{user.FullId}/filter/{filterId}";
+            return await HttpClientHelper.SendAsync<Filter>(parameters, path).ConfigureAwait(false);
+        }
     }
 }
