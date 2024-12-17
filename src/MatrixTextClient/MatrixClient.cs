@@ -8,10 +8,11 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using MatrixTextClient.Requests;
 using MatrixTextClient.Responses;
+using System.Threading;
 
 namespace MatrixTextClient
 {
-    public sealed class MatrixClient : IDisposable
+    public sealed class MatrixClient
     {
         public ILogger Logger => HttpClientParameters.Logger;
         public UserId UserId { get; }
@@ -19,6 +20,8 @@ namespace MatrixTextClient
         public static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 12, null, null);
         internal HttpClientParameters HttpClientParameters { get; private set; }
         public Capabilities ServerCapabilities { get; private set; }
+
+        public delegate Task EventReceivedHandler(MatrixClient client, MatrixEvent matrixEvent);
 
         /// <summary>
         /// Gets the filter applied to the connection. At first it is null. Set it using SetFilterAsync method.
@@ -146,6 +149,7 @@ namespace MatrixTextClient
             var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, UserId, filterId);
             if (updatedFilter != null)
             {
+                updatedFilter.FilterId = filterId;
                 Filter = updatedFilter;
                 return updatedFilter;
             }
@@ -154,14 +158,35 @@ namespace MatrixTextClient
             throw new InvalidOperationException("Failed to get filter after setting it.");
         }
 
-        public void Dispose()
+        /// <summary>
+        /// Acknowledge the awesome name of this method.
+        /// Starts a sync loop which receives events from the server.
+        /// Task runs until the cancellationToken is cancelled.
+        /// </summary>
+        /// <param name="cancellationToken">required, token to stop the loop</param>
+        /// <param name="handler">optional handler for incoming events, default writes events to logger</param>
+        /// <returns></returns>
+        public async Task SyncAsync(CancellationToken cancellationToken, EventReceivedHandler? handler = null)
         {
-            //Stop Sync loop if running
+            if (handler == null)
+                handler = DefaultEventReceivedHandler;
+
+            var request = new SyncRequest
+            {
+                FullState = false,
+                SetPresence = Presence.Online,
+                Timeout = 60000
+            };
+
+            var response = await MatrixHelper.GetSyncAsync(HttpClientParameters, request, cancellationToken);
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            
         }
 
-        public void BeginSyncLoop()
+        public static Task DefaultEventReceivedHandler(MatrixClient client, MatrixEvent matrixEvent)
         {
-            // Start Sync loop
+            client.HttpClientParameters.Logger.LogInformation("Received event of type {Type}", matrixEvent.Type);
+            return Task.CompletedTask;
         }
     }
 

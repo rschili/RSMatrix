@@ -89,5 +89,14 @@ namespace MatrixTextClient
             string path = $"/_matrix/client/v3/user/{user.FullId}/filter/{filterId}";
             return await HttpClientHelper.SendAsync<Filter>(parameters, path).ConfigureAwait(false);
         }
+
+        internal static async Task<SyncResponse> GetSyncAsync(HttpClientParameters httpClientParameters, SyncRequest request, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+            ArgumentNullException.ThrowIfNull(request, nameof(request));
+            var content = JsonContent.Create(request);
+            var path = "/_matrix/client/v3/sync";
+            return await HttpClientHelper.SendAsync<SyncResponse>(httpClientParameters, path, HttpMethod.Get, content).ConfigureAwait(false);
+        }
     }
 }

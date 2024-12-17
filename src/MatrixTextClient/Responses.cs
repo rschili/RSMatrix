@@ -118,6 +118,13 @@ namespace MatrixTextClient.Responses
     /// </summary>
     public class Filter
     {
+        /// <summary>
+        /// This is not part of the request or response, it is used to store the filter id
+        /// It's sent with sync requests to the server
+        /// </summary>
+        [JsonIgnore()]
+        public string? FilterId { get; set; }
+
         [JsonPropertyName("account_data")]
         public EventFilter? AccountData { get; set; }
 
@@ -246,5 +253,65 @@ namespace MatrixTextClient.Responses
 
         [JsonPropertyName("unread_thread_notifications")]
         public bool? UnreadThreadNotifications { get; set; } = false;
+    }
+
+    public class SyncResponse
+    {
+        [JsonPropertyName("next_batch")]
+        public required string NextBatch { get; set; }
+
+        [JsonPropertyName("account_data")]
+        public List<EventData>? AccountData { get; set; }
+
+        /// <summary>
+        /// The updates to the presence status of other users.
+        /// </summary>
+        [JsonPropertyName("presence")]
+        public List<EventData>? Presence { get; set; }
+
+        /// <summary>
+        /// Updates to rooms.
+        /// </summary>
+        [JsonPropertyName("rooms")]
+        public RoomEvents? Rooms { get; set; }
+
+        /// <summary>
+        /// Information on end-to-end device updates, as specified in End-to-end encryption.
+        /// </summary>
+        [JsonPropertyName("device_lists")]
+        public JsonElement? DeviceLists { get; set; }
+
+        /// <summary>
+        /// Information on end-to-end encryption keys, as specified in End-to-end encryption.
+        /// </summary>
+        [JsonPropertyName("device_one_time_keys")]
+        public JsonElement? DeviceOneTimeKeys { get; set; }
+
+        /// <summary>
+        /// Information on the send-to-device messages for the client device, as defined in Send-to-Device messaging.
+        /// </summary>
+        [JsonPropertyName("to_device")]
+        public JsonElement? ToDevice { get; set; }
+    }
+
+    public class EventData
+    {
+        [JsonPropertyName("events")]
+        public List<MatrixEvent>? Events { get; set; }
+    }
+
+    public class RoomEvents
+    {
+        [JsonPropertyName("invite")]
+        public Dictionary<string, JsonElement>? Invites { get; set; }
+
+        [JsonPropertyName("join")]
+        public Dictionary<string, JsonElement>? Joins { get; set; }
+
+        [JsonPropertyName("knock")]
+        public Dictionary<string, JsonElement>? Knocks { get; set; }
+
+        [JsonPropertyName("leave")]
+        public Dictionary<string, JsonElement>? Leaves { get; set; }
     }
 }
