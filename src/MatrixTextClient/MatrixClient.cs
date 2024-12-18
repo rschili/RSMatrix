@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using MatrixTextClient.Requests;
 using MatrixTextClient.Responses;
 using System.Threading;
+using System.Web;
 
 namespace MatrixTextClient
 {
@@ -39,7 +40,7 @@ namespace MatrixTextClient
             ServerCapabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
         }
 
-        public static async Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, ILogger? logger = null)
+        public static async Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
         {
             if (logger == null)
                 logger = NullLogger<MatrixClient>.Instance;
@@ -75,7 +76,7 @@ namespace MatrixTextClient
                 throw new ArgumentException("The server address seems invalid, it should be a well formed Uri.", nameof(userId));
             }
             logger.LogInformation("Connecting to {Url}", baseUri);
-            HttpClientParameters httpClientParameters = new(httpClientFactory, baseUri, null, logger);
+            HttpClientParameters httpClientParameters = new(httpClientFactory, baseUri, null, logger, cancellationToken);
             var wkUri = await MatrixHelper.FetchWellKnownUriAsync(httpClientParameters).ConfigureAwait(false);
             if (wkUri.HomeServer == null || string.IsNullOrEmpty(wkUri.HomeServer.BaseUrl))
             {
@@ -146,7 +147,7 @@ namespace MatrixTextClient
                 throw new InvalidOperationException("Failed to set filter.");
             }
 
-            var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, UserId, filterId);
+            var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, UserId, filterId).ConfigureAwait(false);
             if (updatedFilter != null)
             {
                 updatedFilter.FilterId = filterId;
@@ -163,29 +164,61 @@ namespace MatrixTextClient
         /// Starts a sync loop which receives events from the server.
         /// Task runs until the cancellationToken is cancelled.
         /// </summary>
-        /// <param name="cancellationToken">required, token to stop the loop</param>
+        /// <param name="millisecondsBetweenRequests">Wait some time between receiving data until the next poll. Set to null for no delay.</param>
         /// <param name="handler">optional handler for incoming events, default writes events to logger</param>
         /// <returns></returns>
-        public async Task SyncAsync(CancellationToken cancellationToken, EventReceivedHandler? handler = null)
+        public async Task SyncAsync(int? millisecondsBetweenRequests = 1000, EventReceivedHandler? handler = null)
         {
             if (handler == null)
                 handler = DefaultEventReceivedHandler;
 
-            var request = new SyncRequest
+            var request = new SyncParameters
             {
                 FullState = false,
                 SetPresence = Presence.Online,
                 Timeout = 60000
             };
 
-            var response = await MatrixHelper.GetSyncAsync(HttpClientParameters, request, cancellationToken);
-            await Task.Delay(Timeout.Infinite, cancellationToken);
-            
+            while (!HttpClientParameters.CancellationToken.IsCancellationRequested)
+            {
+                var response = await MatrixHelper.GetSyncAsync(HttpClientParameters, request).ConfigureAwait(false);
+                if (response != null)
+                {
+                    await DefaultSyncReceivedHandler(this, response);
+                    request.Since = response.NextBatch;
+                }
+                //Throttle the requests
+                if(millisecondsBetweenRequests != null)
+                    await Task.Delay(millisecondsBetweenRequests.Value, HttpClientParameters.CancellationToken).ConfigureAwait(false);
+            }
         }
 
+        public static Task DefaultSyncReceivedHandler(MatrixClient client, SyncResponse matrixEvent)
+        {
+            client.Logger.LogInformation("Received sync response");
+            lock (_lock)
+            {
+                using var writer = File.AppendText("F:\\events.json");
+                writer.WriteLine(JsonSerializer.Serialize(matrixEvent, new JsonSerializerOptions { WriteIndented = true }));
+                writer.WriteLine();
+                writer.WriteLine("----------------------------------------------------------------------------------------");
+                writer.WriteLine();
+            }
+            return Task.CompletedTask;
+        }
+
+        static object _lock = new object();
         public static Task DefaultEventReceivedHandler(MatrixClient client, MatrixEvent matrixEvent)
         {
             client.HttpClientParameters.Logger.LogInformation("Received event of type {Type}", matrixEvent.Type);
+            // Serialize MatrixEvent to JSON and append it to a file
+            lock (_lock)
+            {
+                using var writer = File.AppendText("F:\\events.json");
+                writer.WriteLine(JsonSerializer.Serialize(matrixEvent));
+                writer.WriteLine();
+                writer.WriteLine();
+            }
             return Task.CompletedTask;
         }
     }

@@ -8,6 +8,8 @@ using System.Net.Mime;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using System.Web;
+using static MatrixTextClient.HttpParameterHelper;
 
 namespace MatrixTextClient
 {
@@ -18,11 +20,14 @@ namespace MatrixTextClient
         public string? BearerToken { get; set; }
         public ILogger Logger { get; init; }
 
-        public HttpClientParameters(IHttpClientFactory factory, string baseUri, string? bearerToken, ILogger logger)
+        public CancellationToken CancellationToken { get; init; }
+
+        public HttpClientParameters(IHttpClientFactory factory, string baseUri, string? bearerToken, ILogger logger, CancellationToken cancellationToken)
         {
             Factory = factory ?? throw new ArgumentNullException(nameof(factory));
             BaseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
             Logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            CancellationToken = cancellationToken;
             BearerToken = bearerToken;
         }
     }
@@ -32,6 +37,7 @@ namespace MatrixTextClient
     {
         public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null)
         {
+            var cancellationToken = parameters.CancellationToken;
             ArgumentNullException.ThrowIfNull(parameters, nameof(parameters));
             ArgumentException.ThrowIfNullOrEmpty(path, nameof(path));
             using var client = parameters.Factory.CreateClient(Constants.HTTP_CLIENT_NAME);
@@ -45,12 +51,12 @@ namespace MatrixTextClient
             if(content != null)
                 request.Content = content;
 
-            using var response = await client.SendAsync(request).ConfigureAwait(false);
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 if (!response.IsSuccessStatusCode && response.Content != null && response.Content.Headers.ContentLength > 0)
                 {
-                    using var errorStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                    using var errorStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
                     var error = JsonSerializer.Deserialize<MatrixErrorResponse>(errorStream);
                     if (error != null)
                     {
@@ -69,8 +75,8 @@ namespace MatrixTextClient
                 throw new HttpRequestException($"Response content is empty for {request.RequestUri}");
             }
 
-            using var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-            var result = await JsonSerializer.DeserializeAsync<TResponse>(contentStream).ConfigureAwait(false);
+            using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var result = await JsonSerializer.DeserializeAsync<TResponse>(contentStream, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (result != null)
                 return result;
 
@@ -78,7 +84,6 @@ namespace MatrixTextClient
             throw new HttpRequestException($"Failed to deserialize response from {request.RequestUri}.");
         }
     }
-
 
     /// <summary>
     /// Represents an error response from the Matrix Server
@@ -98,6 +103,22 @@ namespace MatrixTextClient
         public override string ToString()
         {
             return $"Error Code: {ErrorCode}, Error Message: {ErrorMessage}";
+        }
+    }
+
+    public static class HttpParameterHelper
+    {
+        public static string AppendParameters(string path, IEnumerable<KeyValuePair<string, string>> parameters)
+        {
+            ArgumentNullException.ThrowIfNull(path, nameof(path));
+            if (parameters == null)
+                return path;
+
+            var formattedParameters = string.Join("&", parameters.Select(kvp => $"{HttpUtility.UrlEncode(kvp.Key)}={HttpUtility.UrlEncode(kvp.Value)}"));
+            if (string.IsNullOrWhiteSpace(formattedParameters))
+                return path;
+
+            return $"{path}?{formattedParameters}";
         }
     }
 

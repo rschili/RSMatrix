@@ -34,7 +34,7 @@ namespace MatrixTextClient.Requests
         public required string Type { get; set; }
     }
 
-    public class SyncRequest
+    public class SyncParameters
     {
         [JsonPropertyName("filter")]
         public string? Filter { get; set; }
@@ -58,6 +58,15 @@ namespace MatrixTextClient.Requests
         /// </summary>
         [JsonPropertyName("timeout")]
         public int Timeout { get; set; }
+        
+        public IEnumerable<KeyValuePair<string, string>> GetAsParameters()
+        {
+            if (FullState) yield return KeyValuePair.Create("full_state", "true");
+            if (SetPresence != Presence.Online) yield return KeyValuePair.Create("set_presence", SetPresence.ToString().ToLower());
+            if (Timeout > 0) yield return KeyValuePair.Create("timeout", Timeout.ToString());
+            if (!string.IsNullOrWhiteSpace(Filter)) yield return KeyValuePair.Create("filter", Filter);
+            if (!string.IsNullOrWhiteSpace(Since)) yield return KeyValuePair.Create("since", Since);
+        }
     }
 
     public enum Presence

@@ -10,6 +10,14 @@ namespace MatrixTextClient;
 
 public class MatrixEvent
 {
+    [JsonPropertyName("content")]
+    public JsonElement? Content { get; set; }
+    [JsonPropertyName("type")]
+    public required string Type { get; set; }
+}
+
+public class MatrixEvent_Ex
+{
     /// <summary>
     /// The body of this event, as created by the client which sent it.
     /// </summary>

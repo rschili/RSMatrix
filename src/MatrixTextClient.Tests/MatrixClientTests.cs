@@ -26,7 +26,7 @@ namespace MatrixTextClient.Tests
         [Arguments("   ", "password", "deviceId")]
         public async Task ConnectAsync_InvalidUserId_ThrowsArgumentException(string? userId, string password, string deviceId)
         {
-            var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixClient.ConnectAsync(userId!, password, deviceId, _httpClientFactoryMock.Object, _logger));
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixClient.ConnectAsync(userId!, password, deviceId, _httpClientFactoryMock.Object, CancellationToken.None, _logger));
             await Assert.That(ex.ParamName).IsEqualTo("userId");
         }
 
@@ -36,7 +36,7 @@ namespace MatrixTextClient.Tests
         [Arguments("userId", "   ", "deviceId")]
         public async Task ConnectAsync_InvalidPassword_ThrowsArgumentException(string userId, string? password, string deviceId)
         {
-            var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixClient.ConnectAsync(userId, password!, deviceId, _httpClientFactoryMock.Object, _logger));
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixClient.ConnectAsync(userId, password!, deviceId, _httpClientFactoryMock.Object, CancellationToken.None, _logger));
             await Assert.That(ex.ParamName).IsEqualTo("password");
         }
 
@@ -46,7 +46,7 @@ namespace MatrixTextClient.Tests
         [Arguments("userId", "password", "   ")]
         public async Task ConnectAsync_InvalidDeviceId_ThrowsArgumentException(string userId, string password, string? deviceId)
         {
-            var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixClient.ConnectAsync(userId, password, deviceId!, _httpClientFactoryMock.Object, _logger));
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixClient.ConnectAsync(userId, password, deviceId!, _httpClientFactoryMock.Object, CancellationToken.None, _logger));
             await Assert.That(ex.ParamName).IsEqualTo("deviceId");
         }
 
@@ -55,7 +55,7 @@ namespace MatrixTextClient.Tests
         [Arguments("user:server", "password", "deviceId")]
         public async Task ConnectAsync_InvalidUserIdFormat_ThrowsArgumentException(string userId, string password, string deviceId)
         {
-            var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixClient.ConnectAsync(userId, password, deviceId, _httpClientFactoryMock.Object, _logger));
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixClient.ConnectAsync(userId, password, deviceId, _httpClientFactoryMock.Object, CancellationToken.None, _logger));
             await Assert.That(ex.ParamName).IsEqualTo("userId");
         }
     }

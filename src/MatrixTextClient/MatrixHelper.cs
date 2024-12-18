@@ -8,6 +8,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Threading.Tasks;
+using System.Web;
 
 namespace MatrixTextClient
 {
@@ -77,7 +78,7 @@ namespace MatrixTextClient
             ArgumentNullException.ThrowIfNull(user);
             ArgumentNullException.ThrowIfNull(filter);
             var content = JsonContent.Create(filter);
-            string path = $"/_matrix/client/v3/user/{user.FullId}/filter";
+            string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.FullId)}/filter";
             return await HttpClientHelper.SendAsync<FilterResponse>(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
         }
 
@@ -86,17 +87,18 @@ namespace MatrixTextClient
             ArgumentNullException.ThrowIfNull(parameters);
             ArgumentNullException.ThrowIfNull(user);
             ArgumentException.ThrowIfNullOrEmpty(filterId, nameof(filterId));
-            string path = $"/_matrix/client/v3/user/{user.FullId}/filter/{filterId}";
+            string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.FullId)}/filter/{HttpUtility.UrlEncode(filterId)}";
             return await HttpClientHelper.SendAsync<Filter>(parameters, path).ConfigureAwait(false);
         }
 
-        internal static async Task<SyncResponse> GetSyncAsync(HttpClientParameters httpClientParameters, SyncRequest request, CancellationToken cancellationToken)
+        internal static async Task<SyncResponse> GetSyncAsync(HttpClientParameters httpClientParameters, SyncParameters parameters)
         {
             ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
-            ArgumentNullException.ThrowIfNull(request, nameof(request));
-            var content = JsonContent.Create(request);
-            var path = "/_matrix/client/v3/sync";
-            return await HttpClientHelper.SendAsync<SyncResponse>(httpClientParameters, path, HttpMethod.Get, content).ConfigureAwait(false);
+            ArgumentNullException.ThrowIfNull(parameters, nameof(parameters));
+
+            var path = HttpParameterHelper.AppendParameters("/_matrix/client/v3/sync", parameters.GetAsParameters());
+
+            return await HttpClientHelper.SendAsync<SyncResponse>(httpClientParameters, path, HttpMethod.Get).ConfigureAwait(false);
         }
     }
 }
