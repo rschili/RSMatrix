@@ -68,14 +68,4 @@ namespace MatrixTextClient.Requests
             if (!string.IsNullOrWhiteSpace(Since)) yield return KeyValuePair.Create("since", Since);
         }
     }
-
-    public enum Presence
-    {
-        [JsonPropertyName("offline")]
-        Offline,
-        [JsonPropertyName("online")]
-        Online,
-        [JsonPropertyName("unavailable")]
-        Unavailable
-    }
 }

@@ -23,7 +23,7 @@ namespace MatrixTextClient
 
         public bool IsValid => !string.IsNullOrWhiteSpace(Name) && !string.IsNullOrWhiteSpace(Server);
 
-        public static bool TryParse(string input, out UserId? userId)
+        public static bool TryParse(string? input, out UserId? userId)
         {
             userId = null;
             if (string.IsNullOrWhiteSpace(input))

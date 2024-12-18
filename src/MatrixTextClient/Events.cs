@@ -14,53 +14,75 @@ public class MatrixEvent
     public JsonElement? Content { get; set; }
     [JsonPropertyName("type")]
     public required string Type { get; set; }
+    [JsonPropertyName("sender")]
+    public string? Sender { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
 
-public class MatrixEvent_Ex
+public class ClientEventWithoutRoomID
 {
-    /// <summary>
-    /// The body of this event, as created by the client which sent it.
-    /// </summary>
     [JsonPropertyName("content")]
     public JsonElement? Content { get; set; }
-
-    /// <summary>
-    /// The globally unique identifier for this event.
-    /// </summary>
-    [JsonPropertyName("event_id")]
-    public required string EventId { get; set; }
-
-    /// <summary>
-    /// Timestamp (in milliseconds since the unix epoch) on originating homeserver when this event was sent.
-    /// </summary>
-    [JsonPropertyName("origin_server_ts")]
-    public required long OriginServerTs { get; set; }
-
-    [JsonPropertyName("room_id")]
-    public required string RoomId { get; set; }
-
-    /// <summary>
-    /// Contains the fully-qualified ID of the user who sent this event.
-    /// </summary>
-    [JsonPropertyName("sender")]
-    public required string Sender { get; set; }
 
     [JsonPropertyName("type")]
     public required string Type { get; set; }
 
-    /// <summary>
-    /// Present if, and only if, this event is a state event.
-    /// The key making this piece of state unique in the room.
-    /// Note that it is often an empty string.
-    /// </summary>
+    [JsonPropertyName("sender")]
+    public required string Sender { get; set; }
+
+    [JsonPropertyName("event_id")]
+    public required string EventId { get; set; }
+
+    [JsonPropertyName("origin_server_ts")]
+    public required long OriginServerTs { get; set; }
+
     [JsonPropertyName("state_key")]
     public string? StateKey { get; set; }
 
-    /// <summary>
-    /// Contains optional extra information about the event.
-    /// </summary>
     [JsonPropertyName("unsigned")]
     public UnsignedData? Unsigned { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
+}
+
+/// <summary>
+/// m.presence event
+/// </summary>
+public class MatrixPresenceEvent
+{
+    [JsonPropertyName("avatar_url")]
+    public string? AvatarUrl { get; set; }
+
+    [JsonPropertyName("currently_active")]
+    public bool? CurrentlyActive { get; set; }
+
+    [JsonPropertyName("displayname")]
+    public string? DisplayName { get; set; }
+
+    /// <summary>
+    /// The last time since this used performed some action, in milliseconds.
+    /// </summary>
+    [JsonPropertyName("last_active_ago")]
+    public long? LastActiveAgo { get; set; }
+
+    [JsonPropertyName("presence")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public required Presence Presence { get; set; }
+
+    [JsonPropertyName("status_msg")]
+    public string? StatusMessage { get; set; }
+}
+public enum Presence
+{
+    [JsonPropertyName("offline")]
+    Offline,
+    [JsonPropertyName("online")]
+    Online,
+    [JsonPropertyName("unavailable")]
+    Unavailable
 }
 
 public class UnsignedData

@@ -85,7 +85,7 @@ namespace MatrixTextClient.Responses
         public RoomVersionsCapability? RoomVersions { get; set; }
 
         [JsonExtensionData]
-        public Dictionary<string, JsonElement>? AdditionalCapabilities { get; set; }
+        public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
     }
 
     public class BooleanCapability
@@ -118,13 +118,13 @@ namespace MatrixTextClient.Responses
         public required string NextBatch { get; set; }
 
         [JsonPropertyName("account_data")]
-        public JsonElement? AccountData { get; set; }
+        public EventResponse? AccountData { get; set; }
 
         /// <summary>
         /// The updates to the presence status of other users.
         /// </summary>
         [JsonPropertyName("presence")]
-        public JsonElement? Presence { get; set; }
+        public EventResponse? Presence { get; set; }
 
         /// <summary>
         /// Updates to rooms.
@@ -151,10 +151,29 @@ namespace MatrixTextClient.Responses
         public JsonElement? ToDevice { get; set; }
     }
 
-    public class EventData
+    public class EventResponse
     {
         [JsonPropertyName("events")]
         public List<MatrixEvent>? Events { get; set; }
+    }
+
+
+    public class ClientEventWithoutRoomIdResponse
+    {
+        [JsonPropertyName("events")]
+        public List<ClientEventWithoutRoomID>? Events { get; set; }
+    }
+
+    public class TimelineEventResponse
+    {
+        [JsonPropertyName("events")]
+        public List<ClientEventWithoutRoomID>? Events { get; set; }
+
+        [JsonPropertyName("limited")]
+        public bool? Limited { get; set; }
+
+        [JsonPropertyName("prev_batch")]
+        public string? PrevBatch { get; set; }
     }
 
     public class RoomEvents
@@ -163,12 +182,56 @@ namespace MatrixTextClient.Responses
         public Dictionary<string, JsonElement>? Invites { get; set; }
 
         [JsonPropertyName("join")]
-        public Dictionary<string, JsonElement>? Joins { get; set; }
+        public Dictionary<string, JsonElement>? Joined { get; set; }
 
         [JsonPropertyName("knock")]
         public Dictionary<string, JsonElement>? Knocks { get; set; }
 
         [JsonPropertyName("leave")]
         public Dictionary<string, JsonElement>? Leaves { get; set; }
+    }
+
+    public class JoinedRoomEvent
+    {
+        [JsonPropertyName("summary")]
+        public RoomSummary? Summary { get; set; }
+
+        [JsonPropertyName("account_data")]
+        public EventResponse? AccountData { get; set; }
+
+        [JsonPropertyName("ephemeral")]
+        public EventResponse? Ephemeral { get; set; }
+
+        [JsonPropertyName("state")]
+        public ClientEventWithoutRoomIdResponse? State { get; set; }
+
+        [JsonPropertyName("timeline")]
+        public TimelineEventResponse? Timeline { get; set; }
+
+        [JsonPropertyName("unread_notifications")]
+        public UnreadNotifications? UnreadNotifications { get; set; }
+
+        [JsonPropertyName("unread_thread_notifications")]
+        public UnreadNotifications? UnreadThreadNotifications { get; set; }
+    }
+
+    public class RoomSummary
+    {
+        [JsonPropertyName("m.heroes")]
+        public List<string>? Heroes { get; set; }
+
+        [JsonPropertyName("m.invited_member_count")]
+        public int? InvitedMemberCount { get; set; }
+
+        [JsonPropertyName("m.joined_member_count")]
+        public int? JoinedMemberCount { get; set; }
+    }
+
+    public class UnreadNotifications
+    {
+        [JsonPropertyName("highlight_count")]
+        public int? HighlightCount { get; set; }
+        [JsonPropertyName("notification_count")]
+        public int? NotificationCount { get; set; }
     }
 }

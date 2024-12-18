@@ -22,7 +22,7 @@ namespace MatrixTextClient
         internal HttpClientParameters HttpClientParameters { get; private set; }
         public Capabilities ServerCapabilities { get; private set; }
 
-        public delegate Task EventReceivedHandler(MatrixClient client, MatrixEvent matrixEvent);
+        public delegate Task SyncReceivedHandler(MatrixClient client, SyncResponse matrixEvent);
 
         /// <summary>
         /// Gets the filter applied to the connection. At first it is null. Set it using SetFilterAsync method.
@@ -167,10 +167,10 @@ namespace MatrixTextClient
         /// <param name="millisecondsBetweenRequests">Wait some time between receiving data until the next poll. Set to null for no delay.</param>
         /// <param name="handler">optional handler for incoming events, default writes events to logger</param>
         /// <returns></returns>
-        public async Task SyncAsync(int? millisecondsBetweenRequests = 1000, EventReceivedHandler? handler = null)
+        public async Task SyncAsync(int? millisecondsBetweenRequests = 1000, SyncReceivedHandler? handler = null)
         {
             if (handler == null)
-                handler = DefaultEventReceivedHandler;
+                handler = DefaultSyncReceivedHandler;
 
             var request = new SyncParameters
             {
@@ -184,7 +184,7 @@ namespace MatrixTextClient
                 var response = await MatrixHelper.GetSyncAsync(HttpClientParameters, request).ConfigureAwait(false);
                 if (response != null)
                 {
-                    await DefaultSyncReceivedHandler(this, response);
+                    await handler(this, response);
                     request.Since = response.NextBatch;
                 }
                 //Throttle the requests
@@ -193,32 +193,9 @@ namespace MatrixTextClient
             }
         }
 
-        public static Task DefaultSyncReceivedHandler(MatrixClient client, SyncResponse matrixEvent)
+        public static Task DefaultSyncReceivedHandler(MatrixClient client, SyncResponse response)
         {
             client.Logger.LogInformation("Received sync response");
-            lock (_lock)
-            {
-                using var writer = File.AppendText("F:\\events.json");
-                writer.WriteLine(JsonSerializer.Serialize(matrixEvent, new JsonSerializerOptions { WriteIndented = true }));
-                writer.WriteLine();
-                writer.WriteLine("----------------------------------------------------------------------------------------");
-                writer.WriteLine();
-            }
-            return Task.CompletedTask;
-        }
-
-        static object _lock = new object();
-        public static Task DefaultEventReceivedHandler(MatrixClient client, MatrixEvent matrixEvent)
-        {
-            client.HttpClientParameters.Logger.LogInformation("Received event of type {Type}", matrixEvent.Type);
-            // Serialize MatrixEvent to JSON and append it to a file
-            lock (_lock)
-            {
-                using var writer = File.AppendText("F:\\events.json");
-                writer.WriteLine(JsonSerializer.Serialize(matrixEvent));
-                writer.WriteLine();
-                writer.WriteLine();
-            }
             return Task.CompletedTask;
         }
     }
