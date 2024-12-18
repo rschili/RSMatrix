@@ -72,7 +72,18 @@ namespace MatrixTextClient
                 }
             }
 
-            if ()
+            if (syncResponse.Rooms != null)
+            {
+                if (syncResponse.Rooms.Joined != null)
+                {
+                    foreach(var joinedRoomEvents in syncResponse.Rooms.Joined)
+                    {
+                        var roomIdString = joinedRoomEvents.Key;
+
+                    }
+                }
+            }
+
         }
         public delegate Task GlobalAccountDataHandler(MatrixClient client, string type, JsonElement? content);
         public GlobalAccountDataHandler? GlobalAccountDataReceived;

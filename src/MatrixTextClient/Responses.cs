@@ -182,7 +182,7 @@ namespace MatrixTextClient.Responses
         public Dictionary<string, JsonElement>? Invites { get; set; }
 
         [JsonPropertyName("join")]
-        public Dictionary<string, JsonElement>? Joined { get; set; }
+        public Dictionary<string, JoinedRoomEvents>? Joined { get; set; }
 
         [JsonPropertyName("knock")]
         public Dictionary<string, JsonElement>? Knocks { get; set; }
@@ -191,7 +191,7 @@ namespace MatrixTextClient.Responses
         public Dictionary<string, JsonElement>? Leaves { get; set; }
     }
 
-    public class JoinedRoomEvent
+    public class JoinedRoomEvents
     {
         [JsonPropertyName("summary")]
         public RoomSummary? Summary { get; set; }
