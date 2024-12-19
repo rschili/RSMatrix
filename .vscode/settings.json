@@ -1,0 +1,14 @@
+{
+    "files.exclude": {
+        "**/.vs": true,
+        "**/bin/": true,
+        "**/obj/": true,
+        "**/TestResults/": true
+    },
+    "dotnet.testWindow.useTestingPlatformProtocol": true,
+    "dotnet.unitTestDebuggingOptions": {
+        "justMyCode": true,
+        "requireExactSource": true,
+        "targetArchitecture": "x86_64",
+    }
+}
