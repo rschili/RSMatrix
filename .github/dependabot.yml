@@ -18,7 +18,7 @@ updates:
           - "*" # Prefer a single PR per solution update.
   # NuGet packages
   - package-ecosystem: "nuget"
-    directory: "/"
+    directory: "/src"
     schedule:
       interval: "weekly"
       day: "wednesday"
