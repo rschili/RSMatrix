@@ -10,5 +10,8 @@
         "justMyCode": true,
         "requireExactSource": true,
         "targetArchitecture": "x86_64",
-    }
+    },
+    "cSpell.words": [
+        "Localpart"
+    ]
 }

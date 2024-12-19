@@ -8,47 +8,132 @@ using System.Xml.Linq;
 
 namespace MatrixTextClient
 {
-    public class UserId
+    public abstract class BaseId
     {
-        public string Name { get; private set; }
-        public string Server { get; private set; }
+        public string Localpart { get; private set; }
+        public string Domain { get; private set; }
 
-        public string FullId => $"@{Name}:{Server}";
+        public abstract char Sigil { get; }
 
-        private UserId(string name, string server)
+        public string FullId => $"{Sigil}{Localpart}:{Domain}";
+
+        protected BaseId(string localpart, string domain)
         {
-            Name = name;
-            Server = server;
+            Localpart = localpart;
+            Domain = domain;
         }
 
-        public bool IsValid => !string.IsNullOrWhiteSpace(Name) && !string.IsNullOrWhiteSpace(Server);
+        public bool IsValid => !string.IsNullOrWhiteSpace(Localpart) && !string.IsNullOrWhiteSpace(Domain);
 
-        public static bool TryParse(string? input, out UserId? userId)
+        protected static bool TryParse(string? input, char sigil, out string localPart, out string domain)
         {
-            userId = null;
+            localPart = string.Empty;
+            domain = string.Empty;
             if (string.IsNullOrWhiteSpace(input))
             {
                 return false;
             }
 
             var parts = input.Split(':', 2);
-            if (parts.Length != 2 || !parts[0].StartsWith("@"))
+            if (parts.Length != 2 || !parts[0].StartsWith(sigil))
             {
                 return false;
             }
 
-            var name = parts[0].Substring(1);
-            var server = parts[1];
+            localPart = parts[0].Substring(1);
+            domain = parts[1];
 
-            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(server))
+            if (string.IsNullOrWhiteSpace(localPart) || string.IsNullOrWhiteSpace(domain))
             {
                 return false;
             }
 
-            userId = new UserId(name, server);
             return true;
         }
+
+        public override string ToString() => FullId;
     }
+
+    public class UserId : BaseId
+    {
+        private const char SIGIL = '@';
+        public override char Sigil => SIGIL;
+
+        private UserId(string name, string server) : base(name, server) { }
+
+        public static bool TryParse(string? input, out UserId? userId)
+        {
+            if (TryParse(input, SIGIL, out var name, out var server))
+            {
+                userId = new UserId(name, server);
+                return true;
+            }
+
+            userId = null;
+            return false;
+        }
+    }
+
+    public class RoomId : BaseId
+    {
+        private const char SIGIL = '!';
+        public override char Sigil => SIGIL;
+
+        private RoomId(string name, string server) : base(name, server) { }
+
+        public static bool TryParse(string? input, out RoomId? roomId)
+        {
+            if (TryParse(input, SIGIL, out var name, out var server))
+            {
+                roomId = new RoomId(name, server);
+                return true;
+            }
+
+            roomId = null;
+            return false;
+        }
+    }
+
+    public class EventId : BaseId
+    {
+        private const char SIGIL = '$';
+        public override char Sigil => SIGIL;
+
+        private EventId(string name, string server) : base(name, server) { }
+
+        public static bool TryParse(string? input, out EventId? eventId)
+        {
+            if (TryParse(input, SIGIL, out var name, out var server))
+            {
+                eventId = new EventId(name, server);
+                return true;
+            }
+
+            eventId = null;
+            return false;
+        }
+    }
+
+    public class RoomAlias : BaseId
+    {
+        private const char SIGIL = '#';
+        public override char Sigil => SIGIL;
+
+        private RoomAlias(string name, string server) : base(name, server) { }
+
+        public static bool TryParse(string? input, out RoomAlias? roomAlias)
+        {
+            if (TryParse(input, SIGIL, out var name, out var server))
+            {
+                roomAlias = new RoomAlias(name, server);
+                return true;
+            }
+
+            roomAlias = null;
+            return false;
+        }
+    }
+
 
     public class SpecVersion : IComparable<SpecVersion>, IEquatable<SpecVersion>
     {
@@ -94,9 +179,9 @@ namespace MatrixTextClient
             var y = int.Parse(match.Groups[3].Value);
             var z = match.Groups[4].Success ? int.Parse(match.Groups[4].Value) : (int?)null;
             var metadata = match.Groups[5].Success ? match.Groups[5].Value : null;
-            if(prefix == "r" && z == null)
+            if (prefix == "r" && z == null)
                 return false;
-            else if(prefix == "v" && z != null)
+            else if (prefix == "v" && z != null)
                 return false;
 
             version = new SpecVersion(x, y, z, metadata);

@@ -69,7 +69,7 @@ namespace MatrixTextClient
                 throw new ArgumentException("The user id seems invalid, it should look like: '@user:example.org'.", nameof(userId));
             }
 
-            var baseUri = $"https://{parsedUserId.Server}";
+            var baseUri = $"https://{parsedUserId.Domain}";
             if (!Uri.IsWellFormedUriString(baseUri, UriKind.Absolute))
             {
                 logger.LogError("The server address '{Url}' seems invalid, it should look like : 'https://matrix.org'.", baseUri);
