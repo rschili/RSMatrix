@@ -116,7 +116,8 @@ namespace MatrixTextClient
                     CurrentSpecVersion.VersionString, string.Join(',', parsedVersions));
 
             var authFlows = await MatrixHelper.FetchSupportedAuthFlowsAsync(httpClientParameters).ConfigureAwait(false);
-            if(!authFlows.Contains(Constants.PASSWORD_LOGIN_FLOW))
+            var authFlowsList = authFlows.Flows.Select(f => f.Type).ToList();
+            if(!authFlowsList.Contains(Constants.PASSWORD_LOGIN_FLOW))
             {
                 logger.LogError("The server does not support password based authentication. Supported types: {Types}", string.Join(", ", authFlows));
                 throw new InvalidOperationException("The server does not support password based authentication.");

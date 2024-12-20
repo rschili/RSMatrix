@@ -49,6 +49,9 @@ namespace MatrixTextClient.Responses
     {
         [JsonPropertyName("flows")]
         public required List<AuthFlow> Flows { get; set; }
+
+        [JsonPropertyName("session")]
+        public string? Session { get; set; }
     }
 
     public class AuthFlow

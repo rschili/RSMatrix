@@ -34,14 +34,10 @@ namespace MatrixTextClient
             return await HttpClientHelper.SendAsync<SpecVersionsResponse>(parameters, "/_matrix/client/versions").ConfigureAwait(false);
         }
 
-        public static async Task<List<string>> FetchSupportedAuthFlowsAsync(HttpClientParameters parameters)
+        public static async Task<AuthFlowsResponse> FetchSupportedAuthFlowsAsync(HttpClientParameters parameters)
         {
             ArgumentNullException.ThrowIfNull(parameters);
-            var response = await HttpClientHelper.SendAsync<AuthFlowsResponse>(parameters, "/_matrix/client/v3/login").ConfigureAwait(false);
-            if (response != null)
-                return response.Flows.Select(f => f.Type).ToList();
-
-            return new List<string>();
+            return await HttpClientHelper.SendAsync<AuthFlowsResponse>(parameters, "/_matrix/client/v3/login").ConfigureAwait(false);
         }
 
         public static async Task<LoginResponse> PasswordLoginAsync(HttpClientParameters parameters, string userId, string password, string deviceId)

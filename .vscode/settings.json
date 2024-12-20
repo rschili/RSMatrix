@@ -12,6 +12,7 @@
         "targetArchitecture": "x86_64",
     },
     "cSpell.words": [
+        "homeserver",
         "Localpart"
     ]
 }
