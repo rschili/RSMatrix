@@ -162,7 +162,7 @@ public class LoginTests
         // assert
         await Assert.That(result).IsNotNull();
         handlerMock.VerifyAll();
-        await Assert.That(result.UserId.FullId).IsEqualTo("@nobody:example.org");
+        await Assert.That(result.User.Full).IsEqualTo("@nobody:example.org");
         await Assert.That(result.HttpClientParameters.BearerToken).IsEqualTo("abc123");
         await Assert.That(result.ServerCapabilities?.ChangePassword?.Enabled).IsFalse();
         await Assert.That(result.SupportedSpecVersions).Contains(new SpecVersion(1, 1, null, null));

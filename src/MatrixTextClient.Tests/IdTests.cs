@@ -21,9 +21,9 @@ public class IdTests
         if(expectedResult)
         {
             await Assert.That(userId).IsNotEqualTo(null);
-            await Assert.That(userId!.Localpart).IsEqualTo(expectedUser);
-            await Assert.That(userId!.Domain).IsEqualTo(expectedServer);
-            await Assert.That(userId!.FullId).IsEqualTo(input);
+            await Assert.That(userId!.Localpart.ToString()).IsEqualTo(expectedUser);
+            await Assert.That(userId!.Domain.ToString()).IsEqualTo(expectedServer);
+            await Assert.That(userId!.Full).IsEqualTo(input);
         }
     }
 
@@ -44,9 +44,9 @@ public class IdTests
         if(expectedResult)
         {
             await Assert.That(roomId).IsNotEqualTo(null);
-            await Assert.That(roomId!.Localpart).IsEqualTo(expectedRoom);
-            await Assert.That(roomId!.Domain).IsEqualTo(expectedServer);
-            await Assert.That(roomId!.FullId).IsEqualTo(input);
+            await Assert.That(roomId!.Localpart.ToString()).IsEqualTo(expectedRoom);
+            await Assert.That(roomId!.Domain.ToString()).IsEqualTo(expectedServer);
+            await Assert.That(roomId!.Full).IsEqualTo(input);
         }
     }
 
@@ -67,9 +67,9 @@ public class IdTests
         if(expectedResult)
         {
             await Assert.That(roomAlias).IsNotEqualTo(null);
-            await Assert.That(roomAlias!.Localpart).IsEqualTo(expectedAlias);
-            await Assert.That(roomAlias!.Domain).IsEqualTo(expectedServer);
-            await Assert.That(roomAlias!.FullId).IsEqualTo(input);
+            await Assert.That(roomAlias!.Localpart.ToString()).IsEqualTo(expectedAlias);
+            await Assert.That(roomAlias!.Domain.ToString()).IsEqualTo(expectedServer);
+            await Assert.That(roomAlias!.Full).IsEqualTo(input);
         }
     }
 
@@ -90,9 +90,9 @@ public class IdTests
         if(expectedResult)
         {
             await Assert.That(eventId).IsNotEqualTo(null);
-            await Assert.That(eventId!.Localpart).IsEqualTo(expectedEvent);
-            await Assert.That(eventId!.Domain).IsEqualTo(expectedServer);
-            await Assert.That(eventId!.FullId).IsEqualTo(input);
+            await Assert.That(eventId!.Localpart.ToString()).IsEqualTo(expectedEvent);
+            await Assert.That(eventId!.Domain.ToString()).IsEqualTo(expectedServer);
+            await Assert.That(eventId!.Full).IsEqualTo(input);
         }
     }
 

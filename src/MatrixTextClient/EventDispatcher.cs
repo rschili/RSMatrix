@@ -88,7 +88,7 @@ namespace MatrixTextClient
         public delegate Task GlobalAccountDataHandler(MatrixClient client, string type, JsonElement? content);
         public GlobalAccountDataHandler? GlobalAccountDataReceived;
 
-        public delegate Task PresenceHandler(MatrixClient client, UserId sender, Presence presence);
+        public delegate Task PresenceHandler(MatrixClient client, MatrixId sender, Presence presence);
         public PresenceHandler? PresenceReceived;
 
     }

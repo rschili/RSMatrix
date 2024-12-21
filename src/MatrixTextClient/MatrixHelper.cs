@@ -68,22 +68,26 @@ namespace MatrixTextClient
             return await HttpClientHelper.SendAsync<CapabilitiesResponse>(parameters, "/_matrix/client/v3/capabilities").ConfigureAwait(false);
         }
 
-        public static async Task<FilterResponse> PostFilterAsync(HttpClientParameters parameters, UserId user, Filter filter)
+        public static async Task<FilterResponse> PostFilterAsync(HttpClientParameters parameters, MatrixId user, Filter filter)
         {
             ArgumentNullException.ThrowIfNull(parameters);
             ArgumentNullException.ThrowIfNull(user);
+            if(user.Kind != IdKind.User)
+                throw new ArgumentException("User must be a user ID", nameof(user));
             ArgumentNullException.ThrowIfNull(filter);
             var content = JsonContent.Create(filter);
-            string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.FullId)}/filter";
+            string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.Full)}/filter";
             return await HttpClientHelper.SendAsync<FilterResponse>(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
         }
 
-        public static async Task<Filter> GetFilterAsync(HttpClientParameters parameters, UserId user, string filterId)
+        public static async Task<Filter> GetFilterAsync(HttpClientParameters parameters, MatrixId user, string filterId)
         {
             ArgumentNullException.ThrowIfNull(parameters);
             ArgumentNullException.ThrowIfNull(user);
+            if(user.Kind != IdKind.User)
+                throw new ArgumentException("User must be a user ID", nameof(user));
             ArgumentException.ThrowIfNullOrEmpty(filterId, nameof(filterId));
-            string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.FullId)}/filter/{HttpUtility.UrlEncode(filterId)}";
+            string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.Full)}/filter/{HttpUtility.UrlEncode(filterId)}";
             return await HttpClientHelper.SendAsync<Filter>(parameters, path).ConfigureAwait(false);
         }
 

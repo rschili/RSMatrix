@@ -16,7 +16,7 @@ namespace MatrixTextClient
     public sealed class MatrixClient
     {
         public ILogger Logger => HttpClientParameters.Logger;
-        public UserId UserId { get; }
+        public MatrixId User { get; }
         public IList<SpecVersion> SupportedSpecVersions { get; }
         public static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 12, null, null);
         internal HttpClientParameters HttpClientParameters { get; private set; }
@@ -30,12 +30,14 @@ namespace MatrixTextClient
         public Filter? Filter { get; private set; }
 
         internal MatrixClient(HttpClientParameters parameters,
-            UserId userId,
+            MatrixId userId,
             IList<SpecVersion> supportedSpecVersions,
             Capabilities capabilities)
         {
             HttpClientParameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
-            UserId = userId ?? throw new ArgumentNullException(nameof(userId));
+            User = userId ?? throw new ArgumentNullException(nameof(userId));
+            if(userId.Kind != IdKind.User)
+                throw new ArgumentException("User ID must be of type 'User'.", nameof(userId));
             SupportedSpecVersions = supportedSpecVersions ?? throw new ArgumentNullException(nameof(supportedSpecVersions));
             ServerCapabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
         }
@@ -140,7 +142,7 @@ namespace MatrixTextClient
         public async Task<Filter> SetFilterAsync(Filter filter)
         {
             Logger.LogInformation("Setting filter new filter");
-            var filterResponse = await MatrixHelper.PostFilterAsync(HttpClientParameters, UserId, filter).ConfigureAwait(false);
+            var filterResponse = await MatrixHelper.PostFilterAsync(HttpClientParameters, User, filter).ConfigureAwait(false);
             var filterId = filterResponse.FilterId;
             if(string.IsNullOrEmpty(filterId))
             {
@@ -148,7 +150,7 @@ namespace MatrixTextClient
                 throw new InvalidOperationException("Failed to set filter.");
             }
 
-            var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, UserId, filterId).ConfigureAwait(false);
+            var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, User, filterId).ConfigureAwait(false);
             if (updatedFilter != null)
             {
                 updatedFilter.FilterId = filterId;

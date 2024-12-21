@@ -1,71 +1,100 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml.Linq;
+using MatrixTextClient.Requests;
 
 namespace MatrixTextClient
 {
-    public abstract class BaseId
+    public enum IdKind
     {
-        public string Localpart { get; private set; }
-        public string Domain { get; private set; }
+        User,
+        Room,
+        Event,
+        RoomAlias
+    }
 
-        public abstract char Sigil { get; }
+    public sealed class MatrixId
+    {
+        public string Full { get; init;}
 
-        public string FullId => $"{Sigil}{Localpart}:{Domain}";
+        public Range LocalpartRange { get; init; }
+        public Range DomainRange { get; init; }
 
-        protected BaseId(string localpart, string domain)
+        public ReadOnlySpan<char> Localpart => Full.AsSpan(LocalpartRange);
+        public ReadOnlySpan<char> Domain => Full.AsSpan(DomainRange);
+
+        public IdKind Kind { get; init; }
+
+        private static readonly SearchValues<char> s_allowedLocalpartCharacters = SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_=+/");
+        private static readonly SearchValues<char> s_allowedDomainCharacters = SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_=+/:");
+
+        private MatrixId(string full, Range localpartRange, Range domainRange, IdKind kind)
         {
-            Localpart = localpart;
-            Domain = domain;
+            Full = full;
+            LocalpartRange = localpartRange;
+            DomainRange = domainRange;
+            Kind = kind;
         }
 
-        public bool IsValid => !string.IsNullOrWhiteSpace(Localpart) && !string.IsNullOrWhiteSpace(Domain);
-
-        protected static bool TryParse(string? input, char sigil, out string localPart, out string domain)
+        public static bool TryParse(string? input, out MatrixId? result)
         {
-            localPart = string.Empty;
-            domain = string.Empty;
-            if (string.IsNullOrWhiteSpace(input))
-            {
+            result = null;
+            if (string.IsNullOrWhiteSpace(input) || !input.Contains(':') || input.Length < 4 ) // shortest possible id is @a:b
                 return false;
-            }
 
-            var parts = input.Split(':', 2);
-            if (parts.Length != 2 || !parts[0].StartsWith(sigil))
+
+            var span = input.AsSpan();
+            IdKind? idKind = span[0] switch
             {
+                '@' => IdKind.User,
+                '!' => IdKind.Room,
+                '$' => IdKind.Event,
+                '#' => IdKind.RoomAlias,
+                _ => null
+            };
+
+            if (idKind == null)
                 return false;
-            }
 
-            localPart = parts[0].Substring(1);
-            domain = parts[1];
-
-            if (string.IsNullOrWhiteSpace(localPart) || string.IsNullOrWhiteSpace(domain))
-            {
+            var indexOfSeparator = span.IndexOf(':');
+            if (indexOfSeparator == -1)
                 return false;
-            }
+            if(indexOfSeparator <= 2) // shortest possible id is @a:b
+                return false;
+            if (indexOfSeparator >= span.Length - 1) // cannot be the last char
+                return false;
 
+            var localpartRange = new Range(1, indexOfSeparator);
+            var domainRange = Range.StartAt(indexOfSeparator + 1);
+
+            var localpart = span[localpartRange];
+            if (MemoryExtensions.ContainsAnyExcept(localpart, s_allowedLocalpartCharacters))
+                return false;
+
+            var domain = span[domainRange];
+            if (MemoryExtensions.ContainsAnyExcept(domain, s_allowedDomainCharacters))
+                return false;
+
+            result = new MatrixId(input, localpartRange, domainRange, idKind.Value);
             return true;
         }
 
-        public override string ToString() => FullId;
+        public override string ToString() => Full;
     }
 
-    public class UserId : BaseId
+    public static class UserId
     {
-        private const char SIGIL = '@';
-        public override char Sigil => SIGIL;
-
-        private UserId(string name, string server) : base(name, server) { }
-
-        public static bool TryParse(string? input, out UserId? userId)
+        public static bool TryParse(string? input, out MatrixId? userId)
         {
-            if (TryParse(input, SIGIL, out var name, out var server))
+            if (MatrixId.TryParse(input, out var id) && id != null && id.Kind == IdKind.User)
             {
-                userId = new UserId(name, server);
+                userId = id;
                 return true;
             }
 
@@ -74,18 +103,13 @@ namespace MatrixTextClient
         }
     }
 
-    public class RoomId : BaseId
+    public static class RoomId
     {
-        private const char SIGIL = '!';
-        public override char Sigil => SIGIL;
-
-        private RoomId(string name, string server) : base(name, server) { }
-
-        public static bool TryParse(string? input, out RoomId? roomId)
+        public static bool TryParse(string? input, out MatrixId? roomId)
         {
-            if (TryParse(input, SIGIL, out var name, out var server))
+            if (MatrixId.TryParse(input, out var id) && id != null && id.Kind == IdKind.Room)
             {
-                roomId = new RoomId(name, server);
+                roomId = id;
                 return true;
             }
 
@@ -94,18 +118,13 @@ namespace MatrixTextClient
         }
     }
 
-    public class EventId : BaseId
+    public static class EventId
     {
-        private const char SIGIL = '$';
-        public override char Sigil => SIGIL;
-
-        private EventId(string name, string server) : base(name, server) { }
-
-        public static bool TryParse(string? input, out EventId? eventId)
+        public static bool TryParse(string? input, out MatrixId? eventId)
         {
-            if (TryParse(input, SIGIL, out var name, out var server))
+            if (MatrixId.TryParse(input, out var id) && id != null && id.Kind == IdKind.Event)
             {
-                eventId = new EventId(name, server);
+                eventId = id;
                 return true;
             }
 
@@ -114,18 +133,13 @@ namespace MatrixTextClient
         }
     }
 
-    public class RoomAlias : BaseId
+    public static class RoomAlias
     {
-        private const char SIGIL = '#';
-        public override char Sigil => SIGIL;
-
-        private RoomAlias(string name, string server) : base(name, server) { }
-
-        public static bool TryParse(string? input, out RoomAlias? roomAlias)
+        public static bool TryParse(string? input, out MatrixId? roomAlias)
         {
-            if (TryParse(input, SIGIL, out var name, out var server))
+            if (MatrixId.TryParse(input, out var id) && id != null && id.Kind == IdKind.RoomAlias)
             {
-                roomAlias = new RoomAlias(name, server);
+                roomAlias = id;
                 return true;
             }
 

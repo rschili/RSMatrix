@@ -11,8 +11,5 @@
         "requireExactSource": true,
         "targetArchitecture": "x86_64",
     },
-    "cSpell.words": [
-        "homeserver",
-        "Localpart"
-    ]
+    "cSpell.enabled": false
 }
