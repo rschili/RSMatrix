@@ -64,9 +64,7 @@ namespace MatrixTextClient
                         await HandleAccountDataReceivedAsync(client, roomId, pair.Value.AccountData).ConfigureAwait(false);
                         await HandleEphemeralReceivedAsync(client, roomId, pair.Value.Ephemeral).ConfigureAwait(false);
                         await HandleStateReceivedAsync(client, roomId, pair.Value.State).ConfigureAwait(false);
-                        //state, timeline
-                        
-
+                        await HandleTimelineReceivedAsync(client, roomId, pair.Value.Timeline).ConfigureAwait(false);
                     } // foreach joined room
                 } // if joined
             } // if rooms
@@ -84,7 +82,7 @@ namespace MatrixTextClient
 
         private async Task HandleStateReceivedAsync(MatrixClient client, MatrixId roomId, ClientEventWithoutRoomIdResponse? state)
         {
-            if (state == null || state.Events == null || StateReceived == null)
+            if (state == null || state.Events == null)
                 return;
 
             foreach(var e in state.Events)
@@ -96,6 +94,9 @@ namespace MatrixTextClient
                 }
                 if (e.Type == "m.room.member")
                 {
+                    if (RoomMemberReceived == null)
+                        continue;
+
                     if(!e.Content.Value.TryGetProperty("displayname", out var displayNameElement) || displayNameElement.ValueKind == JsonValueKind.String)
                     {
                         Logger.LogWarning("Received membership event with missing displayname");
@@ -121,11 +122,134 @@ namespace MatrixTextClient
                         continue;
                     }
 
-                    await StateReceived(client, roomId, userId, displayName, membership).ConfigureAwait(false);
+                    await RoomMemberReceived(client, roomId, userId, displayName, membership).ConfigureAwait(false);
                 }
+                else if (e.Type == "m.space.child")
+                {} // ignore for now. Room hierarchy is not implemented
+                else if (e.Type == "m.room.avatar")
+                {} // ignore for now. Room avatar is not implemented
+                else if (e.Type == "m.room.history_visibility")
+                {} // ignore for now.
+                else if (e.Type == "m.room.canonical_alias")
+                {
+                    if (CanonicalAliasReceived == null)
+                        continue;
+
+                    if(!e.Content.Value.TryGetProperty("alias", out var aliasElement) || aliasElement.ValueKind != JsonValueKind.String)
+                    {
+                        Logger.LogWarning("Received canonical alias event with missing alias");
+                        continue;
+                    }
+                    var alias = aliasElement.GetString();
+                    if(string.IsNullOrEmpty(alias))
+                    {
+                        Logger.LogWarning("Received canonical alias event with empty alias");
+                        continue;
+                    }
+
+                    await CanonicalAliasReceived(client, roomId, alias).ConfigureAwait(false);
+                }
+                else if (e.Type == "m.room.name")
+                {
+                    if (RoomNameReceived == null)
+                        continue;
+
+                    if(!e.Content.Value.TryGetProperty("name", out var nameElement) || nameElement.ValueKind != JsonValueKind.String)
+                    {
+                        Logger.LogWarning("Received room name event with missing name");
+                        continue;
+                    }
+                    var name = nameElement.GetString();
+                    if(string.IsNullOrEmpty(name))
+                    {
+                        Logger.LogWarning("Received room name event with empty name");
+                        continue;
+                    }
+
+                    await RoomNameReceived(client, roomId, name).ConfigureAwait(false);
+                } // ignore for now.
+                else if (e.Type == "m.room.topic")
+                {} // ignore for now.
+                else if (e.Type == "m.room.create")
+                {} // ignore for now.
+                else if (e.Type == "m.room.join_rules")
+                {} // ignore for now.
+                else if (e.Type == "m.room.power_levels")
+                {} // ignore for now.
                 else
                 {
                     Logger.LogWarning("Received state event with unsupported type: {type}", e.Type);
+                }
+            }
+        }
+
+        private async Task HandleTimelineReceivedAsync(MatrixClient client, MatrixId roomId, TimelineEventResponse? timeline)
+        {
+            if (timeline == null || timeline.Events == null)
+                return;
+
+            foreach(var e in timeline.Events)
+            {
+                if (e.Content == null)
+                {
+                    Logger.LogWarning("Received timeline event with missing content of type {type}", e.Type);
+                    continue;
+                }
+
+                if(e.Type == "m.room.member")
+                    continue; // ignore for now. Updates to member events
+
+                if(e.Type == "m.room.message")
+                {
+                    if (MessageReceived == null)
+                        continue;
+                    if (!e.Content.Value.TryGetProperty("msgtype", out var msgTypeElement) || msgTypeElement.ValueKind != JsonValueKind.String)
+                    {
+                        Logger.LogWarning("Received message event with missing msgtype");
+                        continue;
+                    }
+                    var msgType = msgTypeElement.GetString();
+                    if (string.IsNullOrEmpty(msgType))
+                    {
+                        Logger.LogWarning("Received message event with empty msgtype");
+                        continue;
+                    }
+
+                    if(msgType != "m.text")
+                    {
+                        Logger.LogWarning("Received message event with unsupported msgtype: {msgType}", msgType);
+                        continue;
+                    }
+
+                    if (!UserId.TryParse(e.Sender, out var sender) || sender == null)
+                    {
+                        Logger.LogWarning("Received message event with invalid sender: {sender}", e.Sender);
+                        continue;
+                    }
+
+                    List<MatrixId>? mentions = null;
+                    if(e.Content.Value.TryGetProperty("m.mentions", out var mentionsElement) && mentionsElement.ValueKind == JsonValueKind.Object
+                        && mentionsElement.TryGetProperty("user_ids", out var userIdsElement) && userIdsElement.ValueKind == JsonValueKind.Array)
+                    {
+                        mentions = userIdsElement.EnumerateArray()
+                            .Select(v => v.GetString() ?? null)
+                            .Where(userId => userId != null)
+                            .Select(s => UserId.TryParse(s, out MatrixId? userId) ? userId : null)
+                            .Where(id => id != null).Select(id => id!).ToList();
+                    }
+
+                    if (e.Content.Value.TryGetProperty("body", out var bodyElement) && bodyElement.ValueKind == JsonValueKind.String)
+                    {
+                        var body = bodyElement.GetString();
+                        if (body != null)
+                        {
+                            await MessageReceived(roomId, sender, e.EventId, body, mentions).ConfigureAwait(false);
+                        }
+                    }
+                }
+                else
+                {
+                    Logger.LogWarning("Received timeline event with unsupported type: {type}", e.Type);
                 }
             }
         }
@@ -265,7 +389,15 @@ namespace MatrixTextClient
         public RoomSummaryHandler? RoomSummaryReceived;
 
         public delegate Task StateHandler(MatrixClient client, MatrixId room, MatrixId userId, string displayName, string membership);
-        public StateHandler? StateReceived;
+        public StateHandler? RoomMemberReceived;
 
+        public delegate Task CanonicalAliasHandler(MatrixClient client, MatrixId room, string alias);
+        public CanonicalAliasHandler? CanonicalAliasReceived;
+
+        public delegate Task RoomNameHandler(MatrixClient client, MatrixId room, string name);
+        public RoomNameHandler? RoomNameReceived;
+
+        public delegate Task MessageHandler(MatrixId room, MatrixId sender, string eventId, string body, List<MatrixId>? mentions);
+        public MessageHandler? MessageReceived;
     }
 }
