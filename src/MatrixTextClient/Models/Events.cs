@@ -1,12 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading.Tasks;
 
-namespace MatrixTextClient;
+namespace MatrixTextClient.Models;
 
 public class MatrixEvent
 {
@@ -48,33 +43,6 @@ public class ClientEventWithoutRoomID
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
 
-/// <summary>
-/// m.presence event
-/// </summary>
-public class MatrixPresenceEvent
-{
-    [JsonPropertyName("avatar_url")]
-    public string? AvatarUrl { get; set; }
-
-    [JsonPropertyName("currently_active")]
-    public bool? CurrentlyActive { get; set; }
-
-    [JsonPropertyName("displayname")]
-    public string? DisplayName { get; set; }
-
-    /// <summary>
-    /// The last time since this used performed some action, in milliseconds.
-    /// </summary>
-    [JsonPropertyName("last_active_ago")]
-    public long? LastActiveAgo { get; set; }
-
-    [JsonPropertyName("presence")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required Presence Presence { get; set; }
-
-    [JsonPropertyName("status_msg")]
-    public string? StatusMessage { get; set; }
-}
 public enum Presence
 {
     [JsonPropertyName("offline")]
@@ -124,24 +92,3 @@ public class UnsignedData
     public string? TransactionId { get; set; }
 }
 
-/// <summary>
-/// A stripped down state event
-/// </summary>
-/// <remarks>
-/// Clients should only use stripped state events when they don’t have access to the proper
-/// state of the room. Once the state of the room is available, all stripped state should be discarded.
-/// </remarks>
-public class StrippedStateEvent
-{
-    [JsonPropertyName("content")]
-    public JsonElement? Content { get; set; }
-
-    [JsonPropertyName("sender")]
-    public required string Sender { get; set; }
-
-    [JsonPropertyName("state_key")]
-    public string? StateKey { get; set; }
-
-    [JsonPropertyName("type")]
-    public required string Type { get; set; }
-}

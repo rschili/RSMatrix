@@ -1,15 +1,9 @@
-using MatrixTextClient;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
-using System;
 using System.Net;
-using System.Net.Http;
-using System.Net.Http.Json;
 using System.Text;
-using System.Threading.Tasks;
-using TUnit.Core;
+using MatrixTextClient.Models;
 
 namespace MatrixTextClient.Tests;
 
@@ -157,7 +151,7 @@ public class LoginTests
         mockHttpClientFactory.Setup(_ => _.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(handlerMock.Object, false));
 
         // act
-        var result = await MatrixClient.ConnectAsync("@nobody:example.org", "password", "deviceId", mockHttpClientFactory.Object, CancellationToken.None, NullLogger.Instance);
+        var result = await MatrixClientCore.ConnectAsync("@nobody:example.org", "password", "deviceId", mockHttpClientFactory.Object, CancellationToken.None, NullLogger.Instance);
 
         // assert
         await Assert.That(result).IsNotNull();

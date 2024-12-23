@@ -1,4 +1,4 @@
-﻿using TUnit.Core;
+﻿using MatrixTextClient.Models;
 
 namespace MatrixTextClient.Tests;
 

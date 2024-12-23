@@ -27,9 +27,9 @@ Console.CancelKeyPress += (sender, e) =>
 
 try
 {
-    var client = await MatrixClient.ConnectAsync(userid, password, device,
+    var client = await MatrixClientCore.ConnectAsync(userid, password, device,
         services.GetRequiredService<IHttpClientFactory>(), cancellationTokenSource.Token,
-        services.GetRequiredService<ILogger<MatrixClient>>());
+        services.GetRequiredService<ILogger<MatrixClientCore>>());
     await client.SyncAsync();
     Console.WriteLine("Sync has ended.");
 }
