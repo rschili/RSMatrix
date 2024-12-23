@@ -29,6 +29,7 @@ public static class HttpClientHelper
 {
     public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null)
     {
+        //TODO: Rate limiter. System.Threading.RateLimiting considered, but we don't want timers and disposable objects. Task.Delay is fine.
         var cancellationToken = parameters.CancellationToken;
         ArgumentNullException.ThrowIfNull(parameters, nameof(parameters));
         ArgumentException.ThrowIfNullOrEmpty(path, nameof(path));
