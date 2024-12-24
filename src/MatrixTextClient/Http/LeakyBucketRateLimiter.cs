@@ -18,7 +18,8 @@ public class LeakyBucketRateLimiter
 {
     public int Capacity { get; }
     public int MaxLeaksPerHour { get; }
-    public int WaterLevel { get; private set; }
+    public int WaterLevel => _waterLevel;
+    private int _waterLevel;
 
     private readonly long _ticksPerRestore; // ticks to restore one leak
 
@@ -34,7 +35,7 @@ public class LeakyBucketRateLimiter
 
         Capacity = capacity;
         MaxLeaksPerHour = maxLeaksPerHour;
-        WaterLevel = capacity;
+        _waterLevel = capacity;
 
         var ticksPerSecond = Stopwatch.Frequency; // Use stopwatch, it's more accurate than DateTime
         var ticksPerHour = ticksPerSecond * 60 * 60; // Avoid using TimeSpan, its tick frequency may be different
@@ -43,26 +44,46 @@ public class LeakyBucketRateLimiter
         _ticksPerRestore = ticksPerHour / (maxLeaksPerHour - capacity); // subtract capacity to make sure we never exceed maxRequestsPerHour even if the bucket is full
     }
 
+    /// <summary>
+    /// Attempts to leak from the bucket.
+    /// </summary>
+    /// <returns>True if successful, false if the bucket is empty</returns>
     public bool Leak()
     {
-        lock (_lock) // using lock is not the fastest, but at the rate we send requests, it does not matter
+        if(_waterLevel <= 0)
         {
+            var restoredWaterlevel = TryFillBucket();
+            if(restoredWaterlevel <= 0)
+                return false;
+        }
+
+        // in some race conditions _waterLevel may go negative, we chose to ignore that as the restoration rate will even this out
+        Interlocked.Decrement(ref _waterLevel);
+        return true;
+    }
+
+    /// <summary>
+    /// Attempts to refill some of the bucket, returns the waterlevel after filling
+    /// </summary>
+    /// <returns>The waterlevel after the operation</returns>
+    private int TryFillBucket()
+    {
+        lock(_lock)
+        {
+            var waterlevel = _waterLevel;
+            if(waterlevel >= Capacity)
+                return waterlevel;
+
             var currentTicks = Stopwatch.GetTimestamp();
-            var elapsedTicks = currentTicks - _lastRestoreTicks;
+            var elapsedTicks = currentTicks - Interlocked.Read(ref _lastRestoreTicks);
             var restored = (int)(elapsedTicks / _ticksPerRestore);
-            if(restored > 0)
-            {
-                _lastRestoreTicks = currentTicks; // We may lose some ticks here, but it's less of a problem than _lastRestoreTicks never catching up
-                WaterLevel = Math.Min(WaterLevel + restored, Capacity);
-            }
+            if(restored == 0)
+                return waterlevel;
 
-            if(WaterLevel > 0)
-            {
-                WaterLevel--;
-                return true;
-            }
-
-            return false;
+            var newWaterLevel = Math.Min(waterlevel + restored, Capacity);
+            _lastRestoreTicks = currentTicks;
+            _waterLevel = newWaterLevel;
+            return newWaterLevel;
         }
     }
 }

@@ -89,6 +89,7 @@ public static class MatrixHelper
 
         var path = HttpParameterHelper.AppendParameters("/_matrix/client/v3/sync", parameters.GetAsParameters());
 
-        return await HttpClientHelper.SendAsync<SyncResponse>(httpClientParameters, path, HttpMethod.Get).ConfigureAwait(false);
+        return await HttpClientHelper.SendAsync<SyncResponse>(httpClientParameters, path, HttpMethod.Get,
+            ignoreRateLimit: true).ConfigureAwait(false);
     }
 }

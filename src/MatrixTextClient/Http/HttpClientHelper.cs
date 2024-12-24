@@ -11,6 +11,7 @@ public record HttpClientParameters
     public string BaseUri { get; set; }
     public string? BearerToken { get; set; }
     public ILogger Logger { get; init; }
+    public LeakyBucketRateLimiter? RateLimiter { get; set; }
 
     public CancellationToken CancellationToken { get; init; }
 
@@ -27,9 +28,16 @@ public record HttpClientParameters
 
 public static class HttpClientHelper
 {
-    public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null)
+    public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
     {
-        //TODO: Rate limiter. System.Threading.RateLimiting considered, but we don't want timers and disposable objects. Task.Delay is fine.
+        //Rate limiter. System.Threading.RateLimiting considered, but we don't want timers and disposable objects.
+        var rateLimiter = parameters.RateLimiter;
+        if (!ignoreRateLimit && rateLimiter != null && !rateLimiter.Leak())
+        {
+            parameters.Logger.LogWarning("Rate limit exceeded. Request to {Path} will be delayed.", path);
+            throw new HttpRequestException("Rate limit exceeded.");
+        }
+
         var cancellationToken = parameters.CancellationToken;
         ArgumentNullException.ThrowIfNull(parameters, nameof(parameters));
         ArgumentException.ThrowIfNullOrEmpty(path, nameof(path));

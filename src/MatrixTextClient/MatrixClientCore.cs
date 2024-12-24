@@ -130,6 +130,7 @@ public sealed class MatrixClientCore
         httpClientParameters.BearerToken = loginResponse.AccessToken;
 
         var serverCapabilities = await MatrixHelper.FetchCapabilitiesAsync(httpClientParameters).ConfigureAwait(false);
+        httpClientParameters.RateLimiter = new LeakyBucketRateLimiter(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
         var client = new MatrixClientCore(httpClientParameters, parsedUserId, parsedVersions, serverCapabilities.Capabilities);
         return client;
     }
