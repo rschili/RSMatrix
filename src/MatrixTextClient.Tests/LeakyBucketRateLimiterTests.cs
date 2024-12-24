@@ -42,7 +42,7 @@ namespace MatrixTextClient.Tests
             // Act
             bool result = rateLimiter.Leak();
 
-            // await Assert
+            // Assert
             await Assert.That(result).IsTrue();
             await Assert.That(rateLimiter.WaterLevel).IsEqualTo(9);
         }
@@ -57,7 +57,7 @@ namespace MatrixTextClient.Tests
             // Act
             bool result = rateLimiter.Leak();
 
-            // await Assert
+            // Assert
             await Assert.That(result).IsFalse();
             await Assert.That(rateLimiter.WaterLevel).IsZero();
         }
@@ -75,7 +75,7 @@ namespace MatrixTextClient.Tests
             // Act
             bool result = rateLimiter.Leak();
 
-            // await Assert
+            // Assert
             await Assert.That(result).IsTrue();
         }
 
@@ -96,7 +96,7 @@ namespace MatrixTextClient.Tests
                 }
             });
 
-            // await Assert
+            // Assert
             await Assert.That(successCount).IsEqualTo(10); // Only 10 requests should succeed
         }
     }
