@@ -9,25 +9,25 @@ namespace Narrensicher.Matrix;
 /// <summary>
 /// The low level class for interacting with the Matrix server.
 /// </summary>
-public sealed class MatrixClient
+public sealed class MatrixTextClient
 {
-    public MatrixClientCore Core { get; private init; }
-    public ILogger Logger => Core.Logger;
-    public MatrixId User => Core.User;
+    internal MatrixClientCore Core { get; private init; }
+    private ILogger Logger => Core.Logger;
+    public MatrixId CurrentUser => Core.User;
 
     public delegate Task MessageHandler(MatrixTextMessage message);
 
-    private MessageHandler _messageHandler;
+    private MessageHandler? _messageHandler = null; // We use this to track if the sync has been started
 
-    private MatrixClient(MatrixClientCore core)
+    private MatrixTextClient(MatrixClientCore core)
     {
         Core = core ?? throw new ArgumentNullException(nameof(core));
     }
 
-    public static async Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
+    public static async Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
     {
         var core = await MatrixClientCore.ConnectAsync(userId, password, deviceId, httpClientFactory, cancellationToken, logger).ConfigureAwait(false);
-        var client = new MatrixClient(core);
+        var client = new MatrixTextClient(core);
         return client;
     }
 
@@ -40,12 +40,12 @@ public sealed class MatrixClient
         await Core.SyncAsync(HandleSyncResponse).ConfigureAwait(false);
     }
 
-    public async Task HandleSyncResponse(SyncResponse response)
+    private async Task HandleSyncResponse(SyncResponse response)
     {
         MatrixTextMessage message = new();
         try
         {
-            await _messageHandler(message).ConfigureAwait(false);
+            await _messageHandler!(message).ConfigureAwait(false);
         }
         catch(TaskCanceledException)
         {

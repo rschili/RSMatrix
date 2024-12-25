@@ -1,6 +1,7 @@
 ﻿using Narrensicher.Matrix;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Narrensicher.Matrix.Models;
 
 // load environment variables or a .env file
 DotNetEnv.Env.TraversePath().Load();
@@ -27,10 +28,10 @@ Console.CancelKeyPress += (sender, e) =>
 
 try
 {
-    var client = await MatrixClientCore.ConnectAsync(userid, password, device,
+    var client = await MatrixTextClient.ConnectAsync(userid, password, device,
         services.GetRequiredService<IHttpClientFactory>(), cancellationTokenSource.Token,
-        services.GetRequiredService<ILogger<MatrixClientCore>>());
-    await client.SyncAsync();
+        services.GetRequiredService<ILogger<MatrixTextClient>>());
+    await client.SyncAsync(MessageReceived);
     Console.WriteLine("Sync has ended.");
 }
 catch (OperationCanceledException)
@@ -44,4 +45,9 @@ catch (Exception ex)
 finally
 {
     await services.DisposeAsync();
+}
+
+Task MessageReceived(MatrixTextMessage message)
+{
+    return Task.CompletedTask;
 }

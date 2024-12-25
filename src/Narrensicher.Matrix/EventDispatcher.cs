@@ -14,11 +14,11 @@ public class EventDispatcher
         Logger = logger ?? NullLogger<EventDispatcher>.Instance;
     }
 
-    public async Task HandleSyncReceivedAsync(MatrixClientCore client, SyncResponse syncResponse)
+    public async Task HandleSyncReceivedAsync(SyncResponse syncResponse)
     {
         try
         {
-            await HandleSyncReceivedInternalAsync(client, syncResponse).ConfigureAwait(false);
+            await HandleSyncReceivedInternalAsync(syncResponse).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -26,19 +26,19 @@ public class EventDispatcher
         }
     }
 
-    private async Task HandleSyncReceivedInternalAsync(MatrixClientCore client, SyncResponse syncResponse)
+    private async Task HandleSyncReceivedInternalAsync(SyncResponse syncResponse)
     {
         if (syncResponse == null)
             return;
 
         if (syncResponse.AccountData != null)
         {
-            await HandleAccountDataReceivedAsync(client, null, syncResponse.AccountData).ConfigureAwait(false);
+            await HandleAccountDataReceivedAsync(null, syncResponse.AccountData).ConfigureAwait(false);
         }
 
         if (syncResponse.Presence != null)
         {
-            await HandlePresenceReceivedAsync(client, syncResponse.Presence).ConfigureAwait(false);
+            await HandlePresenceReceivedAsync(syncResponse.Presence).ConfigureAwait(false);
         }
 
         if (syncResponse.Rooms != null)
@@ -54,27 +54,27 @@ public class EventDispatcher
                         continue;
                     }
 
-                    await HandleRoomSummaryReceivedAsync(client, roomId, pair.Value.Summary).ConfigureAwait(false);
-                    await HandleAccountDataReceivedAsync(client, roomId, pair.Value.AccountData).ConfigureAwait(false);
-                    await HandleEphemeralReceivedAsync(client, roomId, pair.Value.Ephemeral).ConfigureAwait(false);
-                    await HandleStateReceivedAsync(client, roomId, pair.Value.State).ConfigureAwait(false);
-                    await HandleTimelineReceivedAsync(client, roomId, pair.Value.Timeline).ConfigureAwait(false);
+                    await HandleRoomSummaryReceivedAsync(roomId, pair.Value.Summary).ConfigureAwait(false);
+                    await HandleAccountDataReceivedAsync(roomId, pair.Value.AccountData).ConfigureAwait(false);
+                    await HandleEphemeralReceivedAsync(roomId, pair.Value.Ephemeral).ConfigureAwait(false);
+                    await HandleStateReceivedAsync(roomId, pair.Value.State).ConfigureAwait(false);
+                    await HandleTimelineReceivedAsync(roomId, pair.Value.Timeline).ConfigureAwait(false);
                 } // foreach joined room
             } // if joined
         } // if rooms
     }
 
-    private async Task HandleRoomSummaryReceivedAsync(MatrixClientCore client, MatrixId roomId, RoomSummary? summary)
+    private async Task HandleRoomSummaryReceivedAsync(MatrixId roomId, RoomSummary? summary)
     {
         if (summary == null || summary.Heroes == null || RoomSummaryReceived == null)
             return;
 
         var users = summary.Heroes.Select(s => UserId.TryParse(s, out MatrixId? userId) ? userId : null)
             .Where(id => id != null).Select(id => id!).ToList();
-        await RoomSummaryReceived(client, roomId, users!).ConfigureAwait(false);
+        await RoomSummaryReceived(roomId, users!).ConfigureAwait(false);
     }
 
-    private async Task HandleStateReceivedAsync(MatrixClientCore client, MatrixId roomId, ClientEventWithoutRoomIdResponse? state)
+    private async Task HandleStateReceivedAsync(MatrixId roomId, ClientEventWithoutRoomIdResponse? state)
     {
         if (state == null || state.Events == null)
             return;
@@ -116,7 +116,7 @@ public class EventDispatcher
                     continue;
                 }
 
-                await RoomMemberReceived(client, roomId, userId, displayName, membership).ConfigureAwait(false);
+                await RoomMemberReceived(roomId, userId, displayName, membership).ConfigureAwait(false);
             }
             else if (e.Type == "m.space.child")
             { } // ignore for now. Room hierarchy is not implemented
@@ -141,7 +141,7 @@ public class EventDispatcher
                     continue;
                 }
 
-                await CanonicalAliasReceived(client, roomId, alias).ConfigureAwait(false);
+                await CanonicalAliasReceived(roomId, alias).ConfigureAwait(false);
             }
             else if (e.Type == "m.room.name")
             {
@@ -160,7 +160,7 @@ public class EventDispatcher
                     continue;
                 }
 
-                await RoomNameReceived(client, roomId, name).ConfigureAwait(false);
+                await RoomNameReceived(roomId, name).ConfigureAwait(false);
             } // ignore for now.
             else if (e.Type == "m.room.topic")
             { } // ignore for now.
@@ -177,7 +177,7 @@ public class EventDispatcher
         }
     }
 
-    private async Task HandleTimelineReceivedAsync(MatrixClientCore client, MatrixId roomId, TimelineEventResponse? timeline)
+    private async Task HandleTimelineReceivedAsync(MatrixId roomId, TimelineEventResponse? timeline)
     {
         if (timeline == null || timeline.Events == null)
             return;
@@ -248,7 +248,7 @@ public class EventDispatcher
         }
     }
 
-    private async Task HandlePresenceReceivedAsync(MatrixClientCore client, EventResponse presenceEvents)
+    private async Task HandlePresenceReceivedAsync(EventResponse presenceEvents)
     {
         if (PresenceReceived == null || presenceEvents.Events == null)
             return;
@@ -274,25 +274,25 @@ public class EventDispatcher
                 continue;
             }
             var content = JsonSerializer.Deserialize<Presence>((JsonElement)presence.Content);
-            await PresenceReceived(client, userId, content).ConfigureAwait(false);
+            await PresenceReceived(userId, content).ConfigureAwait(false);
         }
     }
 
-    private async Task HandleAccountDataReceivedAsync(MatrixClientCore client, MatrixId? roomId, EventResponse? accountData)
+    private async Task HandleAccountDataReceivedAsync(MatrixId? roomId, EventResponse? accountData)
     {
         if (accountData != null && accountData.Events != null)
         {
             foreach (var e in accountData.Events)
             {
                 if (roomId != null && RoomAccountDataReceived != null)
-                    await RoomAccountDataReceived(client, roomId, e.Type, e.Content).ConfigureAwait(false);
+                    await RoomAccountDataReceived(roomId, e.Type, e.Content).ConfigureAwait(false);
                 else if (GlobalAccountDataReceived != null)
-                    await GlobalAccountDataReceived(client, e.Type, e.Content).ConfigureAwait(false);
+                    await GlobalAccountDataReceived(e.Type, e.Content).ConfigureAwait(false);
             }
         }
     }
 
-    private async Task HandleEphemeralReceivedAsync(MatrixClientCore client, MatrixId roomId, EventResponse? eph)
+    private async Task HandleEphemeralReceivedAsync(MatrixId roomId, EventResponse? eph)
     {
         if (eph != null && eph.Events != null)
         {
@@ -313,7 +313,7 @@ public class EventDispatcher
                             .Select(s => UserId.TryParse(s, out MatrixId? userId) ? userId : null)
                             .Where(id => id != null).Select(id => id!).ToList();
 
-                        await TypingReceived(client, roomId, typingUsers).ConfigureAwait(false);
+                        await TypingReceived(roomId, typingUsers).ConfigureAwait(false);
                     }
                     else
                         Logger.LogWarning("Received typing event with invalid user_ids structure");
@@ -353,7 +353,7 @@ public class EventDispatcher
                                 threadId = tid.GetString();
                             }
 
-                            await ReceiptReceived(client, roomId, eventId, userId, threadId).ConfigureAwait(false);
+                            await ReceiptReceived(roomId, eventId, userId, threadId).ConfigureAwait(false);
                         }
                     }
                 } // else if receipt
@@ -363,32 +363,32 @@ public class EventDispatcher
         } // if ephemeral
     }
 
-    public delegate Task GlobalAccountDataHandler(MatrixClientCore client, string type, JsonElement? content);
+    public delegate Task GlobalAccountDataHandler(string type, JsonElement? content);
     public GlobalAccountDataHandler? GlobalAccountDataReceived;
 
-    public delegate Task RoomAccountDataHandler(MatrixClientCore client, MatrixId room, string type, JsonElement? content);
+    public delegate Task RoomAccountDataHandler(MatrixId room, string type, JsonElement? content);
     public RoomAccountDataHandler? RoomAccountDataReceived;
 
-    public delegate Task PresenceHandler(MatrixClientCore client, MatrixId sender, Presence presence);
+    public delegate Task PresenceHandler(MatrixId sender, Presence presence);
     public PresenceHandler? PresenceReceived;
 
-    public delegate Task TypingHandler(MatrixClientCore client, MatrixId room, List<MatrixId> typingUsers);
+    public delegate Task TypingHandler(MatrixId room, List<MatrixId> typingUsers);
     public TypingHandler? TypingReceived;
 
-    public delegate Task ReceiptHandler(MatrixClientCore client, MatrixId room, MatrixId eventId, MatrixId userId, string? threadId);
+    public delegate Task ReceiptHandler(MatrixId room, MatrixId eventId, MatrixId userId, string? threadId);
 
     public ReceiptHandler? ReceiptReceived;
 
-    public delegate Task RoomSummaryHandler(MatrixClientCore client, MatrixId room, List<MatrixId> users);
+    public delegate Task RoomSummaryHandler(MatrixId room, List<MatrixId> users);
     public RoomSummaryHandler? RoomSummaryReceived;
 
-    public delegate Task StateHandler(MatrixClientCore client, MatrixId room, MatrixId userId, string displayName, string membership);
+    public delegate Task StateHandler(MatrixId room, MatrixId userId, string displayName, string membership);
     public StateHandler? RoomMemberReceived;
 
-    public delegate Task CanonicalAliasHandler(MatrixClientCore client, MatrixId room, string alias);
+    public delegate Task CanonicalAliasHandler(MatrixId room, string alias);
     public CanonicalAliasHandler? CanonicalAliasReceived;
 
-    public delegate Task RoomNameHandler(MatrixClientCore client, MatrixId room, string name);
+    public delegate Task RoomNameHandler(MatrixId room, string name);
     public RoomNameHandler? RoomNameReceived;
 
     public delegate Task MessageHandler(MatrixId room, MatrixId sender, string eventId, string body, List<MatrixId>? mentions);

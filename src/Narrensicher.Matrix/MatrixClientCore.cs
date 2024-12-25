@@ -8,21 +8,21 @@ namespace Narrensicher.Matrix;
 /// <summary>
 /// The low level class for interacting with the Matrix server.
 /// </summary>
-public sealed class MatrixClientCore
+internal sealed class MatrixClientCore
 {
-    public ILogger Logger => HttpClientParameters.Logger;
-    public MatrixId User { get; }
-    public IList<SpecVersion> SupportedSpecVersions { get; }
-    public static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 12, null, null);
+    internal ILogger Logger => HttpClientParameters.Logger;
+    internal MatrixId User { get; }
+    internal IList<SpecVersion> SupportedSpecVersions { get; }
+    internal static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 12, null, null);
     internal HttpClientParameters HttpClientParameters { get; private set; }
-    public Capabilities ServerCapabilities { get; private set; }
+    internal Capabilities ServerCapabilities { get; private set; }
 
-    public delegate Task SyncReceivedHandler(SyncResponse matrixEvent);
+    internal delegate Task SyncReceivedHandler(SyncResponse matrixEvent);
 
     /// <summary>
     /// Gets the filter applied to the connection. At first it is null. Set it using SetFilterAsync method.
     /// </summary>
-    public Filter? Filter { get; private set; }
+    internal Filter? Filter { get; private set; }
 
     internal MatrixClientCore(HttpClientParameters parameters,
         MatrixId userId,
@@ -37,7 +37,7 @@ public sealed class MatrixClientCore
         ServerCapabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
     }
 
-    public static async Task<MatrixClientCore> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
+    internal static async Task<MatrixClientCore> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
     {
         if (logger == null)
             logger = NullLogger<MatrixClientCore>.Instance;
@@ -135,7 +135,7 @@ public sealed class MatrixClientCore
         return client;
     }
 
-    public async Task<Filter> SetFilterAsync(Filter filter)
+    internal async Task<Filter> SetFilterAsync(Filter filter)
     {
         Logger.LogInformation("Setting filter new filter");
         var filterResponse = await MatrixHelper.PostFilterAsync(HttpClientParameters, User, filter).ConfigureAwait(false);
@@ -165,7 +165,7 @@ public sealed class MatrixClientCore
     /// </summary>
     /// <param name="handler">optional handler for incoming events, default writes events to logger</param>
     /// <returns></returns>
-    public async Task SyncAsync(SyncReceivedHandler? handler = null)
+    internal async Task SyncAsync(SyncReceivedHandler? handler = null)
     {
         if (handler == null)
             handler = DefaultSyncReceivedHandler;
@@ -188,7 +188,7 @@ public sealed class MatrixClientCore
         }
     }
 
-    public Task DefaultSyncReceivedHandler(SyncResponse response)
+    internal Task DefaultSyncReceivedHandler(SyncResponse response)
     {
         Logger.LogInformation("Received sync response but no handler is set.");
         return Task.CompletedTask;
