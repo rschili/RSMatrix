@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\MatrixTextClient\MatrixTextClient.csproj" />
+    <ProjectReference Include="..\Narrensicher.Matrix\Narrensicher.Matrix.csproj" />
   </ItemGroup>
 
 </Project>

@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
-namespace MatrixTextClient.Models;
+namespace Narrensicher.Matrix.Models;
 
 /// <summary>
 /// Consolt spec for help https://spec.matrix.org/v1.12/client-server-api/#get_matrixclientv3useruseridfilterfilterid

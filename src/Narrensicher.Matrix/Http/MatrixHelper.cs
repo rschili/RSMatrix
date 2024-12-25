@@ -1,8 +1,8 @@
-﻿using MatrixTextClient.Models;
+﻿using Narrensicher.Matrix.Models;
 using System.Net.Http.Json;
 using System.Web;
 
-namespace MatrixTextClient.Http;
+namespace Narrensicher.Matrix.Http;
 /// <summary>
 /// Low level helper methods for Matrix operations
 /// </summary>
@@ -46,7 +46,7 @@ public static class MatrixHelper
             },
             Password = password,
             DeviceId = deviceId,
-            InitialDeviceDisplayName = "MatrixTextClient Device",
+            InitialDeviceDisplayName = "Narrensicher.Matrix Device",
             Type = "m.login.password"
         };
         var content = JsonContent.Create(request);

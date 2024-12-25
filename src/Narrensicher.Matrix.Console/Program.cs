@@ -1,4 +1,4 @@
-﻿using MatrixTextClient;
+﻿using Narrensicher.Matrix;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

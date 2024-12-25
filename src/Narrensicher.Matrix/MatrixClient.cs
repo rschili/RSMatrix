@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using MatrixTextClient.Models;
-using MatrixTextClient.Http;
+using Narrensicher.Matrix.Models;
+using Narrensicher.Matrix.Http;
 using System.Reflection.Metadata;
 
-namespace MatrixTextClient;
+namespace Narrensicher.Matrix;
 
 /// <summary>
 /// The low level class for interacting with the Matrix server.

@@ -1,10 +1,10 @@
-using MatrixTextClient.Models;
+using Narrensicher.Matrix.Models;
 using Microsoft.Extensions.Logging;
 using System.Net.Mime;
 using System.Text.Json;
 using System.Web;
 
-namespace MatrixTextClient.Http;
+namespace Narrensicher.Matrix.Http;
 public record HttpClientParameters
 {
     public IHttpClientFactory Factory { get; init; }

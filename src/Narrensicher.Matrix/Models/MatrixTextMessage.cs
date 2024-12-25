@@ -1,4 +1,4 @@
-namespace MatrixTextClient.Models;
+namespace Narrensicher.Matrix.Models;
 
 public class MatrixTextMessage
 {

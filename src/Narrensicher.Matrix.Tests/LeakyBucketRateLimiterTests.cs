@@ -1,7 +1,7 @@
-using MatrixTextClient.Http;
+using Narrensicher.Matrix.Http;
 
 
-namespace MatrixTextClient.Tests
+namespace Narrensicher.Matrix.Tests
 {
     public class LeakyBucketRateLimiterTests
     {

@@ -1,9 +1,9 @@
-﻿using MatrixTextClient.Models;
+﻿using Narrensicher.Matrix.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
 
-namespace MatrixTextClient;
+namespace Narrensicher.Matrix;
 
 public class EventDispatcher
 {

@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace MatrixTextClient.Models;
+namespace Narrensicher.Matrix.Models;
 
 public class MatrixEvent
 {
