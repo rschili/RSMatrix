@@ -17,7 +17,7 @@ public sealed class MatrixClientCore
     internal HttpClientParameters HttpClientParameters { get; private set; }
     public Capabilities ServerCapabilities { get; private set; }
 
-    public delegate Task SyncReceivedHandler(MatrixClientCore client, SyncResponse matrixEvent);
+    public delegate Task SyncReceivedHandler(SyncResponse matrixEvent);
 
     /// <summary>
     /// Gets the filter applied to the connection. At first it is null. Set it using SetFilterAsync method.
@@ -161,12 +161,11 @@ public sealed class MatrixClientCore
     /// <summary>
     /// Acknowledge the awesome name of this method.
     /// Starts a sync loop which receives events from the server.
-    /// Task runs until the cancellationToken is cancelled.
+    /// Task runs until the cancellationToken (the one provided to ConnectAsync) is cancelled.
     /// </summary>
-    /// <param name="millisecondsBetweenRequests">Wait some time between receiving data until the next poll. Set to null for no delay.</param>
     /// <param name="handler">optional handler for incoming events, default writes events to logger</param>
     /// <returns></returns>
-    public async Task SyncAsync(int? millisecondsBetweenRequests = 1000, SyncReceivedHandler? handler = null)
+    public async Task SyncAsync(SyncReceivedHandler? handler = null)
     {
         if (handler == null)
             handler = DefaultSyncReceivedHandler;
@@ -183,18 +182,15 @@ public sealed class MatrixClientCore
             var response = await MatrixHelper.GetSyncAsync(HttpClientParameters, request).ConfigureAwait(false);
             if (response != null)
             {
-                await handler(this, response);
+                await handler(response).ConfigureAwait(false);
                 request.Since = response.NextBatch;
             }
-            //Throttle the requests
-            if (millisecondsBetweenRequests != null)
-                await Task.Delay(millisecondsBetweenRequests.Value, HttpClientParameters.CancellationToken).ConfigureAwait(false);
         }
     }
 
-    public static Task DefaultSyncReceivedHandler(MatrixClientCore client, SyncResponse response)
+    public Task DefaultSyncReceivedHandler(SyncResponse response)
     {
-        client.Logger.LogInformation("Received sync response");
+        Logger.LogInformation("Received sync response but no handler is set.");
         return Task.CompletedTask;
     }
 }

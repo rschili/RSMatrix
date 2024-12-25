@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MatrixTextClient.Models;
 using MatrixTextClient.Http;
+using System.Reflection.Metadata;
 
 namespace MatrixTextClient;
 
@@ -13,6 +14,10 @@ public sealed class MatrixClient
     public MatrixClientCore Core { get; private init; }
     public ILogger Logger => Core.Logger;
     public MatrixId User => Core.User;
+
+    public delegate Task MessageHandler(MatrixTextMessage message);
+
+    private MessageHandler _messageHandler;
 
     private MatrixClient(MatrixClientCore core)
     {
@@ -26,36 +31,31 @@ public sealed class MatrixClient
         return client;
     }
 
-    public async Task SyncAsync(int? millisecondsBetweenRequests = 1000, MatrixClientCore.SyncReceivedHandler? handler = null)
+    public async Task SyncAsync(MessageHandler handler)
     {
-        if (handler == null)
-            handler = DefaultSyncReceivedHandler;
+        if(_messageHandler != null)
+            throw new InvalidOperationException("Sync can only be started once.");
 
-        var request = new SyncParameters
-        {
-            FullState = false,
-            SetPresence = Presence.Online,
-            Timeout = 60000
-        };
-
-        while (!Core.HttpClientParameters.CancellationToken.IsCancellationRequested)
-        {
-            var response = await MatrixHelper.GetSyncAsync(Core.HttpClientParameters, request).ConfigureAwait(false);
-            if (response != null)
-            {
-                await handler(Core, response);
-                request.Since = response.NextBatch;
-            }
-            //Throttle the requests
-            if (millisecondsBetweenRequests != null)
-                await Task.Delay(millisecondsBetweenRequests.Value, Core.HttpClientParameters.CancellationToken).ConfigureAwait(false);
-        }
+        _messageHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+        await Core.SyncAsync(HandleSyncResponse).ConfigureAwait(false);
     }
 
-    public static Task DefaultSyncReceivedHandler(MatrixClientCore client, SyncResponse response)
+    public async Task HandleSyncResponse(SyncResponse response)
     {
-        client.Logger.LogInformation("Received sync response");
-        return Task.CompletedTask;
+        MatrixTextMessage message = new();
+        try
+        {
+            await _messageHandler(message).ConfigureAwait(false);
+        }
+        catch(TaskCanceledException)
+        {
+            Logger.LogInformation("Sync was cancelled.");
+            throw;
+        }
+        catch(Exception ex)
+        { // we only allow TaskCanceledException to bubble up
+            Logger.LogError(ex, "Error during handling of message.");
+        }
     }
 }
 
