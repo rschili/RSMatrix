@@ -37,6 +37,40 @@ public sealed class MatrixTextClient
             throw new InvalidOperationException("Sync can only be started once.");
 
         _messageHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+
+        // We only want to receive text messages, filter out spam we're not interested in
+        Filter filter = new()
+        {
+            AccountData = new()
+            {
+                NotTypes = new() { "*" }
+            },
+            Room = new()
+            {
+                AccountData = new()
+                {
+                    NotTypes = new() { "*" }
+                },
+                Ephemeral = new()
+                {
+                    NotTypes = new() { "m.typing", "m.receipt" },
+                    LazyLoadMembers = true
+                },
+                Timeline = new()
+                {
+                    LazyLoadMembers = true,
+                },
+                State = new()
+                {
+                    NotTypes = new() { "m.room.join_rules", "m.room.guest_access", "m.room.avatar", "m.room.history_visibility", "m.room.power_levels" },
+                    LazyLoadMembers = true
+                },
+            }
+        };
+        filter = await Core.SetFilterAsync(filter).ConfigureAwait(false);
+        if(filter.FilterId == null)
+            Logger.LogWarning("No filter ID was returned after setting a filter. This should not happen. It won't break the client, but unnecessary events will be received.");
+        
         await Core.SyncAsync(HandleSyncResponse).ConfigureAwait(false);
     }
 

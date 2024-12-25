@@ -174,7 +174,8 @@ internal sealed class MatrixClientCore
         {
             FullState = false,
             SetPresence = Presence.Online,
-            Timeout = 60000
+            Timeout = 60000,
+            Filter = Filter?.FilterId
         };
 
         while (!HttpClientParameters.CancellationToken.IsCancellationRequested)
