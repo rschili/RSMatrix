@@ -13,6 +13,7 @@ public class Room
 
     // ConcurrentDictionary is expensive, we only use it for the global things. Inside the room we use ImmutableDictionary instead as there is less data and less movement
     public ImmutableDictionary<string, RoomUser> Users { get; internal set; } = ImmutableDictionary<string, RoomUser>.Empty.WithComparers(StringComparer.OrdinalIgnoreCase);
+    public string? DisplayName { get; internal set; }
 }
 
 public class RoomUser

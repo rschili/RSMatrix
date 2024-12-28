@@ -4,6 +4,7 @@ using Narrensicher.Matrix.Models;
 using Narrensicher.Matrix.Http;
 using System.Reflection.Metadata;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace Narrensicher.Matrix;
 
@@ -90,12 +91,12 @@ public sealed class MatrixTextClient
         {
             if (response.AccountData != null && response.AccountData.Events != null)
             {
-                await HandleAccountDataReceivedAsync(null, response.AccountData.Events).ConfigureAwait(false);
+                HandleAccountDataReceived(null, response.AccountData.Events);
             }
 
             if (response.Presence != null && response.Presence.Events != null)
             {
-                await HandlePresenceReceivedAsync(response.Presence.Events).ConfigureAwait(false);
+                HandlePresenceReceived(response.Presence.Events);
             }
 
             if (response.Rooms != null)
@@ -112,16 +113,16 @@ public sealed class MatrixTextClient
                         }
 
                         if(pair.Value.Summary != null)
-                            await HandleRoomSummaryReceivedAsync(roomId, pair.Value.Summary).ConfigureAwait(false);
+                            HandleRoomSummaryReceived(roomId, pair.Value.Summary);
 
                         if(pair.Value.AccountData != null && pair.Value.AccountData.Events != null)
-                            await HandleAccountDataReceivedAsync(roomId, pair.Value.AccountData.Events).ConfigureAwait(false);
+                            HandleAccountDataReceived(roomId, pair.Value.AccountData.Events);
 
                         if(pair.Value.Ephemeral != null && pair.Value.Ephemeral.Events != null)
-                            await HandleEphemeralReceivedAsync(roomId, pair.Value.Ephemeral.Events).ConfigureAwait(false);
+                            HandleEphemeralReceived(roomId, pair.Value.Ephemeral.Events);
 
                         if(pair.Value.State != null && pair.Value.State.Events != null)
-                            await HandleStateReceivedAsync(roomId, pair.Value.State.Events).ConfigureAwait(false);
+                            HandleStateReceived(roomId, pair.Value.State.Events);
 
                         if(pair.Value.Timeline != null && pair.Value.Timeline.Events != null)
                         {
@@ -157,22 +158,21 @@ public sealed class MatrixTextClient
         }
     }
 
-    private ValueTask HandleRoomSummaryReceivedAsync(MatrixId roomId, RoomSummary? summary)
+    private void HandleRoomSummaryReceived(MatrixId roomId, RoomSummary? summary)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(summary, nameof(summary));
 
         var users = summary?.Heroes?.Select(s => UserId.TryParse(s, out MatrixId? userId) ? userId : null)
             ?.Where(id => id != null)?.Select(id => id!)
-            ?.Select(id => GetOrAddUser(id))?.ToList();
+            ?.Select(GetOrAddUser)?.ToList();
 
-        var room = _rooms.GetOrAdd(roomId.Full,
-            (_) => new Room(roomId));
+        var room = GetOrAddRoom(roomId);
 
         if(users == null || users.Count == 0)
         {
             Logger.LogWarning("Received room summary for room {RoomId} with no users.", roomId.Full);
-            return ValueTask.CompletedTask;
+            return;
         }
 
         lock(room)
@@ -185,25 +185,129 @@ public sealed class MatrixTextClient
                 }
             }
         }
-
-        return ValueTask.CompletedTask;
     }
 
-    private async Task HandlePresenceReceivedAsync(List<MatrixEvent> events)
+    private void HandlePresenceReceived(List<MatrixEvent> events)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(events, nameof(events));
+        foreach(var ev in events)
+        {
+            if(ev.Type != "m.presence")
+            {
+                Logger.LogWarning("Received event of type {Type} in presence events.", ev.Type);
+                continue;
+            }
+
+            if(ev.Content == null)
+            {
+                Logger.LogWarning("Received presence event with no content.");
+                continue;
+            }
+
+            var userId = UserId.TryParse(ev.Sender, out MatrixId? id) ? id : null;
+            if(userId == null)
+            {
+                Logger.LogWarning("Received presence event with invalid sender ID: {Sender}", ev.Sender);
+                continue;
+            }
+            var user = GetOrAddUser(userId);
+
+            var parsedPresence = JsonSerializer.Deserialize<PresenceEvent>((JsonElement)ev.Content);
+            if(parsedPresence == null)
+            {
+                Logger.LogWarning("Received presence event with no valid content.");
+                continue;
+            }
+
+            lock(user)
+            {
+                if(parsedPresence.CurrentlyActive != null)
+                    user.CurrentlyActive = parsedPresence.CurrentlyActive;
+
+                if(parsedPresence.AvatarUrl != null)
+                    user.AvatarUrl = parsedPresence.AvatarUrl;
+
+                if(parsedPresence.DisplayName != null)
+                    user.DisplayName = parsedPresence.DisplayName;
+
+                if(parsedPresence.CurrentlyActive != null)
+                    user.CurrentlyActive = parsedPresence.CurrentlyActive;
+
+                user.Presence = parsedPresence.Presence;
+
+                if(parsedPresence.StatusMsg != null)
+                    user.StatusMessage = parsedPresence.StatusMsg;
+            }
+        }
     }
 
     
-    private async Task HandleEphemeralReceivedAsync(MatrixId roomId, List<MatrixEvent> events)
+    private void HandleEphemeralReceived(MatrixId roomId, List<MatrixEvent> events)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentNullException.ThrowIfNull(events, nameof(events));
+        foreach(var e in events.Where(ev => ev.Type != "m.typing" && ev.Type != "m.receipt"))
+        {
+            // Just track these for now. We are not interested in typing and receipt events
+            Logger.LogWarning("Received unknown Ephemeral event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
+        }
     }
 
     
-    private async Task HandleStateReceivedAsync(MatrixId roomId, List<ClientEventWithoutRoomID> events)
+    private void HandleStateReceived(MatrixId roomId, List<ClientEventWithoutRoomID> events)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentNullException.ThrowIfNull(events, nameof(events));
+        var room = GetOrAddRoom(roomId);
+
+        foreach(var e in events)
+        {
+            if(e.Content == null)
+            {
+                Logger.LogWarning("Received state event with no content in room {RoomId}. Type {Type}", roomId.Full, e.Type);
+                continue;
+            }
+            switch(e.Type)
+            {
+                case "m.room.member":
+                    JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content);
+                    // TODO
+                    break;
+                case "m.room.name":
+                    var nameEvent = JsonSerializer.Deserialize<RoomNameEvent>((JsonElement)e.Content);
+                    if(nameEvent == null)
+                    {
+                        Logger.LogWarning("Received m.room.name event deserialize returned null in room {RoomId}.", roomId.Full);
+                        break;
+                    }
+                    
+                    lock(room)
+                    {
+                        room.DisplayName = nameEvent.Name;
+                    }
+                    break;
+                case "m.room.canonical_alias":
+                    var parsed = JsonSerializer.Deserialize<CanonicalAliasEvent>((JsonElement)e.Content);
+                    RoomAlias.TryParse(parsed?.Alias, out MatrixId? alias);
+                    var altAliases = parsed?.AltAliases?.Select(a => RoomAlias.TryParse(a, out MatrixId? id) ? id : null).Where(id => id != null).Select(id => id!).ToList();
+                    lock(room)
+                    {
+                        room.CanonicalAlias = alias;
+                        if(altAliases != null)
+                            room.AltAliases = room.AltAliases?.Union(altAliases).ToList() ?? altAliases;
+                    }
+                    break;
+                case "m.room.power_levels":
+                case "m.room.join_rules":
+                case "m.room.topic":
+                case "m.room.avatar":
+                    // We don't care about these
+                    break;
+                default:
+                    Logger.LogWarning("Received unknown state event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
+                    break;
+            }
+        }
     }
 
     private async Task HandleTimelineReceivedAsync(MatrixId roomId, List<ClientEventWithoutRoomID> events, List<MatrixTextMessage> messages)
@@ -216,14 +320,18 @@ public sealed class MatrixTextClient
         return _users.GetOrAdd(id.Full, (_) => new User(id));
     }
 
-    private ValueTask HandleAccountDataReceivedAsync(MatrixId? roomId, List<MatrixEvent> accountData)
+    private Room GetOrAddRoom(MatrixId id)
+    {
+        return _rooms.GetOrAdd(id.Full, (_) => new Room(id));
+    }
+
+    private void HandleAccountDataReceived(MatrixId? roomId, List<MatrixEvent> accountData)
     {
         // Sadly, we don't have any account data events we're interested in
         foreach(var ev in accountData)
         {
             Logger.LogDebug("Received account data event: {Event} in Room {Room}", ev.Type, roomId?.Full ?? "(global)");
         }
-        return ValueTask.CompletedTask;
     }
 }
 

@@ -19,7 +19,7 @@ public class MatrixEvent
 public class ClientEventWithoutRoomID
 {
     [JsonPropertyName("content")]
-    public JsonElement? Content { get; set; }
+    public required JsonElement? Content { get; set; }
 
     [JsonPropertyName("type")]
     public required string Type { get; set; }
@@ -33,6 +33,9 @@ public class ClientEventWithoutRoomID
     [JsonPropertyName("origin_server_ts")]
     public required long OriginServerTs { get; set; }
 
+    /// <summary>
+    /// Only set if it's a state event.
+    /// </summary>
     [JsonPropertyName("state_key")]
     public string? StateKey { get; set; }
 
@@ -43,6 +46,27 @@ public class ClientEventWithoutRoomID
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
 
+public class ClientEvent : ClientEventWithoutRoomID
+{
+    [JsonPropertyName("room_id")]
+    public required string RoomId { get; set; }
+}
+
+public class CanonicalAliasEvent
+{
+    [JsonPropertyName("alias")]
+    public string? Alias { get; set; }
+
+    [JsonPropertyName("alt_aliases")]
+    public List<string>? AltAliases { get; set; }
+}
+
+public class RoomNameEvent
+{
+    [JsonPropertyName("name")]
+    public required string Name { get; set; }
+}
+
 public enum Presence
 {
     [JsonPropertyName("offline")]
@@ -51,6 +75,64 @@ public enum Presence
     Online,
     [JsonPropertyName("unavailable")]
     Unavailable
+}
+
+public class PresenceEvent
+{
+    [JsonPropertyName("avatar_url")]
+    public string? AvatarUrl { get; set; }
+
+    [JsonPropertyName("currently_active")]
+    public bool? CurrentlyActive { get; set; }
+
+    [JsonPropertyName("displayname")]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("last_active_ago")]
+    public long? LastActiveAgo { get; set; } // milliseconds
+
+    [JsonPropertyName("presence")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public Presence Presence { get; set; }
+
+    [JsonPropertyName("status_msg")]
+    public string? StatusMsg { get; set; }
+}
+
+public enum Membership
+{
+    [JsonPropertyName("invite")]
+    Invite,
+    [JsonPropertyName("join")]
+    Join,
+    [JsonPropertyName("knock")]
+    Knock,
+    [JsonPropertyName("leave")]
+    Leave,
+    [JsonPropertyName("ban")]
+    Ban
+}
+
+public class RoomMemberEvent
+{
+    [JsonPropertyName("avatar_url")]
+    public string? AvatarUrl { get; set; }
+
+    [JsonPropertyName("displayname")]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("membership")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public required Membership Membership { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    /// <summary>
+    /// Specifies if this is a direct message chat.
+    /// </summary>
+    [JsonPropertyName("is_direct")]
+    public bool? IsDirect { get; set; }
 }
 
 public class UnsignedData
