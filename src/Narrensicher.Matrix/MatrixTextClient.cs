@@ -25,6 +25,8 @@ public sealed class MatrixTextClient
 
     private MessageHandler? _messageHandler = null; // We use this to track if the sync has been started
 
+    public bool DebugMode = false;
+
     private MatrixTextClient(MatrixClientCore core)
     {
         Core = core ?? throw new ArgumentNullException(nameof(core));
@@ -80,10 +82,24 @@ public sealed class MatrixTextClient
         await Core.SyncAsync(HandleSyncResponseAsync).ConfigureAwait(false);
     }
 
+    private async Task WriteSyncResponseToFileAsync(SyncResponse response)
+    {
+        if(response == null)
+            return;
+
+        var path = Path.Combine(Path.GetTempPath(), "matrix", $"sync_{DateTime.Now:yyyyMMdd_HHmmss_fff}.json");
+        using var stream = File.OpenWrite(path);
+        await JsonSerializer.SerializeAsync(stream, response).ConfigureAwait(false);
+        Logger.LogInformation("Sync response written to {Path}", path);
+    }
+
     private async Task HandleSyncResponseAsync(SyncResponse response)
     {
         if (response == null)
             return;
+
+        if(DebugMode)
+            await WriteSyncResponseToFileAsync(response).ConfigureAwait(false);
 
         List<MatrixTextMessage> messages = new();
 
@@ -126,7 +142,7 @@ public sealed class MatrixTextClient
 
                         if(pair.Value.Timeline != null && pair.Value.Timeline.Events != null)
                         {
-                            await HandleTimelineReceivedAsync(roomId, pair.Value.Timeline.Events, messages).ConfigureAwait(false);
+                            HandleTimelineReceived(roomId, pair.Value.Timeline.Events, messages);
                         }
                     } // foreach joined room
                 } // if joined
@@ -139,6 +155,10 @@ public sealed class MatrixTextClient
                     try
                     {
                         await _messageHandler!(message).ConfigureAwait(false);
+                    }
+                    catch(TaskCanceledException)
+                    {
+                        throw;
                     }
                     catch(Exception ex)
                     {
@@ -175,15 +195,9 @@ public sealed class MatrixTextClient
             return;
         }
 
-        lock(room)
+        foreach (var user in users)
         {
-            foreach (var user in users)
-            {
-                if(!room.Users.ContainsKey(user.UserId.Full))
-                {
-                    room.Users = room.Users.Add(user.UserId.Full, new RoomUser(user));
-                }
-            }
+            var roomUser = GetOrAddUser(user, room);
         }
     }
 
@@ -270,8 +284,29 @@ public sealed class MatrixTextClient
             switch(e.Type)
             {
                 case "m.room.member":
-                    JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content);
-                    // TODO
+                    var roomMember = JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content);
+                    if(roomMember == null)
+                    {
+                        Logger.LogWarning("Received m.room.member event deserialize returned null in room {RoomId}.", roomId.Full);
+                        break;
+                    }
+                    var userIdStr = e.StateKey ?? e.Sender;
+                    if(!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
+                    {
+                        Logger.LogWarning("Received m.room.member event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, roomId.Full);
+                        break;
+                    }
+                    var user = GetOrAddUser(userId);
+                    RoomUser? roomUser = GetOrAddUser(user, room);
+
+                    if(roomUser.DisplayName != roomMember.DisplayName || roomUser.Membership != roomMember.Membership)
+                    { //TODO we may want to expose more properties of the room member
+                        lock(roomUser)
+                        {
+                            roomUser.DisplayName = roomMember.DisplayName;
+                            roomUser.Membership = roomMember.Membership;
+                        }
+                    }
                     break;
                 case "m.room.name":
                     var nameEvent = JsonSerializer.Deserialize<RoomNameEvent>((JsonElement)e.Content);
@@ -310,9 +345,50 @@ public sealed class MatrixTextClient
         }
     }
 
-    private async Task HandleTimelineReceivedAsync(MatrixId roomId, List<ClientEventWithoutRoomID> events, List<MatrixTextMessage> messages)
+    private void HandleTimelineReceived(MatrixId roomId, List<ClientEventWithoutRoomID> events, List<MatrixTextMessage> messages)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentNullException.ThrowIfNull(events, nameof(events));
+        ArgumentNullException.ThrowIfNull(messages, nameof(messages));
+        var room = GetOrAddRoom(roomId);
+
+        foreach(var e in events)
+        {
+            if(e.Type != "m.room.message")
+            {
+                Logger.LogWarning("Received timeline event of type {Type} in room {RoomId}.", e.Type, roomId.Full);
+                continue;
+            }
+            if(e.Content == null)
+            {
+                Logger.LogWarning("Received timeline event with no content in room {RoomId}. Type {Type}", roomId.Full, e.Type);
+                continue;
+            }
+
+            var messageEvent = JsonSerializer.Deserialize<RoomMessageEvent>((JsonElement)e.Content);
+            if(messageEvent == null)
+            {
+                Logger.LogWarning("Received m.room.message event deserialize returned null in room {RoomId}.", roomId.Full);
+                break;
+            }
+            var userIdStr = e.Sender;
+            if(!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
+            {
+                Logger.LogWarning("Received m.room.message event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, roomId.Full);
+                break;
+            }
+            if(messageEvent.MsgType != "m.text")
+            {
+                Logger.LogInformation("Ignoring m.room.message event with non-text message type {MsgType} in room {RoomId}.", messageEvent.MsgType, roomId.Full);
+                break;
+            }
+
+            var user = GetOrAddUser(userId);
+            var roomUser = GetOrAddUser(user, room);
+            var message = new MatrixTextMessage(messageEvent.Body, room, roomUser, this);
+            messages.Add(message);
+            break;
+        }
     }
 
     private User GetOrAddUser(MatrixId id)
@@ -323,6 +399,25 @@ public sealed class MatrixTextClient
     private Room GetOrAddRoom(MatrixId id)
     {
         return _rooms.GetOrAdd(id.Full, (_) => new Room(id));
+    }
+
+    private RoomUser GetOrAddUser(User user, Room room)
+    {
+        if(room.Users.TryGetValue(user.UserId.Full, out var roomUser) && roomUser != null)
+            {
+                return roomUser;
+            }
+
+        lock(room)
+        {
+            if(room.Users.TryGetValue(user.UserId.Full, out roomUser) && roomUser != null)
+            {
+                return roomUser;
+            }
+            roomUser = new RoomUser(user);
+            room.Users = room.Users.Add(user.UserId.Full, roomUser);
+            return roomUser;
+        }
     }
 
     private void HandleAccountDataReceived(MatrixId? roomId, List<MatrixEvent> accountData)

@@ -31,6 +31,8 @@ try
     var client = await MatrixTextClient.ConnectAsync(userid, password, device,
         services.GetRequiredService<IHttpClientFactory>(), cancellationTokenSource.Token,
         services.GetRequiredService<ILogger<MatrixTextClient>>());
+
+    client.DebugMode = true;
     await client.SyncAsync(MessageReceived);
     Console.WriteLine("Sync has ended.");
 }

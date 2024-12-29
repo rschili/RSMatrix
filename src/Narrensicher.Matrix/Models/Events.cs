@@ -174,3 +174,22 @@ public class UnsignedData
     public string? TransactionId { get; set; }
 }
 
+
+
+public class RoomMessageEvent
+{
+    [JsonPropertyName("body")]
+    public required string Body { get; set; }
+
+    [JsonPropertyName("msgtype")]
+    public required string MsgType { get; set; }
+
+    /// <summary>
+    /// The format used in the formatted_body. Currently only org.matrix.custom.html is supported.
+    /// </summary>
+    [JsonPropertyName("format")]
+    public string? Format { get; set; }
+
+    [JsonPropertyName("formatted_body")]
+    public string? FormattedBody { get; set; }
+}
