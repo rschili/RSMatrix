@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Narrensicher.Matrix.Models;
+using Narrensicher.Matrix.Http;
 
 // load environment variables or a .env file
 DotNetEnv.Env.TraversePath().Load();
@@ -16,7 +17,17 @@ if (string.IsNullOrWhiteSpace(userid) || string.IsNullOrWhiteSpace(password) || 
 //set up dependency injection
 var services = new ServiceCollection()
     .AddHttpClient()
-    .AddLogging(services => services.AddSimpleConsole()).BuildServiceProvider();
+    .AddLogging(logging =>
+    {
+        logging.AddSimpleConsole(options =>
+        {
+            options.IncludeScopes = true;
+            options.SingleLine = true;
+            options.TimestampFormat = "hh:mm:ss ";
+        });
+        logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning); // Filter logs from HttpClient
+    })
+    .BuildServiceProvider();
 
 //Using CancellationToken as a shutdown mechanism
 var cancellationTokenSource = new CancellationTokenSource();
@@ -33,7 +44,7 @@ try
         services.GetRequiredService<ILogger<MatrixTextClient>>());
 
     client.DebugMode = true;
-    await client.SyncAsync(MessageReceived);
+    await client.SyncAsync(MessageReceivedAsync);
     Console.WriteLine("Sync has ended.");
 }
 catch (OperationCanceledException)
@@ -49,7 +60,9 @@ finally
     await services.DisposeAsync();
 }
 
-Task MessageReceived(MatrixTextMessage message)
+
+Task MessageReceivedAsync(MatrixTextMessage message)
 {
+    Console.WriteLine(message.Body);
     return Task.CompletedTask;
 }

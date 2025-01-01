@@ -17,6 +17,8 @@ internal sealed class MatrixClientCore
     internal HttpClientParameters HttpClientParameters { get; private set; }
     internal Capabilities ServerCapabilities { get; private set; }
 
+    internal PresenceResponse LastPresenceResponse { get; private set; }
+
     internal delegate Task SyncReceivedHandler(SyncResponse matrixEvent);
 
     /// <summary>
@@ -170,6 +172,8 @@ internal sealed class MatrixClientCore
         if (handler == null)
             handler = DefaultSyncReceivedHandler;
 
+        await MatrixHelper.PutPresenceAsync(HttpClientParameters, User, new PresenceRequest() {Presence = Presence.Online }).ConfigureAwait(false);
+
         var request = new SyncParameters
         {
             FullState = false,
@@ -178,6 +182,8 @@ internal sealed class MatrixClientCore
             Filter = Filter?.FilterId
         };
 
+        bool isFirstSync = true;
+
         while (!HttpClientParameters.CancellationToken.IsCancellationRequested)
         {
             var response = await MatrixHelper.GetSyncAsync(HttpClientParameters, request).ConfigureAwait(false);
@@ -185,6 +191,11 @@ internal sealed class MatrixClientCore
             {
                 await handler(response).ConfigureAwait(false);
                 request.Since = response.NextBatch;
+            }
+            if (isFirstSync)
+            {
+                isFirstSync = false;
+                LastPresenceResponse = await MatrixHelper.GetPresenceAsync(HttpClientParameters, User).ConfigureAwait(false);
             }
         }
     }

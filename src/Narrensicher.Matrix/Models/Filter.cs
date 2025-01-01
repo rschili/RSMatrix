@@ -84,10 +84,10 @@ public class RoomEventFilter
     public bool? ContainsUrl { get; set; }
 
     [JsonPropertyName("include_redundant_members")]
-    public bool? IncludeRedundantMembers { get; set; } = false;
+    public bool? IncludeRedundantMembers { get; set; }
 
     [JsonPropertyName("lazy_load_members")]
-    public bool? LazyLoadMembers { get; set; } = false;
+    public bool? LazyLoadMembers { get; set; }
 
     [JsonPropertyName("limit")]
     public int? Limit { get; set; }
@@ -111,7 +111,7 @@ public class RoomEventFilter
     public List<string>? Types { get; set; }
 
     [JsonPropertyName("unread_thread_notifications")]
-    public bool? UnreadThreadNotifications { get; set; } = false;
+    public bool? UnreadThreadNotifications { get; set; }
 }
 
 public class StateFilter
@@ -120,10 +120,10 @@ public class StateFilter
     public bool? ContainsUrl { get; set; }
 
     [JsonPropertyName("include_redundant_members")]
-    public bool? IncludeRedundantMembers { get; set; } = false;
+    public bool? IncludeRedundantMembers { get; set; }
 
     [JsonPropertyName("lazy_load_members")]
-    public bool? LazyLoadMembers { get; set; } = false;
+    public bool? LazyLoadMembers { get; set; }
 
     [JsonPropertyName("limit")]
     public int? Limit { get; set; }
@@ -147,6 +147,6 @@ public class StateFilter
     public List<string>? Types { get; set; }
 
     [JsonPropertyName("unread_thread_notifications")]
-    public bool? UnreadThreadNotifications { get; set; } = false;
+    public bool? UnreadThreadNotifications { get; set; }
 }
 

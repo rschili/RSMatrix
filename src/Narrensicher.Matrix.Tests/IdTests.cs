@@ -85,7 +85,7 @@ public class IdTests
     [Arguments("!event:server", false, "", "")]
     public async Task TryParseEventId(string input, bool expectedResult, string expectedEvent, string expectedServer)
     {
-        var result = EventId.TryParse(input, out var eventId);
+        var result = MatrixEventId.TryParse(input, out var eventId);
         await Assert.That(result).IsEqualTo(expectedResult);
         if(expectedResult)
         {

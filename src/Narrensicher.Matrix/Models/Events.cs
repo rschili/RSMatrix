@@ -77,6 +77,16 @@ public enum Presence
     Unavailable
 }
 
+public class PresenceRequest
+{
+    [JsonPropertyName("presence")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public required Presence Presence { get; set; }
+
+    [JsonPropertyName("status_msg")]
+    public string? StatusMsg { get; set; }
+}
+
 public class PresenceEvent
 {
     [JsonPropertyName("avatar_url")]
@@ -144,7 +154,7 @@ public class UnsignedData
     /// which can cause the age to either be negative or greater than it actually is.
     /// </summary>
     [JsonPropertyName("age")]
-    public required long Age { get; set; }
+    public long Age { get; set; }
 
     /// <summary>
     /// The room membership of the user making the request, at the time of the event.

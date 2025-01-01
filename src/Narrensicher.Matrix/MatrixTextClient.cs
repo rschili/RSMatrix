@@ -49,28 +49,20 @@ public sealed class MatrixTextClient
         // We only want to receive text messages, filter out spam we're not interested in
         Filter filter = new()
         {
-            AccountData = new()
-            {
-                NotTypes = new() { "*" }
-            },
             Room = new()
             {
-                AccountData = new()
-                {
-                    NotTypes = new() { "*" }
-                },
                 Ephemeral = new()
                 {
-                    NotTypes = new() { "m.typing", "m.receipt" },
-                    LazyLoadMembers = true
+                    NotTypes = new() { "m.typing" }, // , "m.receipt"
+                    //LazyLoadMembers = true
                 },
                 Timeline = new()
                 {
-                    LazyLoadMembers = true,
+                    //LazyLoadMembers = true,
                 },
                 State = new()
                 {
-                    NotTypes = new() { "m.room.join_rules", "m.room.guest_access", "m.room.avatar", "m.room.history_visibility", "m.room.power_levels" },
+                    NotTypes = new() { "m.room.join_rules", "m.room.guest_access", "m.room.avatar", "m.room.history_visibility", "m.room.power_levels", "im.vector.modular.widgets" },
                     LazyLoadMembers = true
                 },
             }
@@ -87,11 +79,23 @@ public sealed class MatrixTextClient
         if(response == null)
             return;
 
-        var path = Path.Combine(Path.GetTempPath(), "matrix", $"sync_{DateTime.Now:yyyyMMdd_HHmmss_fff}.json");
-        using var stream = File.OpenWrite(path);
-        await JsonSerializer.SerializeAsync(stream, response).ConfigureAwait(false);
-        Logger.LogInformation("Sync response written to {Path}", path);
+        try
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "matrix");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, $"sync_{DateTime.Now:yyyyMMdd_HHmmss_fff}.json");
+            using var stream = File.OpenWrite(path);
+            await JsonSerializer.SerializeAsync(stream, response).ConfigureAwait(false);
+            Logger.LogInformation("Sync response written to {Path}", path);
+        }
+        catch(Exception ex)
+        {
+            Logger.LogError(ex, "Error writing sync response to file.");
+        }
     }
+
+
+    private LeakyBucketRateLimiter _receiptRateLimiter = new LeakyBucketRateLimiter(5, 120);
 
     private async Task HandleSyncResponseAsync(SyncResponse response)
     {
@@ -166,6 +170,22 @@ public sealed class MatrixTextClient
                     }
                 }
             }
+
+            // process receipts
+            foreach(var room in _rooms.Values)
+            {
+                if(room.LastMessage == null)
+                    continue;
+
+                if(room.LastMessage.EventId.Full != room.LastReceipt?.Full)
+                {
+                    if(_receiptRateLimiter.Leak())
+                    { // This is not thread safe, we may mix receipts, but that's not a big deal
+                        await room.LastMessage.SendReceiptAsync().ConfigureAwait(false);
+                        room.LastReceipt = room.LastMessage.EventId;
+                    }
+                }
+            }
         }
         catch(TaskCanceledException)
         {
@@ -190,10 +210,7 @@ public sealed class MatrixTextClient
         var room = GetOrAddRoom(roomId);
 
         if(users == null || users.Count == 0)
-        {
-            Logger.LogWarning("Received room summary for room {RoomId} with no users.", roomId.Full);
             return;
-        }
 
         foreach (var user in users)
         {
@@ -369,25 +386,30 @@ public sealed class MatrixTextClient
             if(messageEvent == null)
             {
                 Logger.LogWarning("Received m.room.message event deserialize returned null in room {RoomId}.", roomId.Full);
-                break;
+                continue;
             }
             var userIdStr = e.Sender;
             if(!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
             {
                 Logger.LogWarning("Received m.room.message event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, roomId.Full);
-                break;
+                continue;
             }
             if(messageEvent.MsgType != "m.text")
             {
                 Logger.LogInformation("Ignoring m.room.message event with non-text message type {MsgType} in room {RoomId}.", messageEvent.MsgType, roomId.Full);
-                break;
+                continue;
             }
 
             var user = GetOrAddUser(userId);
             var roomUser = GetOrAddUser(user, room);
-            var message = new MatrixTextMessage(messageEvent.Body, room, roomUser, this);
+            if(!MatrixEventId.TryParse(e.EventId, out var eventId) || eventId == null)
+            {
+                Logger.LogWarning("Received m.room.message event with invalid event ID: {EventId} in room {RoomId}.", e.EventId, roomId.Full);
+                continue;
+            }
+            var message = new MatrixTextMessage(messageEvent.Body, room, roomUser, eventId, this);
             messages.Add(message);
-            break;
+            room.LastMessage = message;
         }
     }
 

@@ -109,7 +109,7 @@ public static class RoomId
     }
 }
 
-public static class EventId
+public static class MatrixEventId
 {
     public static bool TryParse(string? input, out MatrixId? eventId)
     {

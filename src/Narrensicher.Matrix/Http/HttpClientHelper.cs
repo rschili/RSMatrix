@@ -30,6 +30,23 @@ public static class HttpClientHelper
 {
     public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
     {
+        using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit).ConfigureAwait(false);
+        using var contentStream = await response.Content.ReadAsStreamAsync(parameters.CancellationToken).ConfigureAwait(false);
+        var result = await JsonSerializer.DeserializeAsync<TResponse>(contentStream, cancellationToken: parameters.CancellationToken).ConfigureAwait(false);
+        if (result != null)
+            return result;
+
+        parameters.Logger.LogError("Failed to deserialize response from {Url}", response.RequestMessage.RequestUri);
+        throw new HttpRequestException($"Failed to deserialize response from {response.RequestMessage.RequestUri}.");
+    }
+
+    public static async Task SendAsync(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
+    {
+        await SendRequestAsync(parameters, path, method, content, ignoreRateLimit).ConfigureAwait(false);
+    }
+
+    private static async Task<HttpResponseMessage> SendRequestAsync(HttpClientParameters parameters, string path, HttpMethod? method, HttpContent? content, bool ignoreRateLimit)
+    {
         //Rate limiter. System.Threading.RateLimiting considered, but we don't want timers and disposable objects.
         var rateLimiter = parameters.RateLimiter;
         if (!ignoreRateLimit && rateLimiter != null && !rateLimiter.Leak())
@@ -41,6 +58,7 @@ public static class HttpClientHelper
         var cancellationToken = parameters.CancellationToken;
         ArgumentNullException.ThrowIfNull(parameters, nameof(parameters));
         ArgumentException.ThrowIfNullOrEmpty(path, nameof(path));
+        parameters.Logger.LogInformation("Sending request to {Path}", path);
         using var client = parameters.Factory.CreateClient("MatrixClient");
         client.MaxResponseContentBufferSize = 1024 * 1024 * 2; // 2 MB;
 
@@ -52,10 +70,11 @@ public static class HttpClientHelper
         if (content != null)
             request.Content = content;
 
-        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        parameters.Logger.LogInformation("Request to {Path} completed with status code {Status}", path, response.StatusCode);
         if (!response.IsSuccessStatusCode)
         {
-            if (!response.IsSuccessStatusCode && response.Content != null && response.Content.Headers.ContentLength > 0)
+            if (response.Content != null && response.Content.Headers.ContentLength > 0)
             {
                 using var errorStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
                 var error = JsonSerializer.Deserialize<MatrixErrorResponse>(errorStream);
@@ -76,13 +95,7 @@ public static class HttpClientHelper
             throw new HttpRequestException($"Response content is empty for {request.RequestUri}");
         }
 
-        using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        var result = await JsonSerializer.DeserializeAsync<TResponse>(contentStream, cancellationToken: cancellationToken).ConfigureAwait(false);
-        if (result != null)
-            return result;
-
-        parameters.Logger.LogError("Failed to deserialize response from {Url}", request.RequestUri);
-        throw new HttpRequestException($"Failed to deserialize response from {request.RequestUri}.");
+        return response;
     }
 }
 
@@ -115,7 +128,8 @@ public static class HttpParameterHelper
         if (parameters == null)
             return path;
 
-        var formattedParameters = string.Join("&", parameters.Select(kvp => $"{HttpUtility.UrlEncode(kvp.Key)}={HttpUtility.UrlEncode(kvp.Value)}"));
+        //var formattedParameters = string.Join("&", parameters.Select(kvp => $"{HttpUtility.UrlEncode(kvp.Key)}={HttpUtility.UrlEncode(kvp.Value)}"));
+        var formattedParameters = string.Join("&", parameters.Select(kvp => $"{kvp.Key}={kvp.Value}"));
         if (string.IsNullOrWhiteSpace(formattedParameters))
             return path;
 

@@ -326,7 +326,7 @@ public class EventDispatcher
                     foreach (var receipt in e.Content.Value.EnumerateObject())
                     {
                         var eventIdStr = receipt.Name;
-                        if (!Models.EventId.TryParse(eventIdStr, out var eventId) || eventId == null)
+                        if (!Models.MatrixEventId.TryParse(eventIdStr, out var eventId) || eventId == null)
                         {
                             Logger.LogWarning("Received receipt event with invalid event ID: {eventId}", eventIdStr);
                             continue;

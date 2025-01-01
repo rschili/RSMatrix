@@ -16,6 +16,10 @@ public class Room
     public string? DisplayName { get; internal set; }
     public MatrixId? CanonicalAlias { get; internal set; }
     public List<MatrixId>? AltAliases { get; internal set; }
+
+    public MatrixTextMessage? LastMessage { get; internal set; }
+
+    public MatrixId? LastReceipt { get; internal set; }
 }
 
 public class RoomUser

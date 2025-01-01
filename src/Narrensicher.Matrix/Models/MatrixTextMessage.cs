@@ -1,3 +1,6 @@
+
+using Narrensicher.Matrix.Http;
+
 namespace Narrensicher.Matrix.Models;
 
 public class MatrixTextMessage
@@ -7,11 +10,22 @@ public class MatrixTextMessage
     public RoomUser Sender { get; private set; }
     public MatrixTextClient Client { get; private set; }
 
-    internal MatrixTextMessage(string? body, Room room, RoomUser sender, MatrixTextClient client)
+    internal MatrixId EventId { get; set; }
+
+    internal string? ThreadId { get; set; }
+
+    internal MatrixTextMessage(string? body, Room room, RoomUser sender, MatrixId eventId, MatrixTextClient client)
     {
         Body = body;
         Room = room;
         Sender = sender;
         Client = client;
+        EventId = eventId;
+    }
+
+    public async Task SendReceiptAsync()
+    {
+        await MatrixHelper.PostReceiptAsync(Client.Core.HttpClientParameters, Room.RoomId, EventId, ThreadId ?? "main");
+        await MatrixHelper.PostReadMarkersAsync(Client.Core.HttpClientParameters, Room.RoomId, EventId);
     }
 }

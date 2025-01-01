@@ -242,3 +242,19 @@ public class UnreadNotifications
     [JsonPropertyName("notification_count")]
     public int? NotificationCount { get; set; }
 }
+
+public class PresenceResponse
+{
+    [JsonPropertyName("currently_active")]
+    public bool? CurrentlyActive { get; set; }
+
+    [JsonPropertyName("last_active_ago")]
+    public int? LastActiveAgo { get; set; }
+
+    [JsonPropertyName("presence")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public Presence Presence { get; set; }
+
+    [JsonPropertyName("status_msg")]
+    public string? StatusMessage { get; set; }
+}

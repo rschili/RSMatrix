@@ -1,5 +1,8 @@
-﻿using Narrensicher.Matrix.Models;
+﻿using Microsoft.Extensions.Logging;
+using Narrensicher.Matrix.Models;
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Web;
 
 namespace Narrensicher.Matrix.Http;
@@ -66,10 +69,56 @@ public static class MatrixHelper
         if (user.Kind != IdKind.User)
             throw new ArgumentException("User must be a user ID", nameof(user));
         ArgumentNullException.ThrowIfNull(filter);
-        var content = JsonContent.Create(filter);
+        var content = JsonContent.Create(filter, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
         string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.Full)}/filter";
         return await HttpClientHelper.SendAsync<FilterResponse>(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
+
+    public static async Task<PresenceResponse> GetPresenceAsync(HttpClientParameters parameters, MatrixId user)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(user);
+        string path = $"/_matrix/client/v3/presence/{HttpUtility.UrlEncode(user.Full)}/status";
+        return await HttpClientHelper.SendAsync<PresenceResponse>(parameters, path).ConfigureAwait(false);
+    }
+
+    public static async Task PutPresenceAsync(HttpClientParameters parameters, MatrixId userId, PresenceRequest presence)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(userId);
+        ArgumentNullException.ThrowIfNull(presence);
+
+        var content = JsonContent.Create(
+            presence, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+        string path = $"/_matrix/client/v3/presence/{HttpUtility.UrlEncode(userId.Full)}/status";
+        await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+    }
+
+    public static async Task PostReceiptAsync(HttpClientParameters parameters, MatrixId room, MatrixId eventId, string? threadId)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(room);
+        ArgumentNullException.ThrowIfNull(eventId);
+        var receipt = new ReceiptRequest { ThreadId = threadId };
+        var content = JsonContent.Create(
+            receipt, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+        string path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(room.Full)}/receipt/m.read/{HttpUtility.UrlEncode(eventId.Full)}";
+        await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
+    }
+
+    public static async Task PostReadMarkersAsync(HttpClientParameters parameters, MatrixId room, MatrixId eventId)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        ArgumentNullException.ThrowIfNull(room);
+        ArgumentNullException.ThrowIfNull(eventId);
+        var receipt = new ReadMarkerRequest { FullyRead = eventId.Full };
+        var content = JsonContent.Create(
+            receipt, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+        string path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(room.Full)}/read_markers";
+        await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
+    }
+
+
 
     public static async Task<Filter> GetFilterAsync(HttpClientParameters parameters, MatrixId user, string filterId)
     {
@@ -92,4 +141,6 @@ public static class MatrixHelper
         return await HttpClientHelper.SendAsync<SyncResponse>(httpClientParameters, path, HttpMethod.Get,
             ignoreRateLimit: true).ConfigureAwait(false);
     }
+
+
 }
