@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-	  <InternalsVisibleTo Include="Narrensicher.Matrix.Tests" />
+	  <InternalsVisibleTo Include="RSMatrix.Tests" />
   </ItemGroup>
 
   <ItemGroup>

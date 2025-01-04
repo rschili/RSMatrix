@@ -1,7 +1,7 @@
 
-using Narrensicher.Matrix.Http;
+using RSMatrix.Http;
 
-namespace Narrensicher.Matrix.Models;
+namespace RSMatrix.Models;
 
 public class MatrixTextMessage
 {

@@ -1,8 +1,8 @@
-﻿using Narrensicher.Matrix;
+﻿using RSMatrix;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Narrensicher.Matrix.Models;
-using Narrensicher.Matrix.Http;
+using RSMatrix.Models;
+using RSMatrix.Http;
 
 // load environment variables or a .env file
 DotNetEnv.Env.TraversePath().Load();

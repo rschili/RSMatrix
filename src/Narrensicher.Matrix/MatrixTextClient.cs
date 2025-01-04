@@ -1,12 +1,12 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Narrensicher.Matrix.Models;
-using Narrensicher.Matrix.Http;
+using RSMatrix.Models;
+using RSMatrix.Http;
 using System.Reflection.Metadata;
 using System.Collections.Concurrent;
 using System.Text.Json;
 
-namespace Narrensicher.Matrix;
+namespace RSMatrix;
 
 /// <summary>
 /// The low level class for interacting with the Matrix server.

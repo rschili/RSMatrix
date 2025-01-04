@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace Narrensicher.Matrix.Http;
+namespace RSMatrix.Http;
 /// <summary>
 /// Since matrix usually has a rate limit of 600 requests per hour, we need to implement a rate limiter to prevent
 /// the client from making too many requests.

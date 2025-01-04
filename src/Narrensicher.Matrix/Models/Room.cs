@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Narrensicher.Matrix.Models;
+namespace RSMatrix.Models;
 
 public class Room
 {

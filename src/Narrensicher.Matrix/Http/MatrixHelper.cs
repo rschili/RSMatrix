@@ -1,11 +1,11 @@
 ﻿using Microsoft.Extensions.Logging;
-using Narrensicher.Matrix.Models;
+using RSMatrix.Models;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Web;
 
-namespace Narrensicher.Matrix.Http;
+namespace RSMatrix.Http;
 /// <summary>
 /// Low level helper methods for Matrix operations
 /// </summary>
@@ -49,7 +49,7 @@ public static class MatrixHelper
             },
             Password = password,
             DeviceId = deviceId,
-            InitialDeviceDisplayName = "Narrensicher.Matrix Device",
+            InitialDeviceDisplayName = "RSMatrix Device",
             Type = "m.login.password"
         };
         var content = JsonContent.Create(request);

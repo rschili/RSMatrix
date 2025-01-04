@@ -1,9 +1,9 @@
-﻿using Narrensicher.Matrix.Models;
+﻿using RSMatrix.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
 
-namespace Narrensicher.Matrix;
+namespace RSMatrix;
 
 public class EventDispatcher
 {

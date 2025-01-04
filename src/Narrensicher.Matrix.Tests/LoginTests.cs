@@ -3,9 +3,9 @@ using Moq;
 using Moq.Protected;
 using System.Net;
 using System.Text;
-using Narrensicher.Matrix.Models;
+using RSMatrix.Models;
 
-namespace Narrensicher.Matrix.Tests;
+namespace RSMatrix.Tests;
 
 public class LoginTests
 {

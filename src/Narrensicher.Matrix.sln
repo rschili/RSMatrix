@@ -3,11 +3,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.12.35527.113
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Narrensicher.Matrix", "Narrensicher.Matrix\Narrensicher.Matrix.csproj", "{973D5F43-767A-4542-A1E2-05BD792800A5}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RSMatrix", "RSMatrix\RSMatrix.csproj", "{973D5F43-767A-4542-A1E2-05BD792800A5}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Narrensicher.Matrix.Console", "Narrensicher.Matrix.Console\Narrensicher.Matrix.Console.csproj", "{187D56EB-1648-4112-A28C-61978B2D0464}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RSMatrix.Console", "RSMatrix.Console\RSMatrix.Console.csproj", "{187D56EB-1648-4112-A28C-61978B2D0464}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Narrensicher.Matrix.Tests", "Narrensicher.Matrix.Tests\Narrensicher.Matrix.Tests.csproj", "{A893D334-35A8-4EAA-9E5E-EE2AEFDFA28E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RSMatrix.Tests", "RSMatrix.Tests\RSMatrix.Tests.csproj", "{A893D334-35A8-4EAA-9E5E-EE2AEFDFA28E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

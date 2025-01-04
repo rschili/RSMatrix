@@ -1,7 +1,7 @@
-using Narrensicher.Matrix.Http;
+using RSMatrix.Http;
 
 
-namespace Narrensicher.Matrix.Tests
+namespace RSMatrix.Tests
 {
     public class LeakyBucketRateLimiterTests
     {

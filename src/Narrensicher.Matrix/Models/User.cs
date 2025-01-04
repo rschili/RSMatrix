@@ -1,4 +1,4 @@
-namespace Narrensicher.Matrix.Models;
+namespace RSMatrix.Models;
 
 public class User
 {

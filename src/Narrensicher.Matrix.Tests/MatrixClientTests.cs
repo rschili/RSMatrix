@@ -1,4 +1,4 @@
-﻿using Narrensicher.Matrix;
+﻿using RSMatrix;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -7,7 +7,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using TUnit.Core;
 
-namespace Narrensicher.Matrix.Tests;
+namespace RSMatrix.Tests;
 public class MatrixClientTests
 {
     private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;

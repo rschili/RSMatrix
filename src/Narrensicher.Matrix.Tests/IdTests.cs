@@ -1,6 +1,6 @@
-﻿using Narrensicher.Matrix.Models;
+﻿using RSMatrix.Models;
 
-namespace Narrensicher.Matrix.Tests;
+namespace RSMatrix.Tests;
 
 public class IdTests
 {

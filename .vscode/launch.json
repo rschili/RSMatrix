@@ -9,13 +9,13 @@
             "name": "Console Debug",
             "type": "dotnet",
             "request": "launch",
-            "projectPath": "${workspaceFolder}/src/Narrensicher.Matrix.Console/Narrensicher.Matrix.Console.csproj",
+            "projectPath": "${workspaceFolder}/src/RSMatrix.Console/RSMatrix.Console.csproj",
         },
         {
             "name": "Tests Debug",
             "type": "dotnet",
             "request": "launch",
-            "projectPath": "${workspaceFolder}/src/Narrensicher.Matrix.Tests/Narrensicher.Matrix.Tests.csproj"
+            "projectPath": "${workspaceFolder}/src/RSMatrix.Tests/RSMatrix.Tests.csproj"
         }
     ]
 }

@@ -1,7 +1,7 @@
 ﻿using System.Buffers;
 using System.Text.RegularExpressions;
 
-namespace Narrensicher.Matrix.Models;
+namespace RSMatrix.Models;
 public enum IdKind
 {
     User,
