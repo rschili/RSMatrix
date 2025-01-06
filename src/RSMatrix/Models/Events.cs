@@ -213,3 +213,27 @@ public class RoomMessageMention
     public List<string>? UserIds { get; set; }
 }
 
+public class RoomEncryptionEvent
+{
+    [JsonPropertyName("algorithm")]
+    public required string Algorithm { get; set; }
+}
+
+public class RoomEncryptedEvent
+{
+    [JsonPropertyName("algorithm")]
+    public required string Algorithm { get; set; }
+
+    [JsonPropertyName("ciphertext")]
+    public required string Ciphertext { get; set; } // may also be a json element with a key of "body" and "type" (olm message type)
+
+    // These are deprecated
+    /*[JsonPropertyName("device_id")]
+    public required string DeviceId { get; set; }
+
+    [JsonPropertyName("sender_key")]
+    public required string SenderKey { get; set; }*/
+
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; set; }
+}

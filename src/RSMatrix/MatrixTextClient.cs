@@ -371,56 +371,119 @@ public sealed class MatrixTextClient
 
         foreach(var e in events)
         {
-            if(e.Type != "m.room.message")
+            if(e.Type == "m.room.message")
+                HandleMessageReceived(roomId, messages, room, e);
+            else if(e.Type == "m.room.encryption")
+                HandleRoomEncryptionEvent(room, e);
+            else if(e.Type == "m.room.encrypted")
+                HandleEncryptedEvent(room, e);
+            else
             {
-                Logger.LogWarning("Received timeline event of type {Type} in room {RoomId}.", e.Type, roomId.Full);
-                continue;
+                Logger.LogWarning("Received unknown timeline event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
             }
-            if(e.Content == null)
-            {
-                Logger.LogWarning("Received timeline event with no content in room {RoomId}. Type {Type}", roomId.Full, e.Type);
-                continue;
-            }
-
-            var messageEvent = JsonSerializer.Deserialize<RoomMessageEvent>((JsonElement)e.Content);
-            if(messageEvent == null)
-            {
-                Logger.LogWarning("Received m.room.message event deserialize returned null in room {RoomId}.", roomId.Full);
-                continue;
-            }
-            var userIdStr = e.Sender;
-            if(!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
-            {
-                Logger.LogWarning("Received m.room.message event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, roomId.Full);
-                continue;
-            }
-            if(messageEvent.MsgType != "m.text")
-            {
-                Logger.LogInformation("Ignoring m.room.message event with non-text message type {MsgType} in room {RoomId}.", messageEvent.MsgType, roomId.Full);
-                continue;
-            }
-
-            var user = GetOrAddUser(userId);
-            var roomUser = GetOrAddUser(user, room);
-            if(!MatrixEventId.TryParse(e.EventId, out var eventId) || eventId == null)
-            {
-                Logger.LogWarning("Received m.room.message event with invalid event ID: {EventId} in room {RoomId}.", e.EventId, roomId.Full);
-                continue;
-            }
-            var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, eventId, this);
-            if(messageEvent.Mentions != null && messageEvent.Mentions.UserIds != null && messageEvent.Mentions.UserIds.Count > 0)
-            {
-                message.Mentions = messageEvent.Mentions.UserIds
-                    .Select(id => UserId.TryParse(id, out MatrixId? mentionId) ? mentionId : null)
-                    .Where(id => id != null)
-                    .Select(id => id!)
-                    .Select(id => GetOrAddUser(id))
-                    .Select(u => GetOrAddUser(u, room)).ToList();
-            }
-            
-            messages.Add(message);
-            room.LastMessage = message;
         }
+    }
+
+    private void HandleEncryptedEvent(Room room, ClientEventWithoutRoomID e)
+    {
+        ArgumentNullException.ThrowIfNull(room, nameof(room));
+        ArgumentNullException.ThrowIfNull(e, nameof(e));
+
+        if(e.Content == null)
+        {
+            Logger.LogWarning("Received m.room.encrypted event with no content in room {RoomId}.", room.RoomId.Full);
+            return;
+        }
+
+        var encryptedEvent = JsonSerializer.Deserialize<RoomEncryptedEvent>((JsonElement)e.Content);
+        if(encryptedEvent == null)
+        {
+            Logger.LogWarning("Received m.room.encrypted event deserialize returned null in room {RoomId}.", room.RoomId.Full);
+            return;
+        }
+
+        if(encryptedEvent.Algorithm != room.Encryption?.Algorithm)
+        {
+            Logger.LogWarning("Received m.room.encrypted event with mismatching algorithm for room {RoomId}. Expected: {ExpectedAlgorithm}, Received: {ReceivedAlgorithm}", room.RoomId.Full, room.Encryption?.Algorithm, encryptedEvent.Algorithm);
+            return;
+        }
+
+        // TODO handle ciphertext
+    }
+
+    private void HandleRoomEncryptionEvent(Room room, ClientEventWithoutRoomID e)
+    {
+        if(e.Content == null)
+        {
+            Logger.LogWarning("Received m.room.encryption event with no content in room {RoomId}.", room.RoomId.Full);
+            return;
+        }
+
+        var encryptionEvent = JsonSerializer.Deserialize<RoomEncryptionEvent>((JsonElement)e.Content);
+        if(encryptionEvent == null)
+        {
+            Logger.LogWarning("Received m.room.encryption event deserialize returned null in room {RoomId}.", room.RoomId.Full);
+            return;
+        }
+
+        if(encryptionEvent.Algorithm != "m.megolm.v1.aes-sha2")
+        {
+            Logger.LogWarning("Received m.room.encryption event with unknown algorithm {Algorithm} in room {RoomId}.", encryptionEvent.Algorithm, room.RoomId.Full);
+            return;
+        }
+
+        lock(room)
+        {
+            room.Encryption = new RoomEncryption(encryptionEvent.Algorithm);
+        }
+    }
+
+    private void HandleMessageReceived(MatrixId roomId, List<ReceivedTextMessage> messages, Room room, ClientEventWithoutRoomID e)
+    {
+        if (e.Content == null)
+        {
+            Logger.LogWarning("Received timeline event with no content in room {RoomId}. Type {Type}", roomId.Full, e.Type);
+            return;
+        }
+
+        var messageEvent = JsonSerializer.Deserialize<RoomMessageEvent>((JsonElement)e.Content);
+        if (messageEvent == null)
+        {
+            Logger.LogWarning("Received m.room.message event deserialize returned null in room {RoomId}.", roomId.Full);
+            return;
+        }
+        var userIdStr = e.Sender;
+        if (!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
+        {
+            Logger.LogWarning("Received m.room.message event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, roomId.Full);
+            return;
+        }
+        if (messageEvent.MsgType != "m.text")
+        {
+            Logger.LogInformation("Ignoring m.room.message event with non-text message type {MsgType} in room {RoomId}.", messageEvent.MsgType, roomId.Full);
+            return;
+        }
+
+        var user = GetOrAddUser(userId);
+        var roomUser = GetOrAddUser(user, room);
+        if (!MatrixEventId.TryParse(e.EventId, out var eventId) || eventId == null)
+        {
+            Logger.LogWarning("Received m.room.message event with invalid event ID: {EventId} in room {RoomId}.", e.EventId, roomId.Full);
+            return;
+        }
+        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, eventId, this);
+        if (messageEvent.Mentions != null && messageEvent.Mentions.UserIds != null && messageEvent.Mentions.UserIds.Count > 0)
+        {
+            message.Mentions = messageEvent.Mentions.UserIds
+                .Select(id => UserId.TryParse(id, out MatrixId? mentionId) ? mentionId : null)
+                .Where(id => id != null)
+                .Select(id => id!)
+                .Select(id => GetOrAddUser(id))
+                .Select(u => GetOrAddUser(u, room)).ToList();
+        }
+
+        messages.Add(message);
+        room.LastMessage = message;
     }
 
     private User GetOrAddUser(MatrixId id)

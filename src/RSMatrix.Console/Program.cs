@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RSMatrix.Models;
 using RSMatrix.Http;
+using RSMatrix.Crypto;
 
 // load environment variables or a .env file
 DotNetEnv.Env.TraversePath().Load();
@@ -13,6 +14,10 @@ if (string.IsNullOrWhiteSpace(userid) || string.IsNullOrWhiteSpace(password) || 
 {
     throw new ArgumentException("Please provide the required environment variables: MATRIX_USER_ID, MATRIX_PASSWORD, MATRIX_DEVICE_ID");
 }
+    Curve25519Helper.Test();
+        var helper = new Ed25519Helper();
+        helper.Test("Hello, World!");
+        return;
 
 //set up dependency injection
 var services = new ServiceCollection()
@@ -64,10 +69,10 @@ finally
 async Task MessageReceivedAsync(ReceivedTextMessage message)
 {
     Console.WriteLine(message);
-    if(message.Body?.Contains("noppelbot") == true)
+    if(message.Body?.Contains("ping") == true)
     {
         await message.Room.SendTypingNotificationAsync();
         await Task.Delay(2000);
-        await message.SendResponseAsync("Hallo!");
+        await message.SendResponseAsync("pong!");
     }
 }

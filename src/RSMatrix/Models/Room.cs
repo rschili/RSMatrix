@@ -23,6 +23,8 @@ public class Room
     public ReceivedTextMessage? LastMessage { get; internal set; }
 
     public MatrixId? LastReceipt { get; internal set; }
+    public RoomEncryption? Encryption { get; internal set; }
+    public bool IsEncrypted => Encryption != null;
 
     public Task SendTypingNotificationAsync(uint? timeoutMS = null)
     {
@@ -63,5 +65,14 @@ public class RoomUser
     public override string ToString()
     {
         return GetDisplayName();
+    }
+}
+
+public class RoomEncryption
+{
+    public string Algorithm { get; }
+    internal RoomEncryption(string algorithm)
+    {
+        Algorithm = algorithm ?? throw new ArgumentNullException(nameof(algorithm));
     }
 }
