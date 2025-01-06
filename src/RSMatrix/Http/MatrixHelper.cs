@@ -142,5 +142,33 @@ public static class MatrixHelper
             ignoreRateLimit: true).ConfigureAwait(false);
     }
 
+    internal static async Task PutTypingNotificationAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MatrixId userId, uint? timeoutMS = null)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentNullException.ThrowIfNull(userId, nameof(userId)); // UserId is provided here, but it only makes sense to provide the current user
 
+        var typingRequest = new TypingRequest { Typing = true, Timeout = timeoutMS ?? 5000 };
+        var content = JsonContent.Create(
+            typingRequest, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+
+        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/typing/{HttpUtility.UrlEncode(userId.Full)}";
+        await HttpClientHelper.SendAsync(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+    }
+
+    internal static async Task PutMessageAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessageRequest message)
+    {
+        //TODO: How to send messages to a thread?
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentNullException.ThrowIfNull(message, nameof(message));
+
+        var txnId = Interlocked.Increment(ref httpClientParameters._txnId);
+
+        var content = JsonContent.Create(
+            message, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+
+        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/send/m.room.message/{txnId}";
+        await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+    }
 }

@@ -61,8 +61,13 @@ finally
 }
 
 
-Task MessageReceivedAsync(MatrixTextMessage message)
+async Task MessageReceivedAsync(ReceivedTextMessage message)
 {
-    Console.WriteLine(message.Body);
-    return Task.CompletedTask;
+    Console.WriteLine(message);
+    if(message.Body?.Contains("noppelbot") == true)
+    {
+        await message.Room.SendTypingNotificationAsync();
+        await Task.Delay(2000);
+        await message.SendResponseAsync("Hallo!");
+    }
 }

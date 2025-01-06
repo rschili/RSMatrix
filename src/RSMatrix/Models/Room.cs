@@ -1,12 +1,15 @@
 using System.Collections.Immutable;
+using RSMatrix.Http;
 
 namespace RSMatrix.Models;
 
 public class Room
 {
-    public Room(MatrixId roomId)
+    internal MatrixTextClient Client { get; }
+    public Room(MatrixId roomId, MatrixTextClient client)
     {
-        RoomId = roomId;
+        RoomId = roomId ?? throw new ArgumentNullException(nameof(roomId));
+        Client = client ?? throw new ArgumentNullException(nameof(client));
     }
 
     public MatrixId RoomId { get; }
@@ -17,9 +20,25 @@ public class Room
     public MatrixId? CanonicalAlias { get; internal set; }
     public List<MatrixId>? AltAliases { get; internal set; }
 
-    public MatrixTextMessage? LastMessage { get; internal set; }
+    public ReceivedTextMessage? LastMessage { get; internal set; }
 
     public MatrixId? LastReceipt { get; internal set; }
+
+    public Task SendTypingNotificationAsync(uint? timeoutMS = null)
+    {
+        return MatrixHelper.PutTypingNotificationAsync(Client.Core.HttpClientParameters, RoomId, Client.CurrentUser, timeoutMS);
+    }
+
+    public Task SendTextMessageAsync(string body) // TODO: threadId?
+    {
+        var messageRequest = new MessageRequest { MsgType = "m.Text", Body = body };
+        return MatrixHelper.PutMessageAsync(Client.Core.HttpClientParameters, RoomId, messageRequest);
+    }
+
+    public override string ToString()
+    {
+        return DisplayName ?? RoomId.Localpart.ToString();
+    }
 }
 
 public class RoomUser
@@ -32,4 +51,17 @@ public class RoomUser
     public User User { get; }
     public string? DisplayName { get; internal set; }
     public Membership? Membership { get; internal set; }
+
+    /// <summary>
+    /// RoomUser and User may have display names. This takes care of choosing the right one
+    /// </summary>
+    public string GetDisplayName()
+    {
+        return DisplayName ?? User.DisplayName ?? User.UserId.Localpart.ToString();
+    }
+
+    public override string ToString()
+    {
+        return GetDisplayName();
+    }
 }

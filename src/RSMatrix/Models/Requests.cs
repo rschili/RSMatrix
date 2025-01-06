@@ -81,3 +81,24 @@ public class ReadMarkerRequest
     [JsonPropertyName("m.read.private")]
     public string? ReadPrivate { get; set; }
 }
+
+internal class TypingRequest
+{
+    [JsonPropertyName("typing")]
+    public required bool Typing { get; set; }
+
+    [JsonPropertyName("timeout")]
+    public uint Timeout { get; set; }
+}
+
+internal class MessageRequest
+{
+    [JsonPropertyName("msgtype")]
+    public required string MsgType { get; set; }
+
+    [JsonPropertyName("body")]
+    public required string Body { get; set; }
+
+    [JsonPropertyName("m.mentions")]
+    public RoomMessageMention? Mentions { get; set; }
+}

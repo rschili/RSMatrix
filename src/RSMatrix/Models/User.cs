@@ -13,4 +13,9 @@ public class User
     public string? DisplayName { get; internal set; }
     public Presence? Presence { get; internal set; } // Initially null if we have not received presence information
     public string? StatusMessage { get; internal set; }
+
+    public override string ToString()
+    {
+        return DisplayName ?? UserId.Localpart.ToString();
+    }
 }

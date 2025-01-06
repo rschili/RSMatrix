@@ -202,4 +202,14 @@ public class RoomMessageEvent
 
     [JsonPropertyName("formatted_body")]
     public string? FormattedBody { get; set; }
+    
+    [JsonPropertyName("m.mentions")]
+    public RoomMessageMention? Mentions { get; set; }
 }
+
+public class RoomMessageMention
+{
+    [JsonPropertyName("user_ids")]
+    public List<string>? UserIds { get; set; }
+}
+

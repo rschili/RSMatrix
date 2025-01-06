@@ -21,7 +21,7 @@ public sealed class MatrixTextClient
 
     private ConcurrentDictionary<string, User> _users = new(StringComparer.OrdinalIgnoreCase);
 
-    public delegate Task MessageHandler(MatrixTextMessage message);
+    public delegate Task MessageHandler(ReceivedTextMessage message);
 
     private MessageHandler? _messageHandler = null; // We use this to track if the sync has been started
 
@@ -105,7 +105,7 @@ public sealed class MatrixTextClient
         if(DebugMode)
             await WriteSyncResponseToFileAsync(response).ConfigureAwait(false);
 
-        List<MatrixTextMessage> messages = new();
+        List<ReceivedTextMessage> messages = new();
 
         try
         {
@@ -362,7 +362,7 @@ public sealed class MatrixTextClient
         }
     }
 
-    private void HandleTimelineReceived(MatrixId roomId, List<ClientEventWithoutRoomID> events, List<MatrixTextMessage> messages)
+    private void HandleTimelineReceived(MatrixId roomId, List<ClientEventWithoutRoomID> events, List<ReceivedTextMessage> messages)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(events, nameof(events));
@@ -407,7 +407,17 @@ public sealed class MatrixTextClient
                 Logger.LogWarning("Received m.room.message event with invalid event ID: {EventId} in room {RoomId}.", e.EventId, roomId.Full);
                 continue;
             }
-            var message = new MatrixTextMessage(messageEvent.Body, room, roomUser, eventId, this);
+            var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, eventId, this);
+            if(messageEvent.Mentions != null && messageEvent.Mentions.UserIds != null && messageEvent.Mentions.UserIds.Count > 0)
+            {
+                message.Mentions = messageEvent.Mentions.UserIds
+                    .Select(id => UserId.TryParse(id, out MatrixId? mentionId) ? mentionId : null)
+                    .Where(id => id != null)
+                    .Select(id => id!)
+                    .Select(id => GetOrAddUser(id))
+                    .Select(u => GetOrAddUser(u, room)).ToList();
+            }
+            
             messages.Add(message);
             room.LastMessage = message;
         }
@@ -420,7 +430,7 @@ public sealed class MatrixTextClient
 
     private Room GetOrAddRoom(MatrixId id)
     {
-        return _rooms.GetOrAdd(id.Full, (_) => new Room(id));
+        return _rooms.GetOrAdd(id.Full, (_) => new Room(id, this));
     }
 
     private RoomUser GetOrAddUser(User user, Room room)

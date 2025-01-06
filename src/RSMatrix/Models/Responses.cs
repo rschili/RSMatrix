@@ -258,3 +258,9 @@ public class PresenceResponse
     [JsonPropertyName("status_msg")]
     public string? StatusMessage { get; set; }
 }
+
+public class MessageResponse
+{
+    [JsonPropertyName("event_id")]
+    public required string EventId { get; set; }
+}

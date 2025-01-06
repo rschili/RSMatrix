@@ -15,6 +15,9 @@ public record HttpClientParameters
 
     public CancellationToken CancellationToken { get; init; }
 
+    // Used as txnId when sending events, incremented for each event sent.
+    internal uint _txnId = 0;
+
     public HttpClientParameters(IHttpClientFactory factory, string baseUri, string? bearerToken, ILogger logger, CancellationToken cancellationToken)
     {
         Factory = factory ?? throw new ArgumentNullException(nameof(factory));
@@ -36,8 +39,8 @@ public static class HttpClientHelper
         if (result != null)
             return result;
 
-        parameters.Logger.LogError("Failed to deserialize response from {Url}", response.RequestMessage.RequestUri);
-        throw new HttpRequestException($"Failed to deserialize response from {response.RequestMessage.RequestUri}.");
+        parameters.Logger.LogError("Failed to deserialize response from {Url}", path);
+        throw new HttpRequestException($"Failed to deserialize response from {path}.");
     }
 
     public static async Task SendAsync(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
