@@ -156,7 +156,7 @@ public static class MatrixHelper
         await HttpClientHelper.SendAsync(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
-    internal static async Task PutMessageAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessageRequest message)
+    internal static async Task<MessageResponse> PutMessageAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessageRequest message)
     {
         //TODO: How to send messages to a thread?
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
@@ -169,6 +169,28 @@ public static class MatrixHelper
             message, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
         var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/send/m.room.message/{txnId}";
-        await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+        return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+    }
+
+    internal static async Task<QueryKeysResponse> PostQueryKeys(HttpClientParameters httpClientParameters, QueryKeysRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(request, nameof(request));
+
+        var content = JsonContent.Create(
+            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+
+        return await HttpClientHelper.SendAsync<QueryKeysResponse>(httpClientParameters, "/_matrix/client/v3/keys/query", HttpMethod.Post, content).ConfigureAwait(false);
+    }
+
+    internal static async Task<UploadKeysResponse> PostUploadKeys(HttpClientParameters httpClientParameters, UploadKeysRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(request, nameof(request));
+
+        var content = JsonContent.Create(
+            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+
+        return await HttpClientHelper.SendAsync<UploadKeysResponse>(httpClientParameters, "/_matrix/client/v3/keys/upload", HttpMethod.Post, content).ConfigureAwait(false);
     }
 }

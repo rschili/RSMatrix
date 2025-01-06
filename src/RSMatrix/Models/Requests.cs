@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace RSMatrix.Models;
 
@@ -101,4 +102,45 @@ internal class MessageRequest
 
     [JsonPropertyName("m.mentions")]
     public RoomMessageMention? Mentions { get; set; }
+}
+
+internal class QueryKeysRequest
+{
+    /// <summary>
+    /// Required: The keys to be downloaded. A map from user ID,
+    /// to a list of device IDs, or to an empty list to indicate all devices for the corresponding user.
+    /// </summary>
+    [JsonPropertyName("device_keys")]
+    public required Dictionary<string, List<string>> DeviceKeys { get; set; }
+
+    /// <summary>
+    /// The time (in milliseconds) to wait when downloading keys from remote servers. 10 seconds is the recommended default.
+    /// </summary>
+    [JsonPropertyName("timeout")]
+    public int? Timeout { get; set; }
+}
+
+internal class UploadKeysRequest
+{
+    /// <summary>
+    /// Identity keys for the device. May be absent if no new identity keys are required.
+    /// </summary>
+    [JsonPropertyName("device_keys")]
+    public DeviceInformation? DeviceKeys { get; set; }
+
+    [JsonPropertyName("fallback_keys")]
+    public Dictionary<string, JsonElement>? FallbackKeys { get; set; }
+
+    [JsonPropertyName("one_time_keys")]
+    public Dictionary<string, JsonElement>? OneTimeKeys { get; set; }
+}
+
+// may be used instead of a string in Fallback Keys and OneTimeKeys above
+internal class KeyObject
+{
+    [JsonPropertyName("key")]
+    public required string Key { get; set; }
+
+    [JsonPropertyName("signatures")]
+    public required Dictionary<string, Dictionary<string, string>>? Signatures { get; set; }
 }
