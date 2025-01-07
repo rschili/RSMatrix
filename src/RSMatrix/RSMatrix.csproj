@@ -4,10 +4,19 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <Version>1.0.0-alpha-2</Version>
+    <Authors>Robert.Schili</Authors>
+    <Description>Simple text client implementation for the matrix.org chat protocol.</Description>
+    <PackageTags>matrix.org chat client</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/rschili/RSMatrix</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
-	  <InternalsVisibleTo Include="RSMatrix.Tests" />
+    <InternalsVisibleTo Include="RSMatrix.Tests" />
+    <None Include="../../README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
