@@ -65,7 +65,6 @@ finally
 async Task MessageReceivedAsync(ReceivedTextMessage message)
 {
     Console.WriteLine(message);
-    var dto = message.Timestamp.ToString("HH:mm:ss");
     var age = DateTimeOffset.Now - message.Timestamp;
     if(message.Body?.Contains("ping") == true && age.TotalSeconds < 10)
     {

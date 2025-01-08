@@ -65,6 +65,10 @@ public sealed class MatrixTextClient
                     NotTypes = new() { "m.room.join_rules", "m.room.guest_access", "m.room.avatar", "m.room.history_visibility", "m.room.power_levels", "im.vector.modular.widgets" },
                     LazyLoadMembers = true
                 },
+                AccountData = new()
+                {
+                    NotTypes = new() { "m.fully_read" }
+                }
             }
         };
         filter = await Core.SetFilterAsync(filter).ConfigureAwait(false);
@@ -95,7 +99,7 @@ public sealed class MatrixTextClient
     }
 
 
-    private LeakyBucketRateLimiter _receiptRateLimiter = new LeakyBucketRateLimiter(5, 120);
+    private LeakyBucketRateLimiter _receiptRateLimiter = new LeakyBucketRateLimiter(1, 30);
 
     private async Task HandleSyncResponseAsync(SyncResponse response)
     {

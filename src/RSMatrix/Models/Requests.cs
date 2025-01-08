@@ -74,7 +74,7 @@ public class ReceiptRequest
 public class ReadMarkerRequest
 {
     [JsonPropertyName("m.read")]
-    public string? read { get; set; }
+    public string? Read { get; set; }
 
     [JsonPropertyName("m.fully_read")]
     public string? FullyRead { get; set; }

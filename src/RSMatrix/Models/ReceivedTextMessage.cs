@@ -34,8 +34,9 @@ public class ReceivedTextMessage
     /// <returns></returns>
     internal async Task SendReceiptAsync()
     {
-        await MatrixHelper.PostReceiptAsync(Client.Core.HttpClientParameters, Room.RoomId, EventId, ThreadId ?? "main");
-        await MatrixHelper.PostReadMarkersAsync(Client.Core.HttpClientParameters, Room.RoomId, EventId);
+        //await MatrixHelper.PostReceiptAsync(Client.Core.HttpClientParameters, Room.RoomId, EventId, ThreadId ?? "main");
+        // Set both, read marker and receipt at the same time
+        await MatrixHelper.PostReadMarkersAsync(Client.Core.HttpClientParameters, Room.RoomId, EventId, true);
     }
 
     public Task SendResponseAsync(string body)

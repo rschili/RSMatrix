@@ -106,14 +106,17 @@ public static class MatrixHelper
         await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
-    public static async Task PostReadMarkersAsync(HttpClientParameters parameters, MatrixId room, string eventId)
+    public static async Task PostReadMarkersAsync(HttpClientParameters parameters, MatrixId room, string eventId, bool sendReceipt = false)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(room);
         ArgumentNullException.ThrowIfNull(eventId);
-        var receipt = new ReadMarkerRequest { FullyRead = eventId };
+        var request = new ReadMarkerRequest { FullyRead = eventId };
+        if(sendReceipt)
+         request.Read = eventId;
+
         var content = JsonContent.Create(
-            receipt, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
         string path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(room.Full)}/read_markers";
         await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
