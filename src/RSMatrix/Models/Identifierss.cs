@@ -6,7 +6,6 @@ public enum IdKind
 {
     User,
     Room,
-    Event,
     RoomAlias
 }
 
@@ -45,7 +44,6 @@ public sealed class MatrixId
         {
             '@' => IdKind.User,
             '!' => IdKind.Room,
-            '$' => IdKind.Event,
             '#' => IdKind.RoomAlias,
             _ => null
         };
@@ -105,21 +103,6 @@ public static class RoomId
         }
 
         roomId = null;
-        return false;
-    }
-}
-
-public static class MatrixEventId
-{
-    public static bool TryParse(string? input, out MatrixId? eventId)
-    {
-        if (MatrixId.TryParse(input, out var id) && id != null && id.Kind == IdKind.Event)
-        {
-            eventId = id;
-            return true;
-        }
-
-        eventId = null;
         return false;
     }
 }

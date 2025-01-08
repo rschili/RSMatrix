@@ -53,7 +53,7 @@ public sealed class MatrixTextClient
             {
                 Ephemeral = new()
                 {
-                    NotTypes = new() { "m.typing" }, // , "m.receipt"
+                    NotTypes = new() { "m.typing", "m.receipt" },
                     //LazyLoadMembers = true
                 },
                 Timeline = new()
@@ -177,12 +177,12 @@ public sealed class MatrixTextClient
                 if(room.LastMessage == null)
                     continue;
 
-                if(room.LastMessage.EventId.Full != room.LastReceipt?.Full)
+                if(room.LastMessage.EventId != room.LastReceiptEventId)
                 {
                     if(_receiptRateLimiter.Leak())
                     { // This is not thread safe, we may mix receipts, but that's not a big deal
                         await room.LastMessage.SendReceiptAsync().ConfigureAwait(false);
-                        room.LastReceipt = room.LastMessage.EventId;
+                        room.LastReceiptEventId = room.LastMessage.EventId;
                     }
                 }
             }
@@ -464,14 +464,11 @@ public sealed class MatrixTextClient
             return;
         }
 
+        var serverTs = DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs);
+
         var user = GetOrAddUser(userId);
         var roomUser = GetOrAddUser(user, room);
-        if (!MatrixEventId.TryParse(e.EventId, out var eventId) || eventId == null)
-        {
-            Logger.LogWarning("Received m.room.message event with invalid event ID: {EventId} in room {RoomId}.", e.EventId, roomId.Full);
-            return;
-        }
-        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, eventId, this);
+        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, e.EventId, serverTs, this);
         if (messageEvent.Mentions != null && messageEvent.Mentions.UserIds != null && messageEvent.Mentions.UserIds.Count > 0)
         {
             message.Mentions = messageEvent.Mentions.UserIds

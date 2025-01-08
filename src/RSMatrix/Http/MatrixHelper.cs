@@ -94,7 +94,7 @@ public static class MatrixHelper
         await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
-    public static async Task PostReceiptAsync(HttpClientParameters parameters, MatrixId room, MatrixId eventId, string? threadId)
+    public static async Task PostReceiptAsync(HttpClientParameters parameters, MatrixId room, string eventId, string? threadId)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(room);
@@ -102,16 +102,16 @@ public static class MatrixHelper
         var receipt = new ReceiptRequest { ThreadId = threadId };
         var content = JsonContent.Create(
             receipt, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-        string path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(room.Full)}/receipt/m.read/{HttpUtility.UrlEncode(eventId.Full)}";
+        string path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(room.Full)}/receipt/m.read/{HttpUtility.UrlEncode(eventId)}";
         await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
-    public static async Task PostReadMarkersAsync(HttpClientParameters parameters, MatrixId room, MatrixId eventId)
+    public static async Task PostReadMarkersAsync(HttpClientParameters parameters, MatrixId room, string eventId)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(room);
         ArgumentNullException.ThrowIfNull(eventId);
-        var receipt = new ReadMarkerRequest { FullyRead = eventId.Full };
+        var receipt = new ReadMarkerRequest { FullyRead = eventId };
         var content = JsonContent.Create(
             receipt, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
         string path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(room.Full)}/read_markers";
@@ -148,7 +148,7 @@ public static class MatrixHelper
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(userId, nameof(userId)); // UserId is provided here, but it only makes sense to provide the current user
 
-        var typingRequest = new TypingRequest { Typing = true, Timeout = timeoutMS ?? 5000 };
+        var typingRequest = new TypingRequest { Typing = true, Timeout = timeoutMS ?? 2000 };
         var content = JsonContent.Create(
             typingRequest, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
@@ -163,7 +163,8 @@ public static class MatrixHelper
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(message, nameof(message));
 
-        var txnId = Interlocked.Increment(ref httpClientParameters._txnId);
+        var txnIndex = Interlocked.Increment(ref httpClientParameters._txnId);
+        var txnId = $"{DateTimeOffset.Now.ToUnixTimeSeconds()}-{txnIndex}";
 
         var content = JsonContent.Create(
             message, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });

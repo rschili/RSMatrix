@@ -72,28 +72,4 @@ public class IdTests
             await Assert.That(roomAlias!.Full).IsEqualTo(input);
         }
     }
-
-    [Test]
-    [Arguments("$event:server", true, "event", "server")]
-    [Arguments("$event:server:extra", true, "event", "server:extra")]
-    [Arguments("$event", false, "", "")]
-    [Arguments("event:server", false, "", "")]
-    [Arguments("", false, "", "")]
-    [Arguments("event", false, "", "")]
-    [Arguments("event:", false, "", "")]
-    [Arguments(":server", false, "", "")]
-    [Arguments("!event:server", false, "", "")]
-    public async Task TryParseEventId(string input, bool expectedResult, string expectedEvent, string expectedServer)
-    {
-        var result = MatrixEventId.TryParse(input, out var eventId);
-        await Assert.That(result).IsEqualTo(expectedResult);
-        if(expectedResult)
-        {
-            await Assert.That(eventId).IsNotEqualTo(null);
-            await Assert.That(eventId!.Localpart.ToString()).IsEqualTo(expectedEvent);
-            await Assert.That(eventId!.Domain.ToString()).IsEqualTo(expectedServer);
-            await Assert.That(eventId!.Full).IsEqualTo(input);
-        }
-    }
-
 }

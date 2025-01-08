@@ -22,7 +22,7 @@ public class Room
 
     public ReceivedTextMessage? LastMessage { get; internal set; }
 
-    public MatrixId? LastReceipt { get; internal set; }
+    public string? LastReceiptEventId { get; internal set; }
     public RoomEncryption? Encryption { get; internal set; }
     public bool IsEncrypted => Encryption != null;
 
@@ -31,10 +31,11 @@ public class Room
         return MatrixHelper.PutTypingNotificationAsync(Client.Core.HttpClientParameters, RoomId, Client.CurrentUser, timeoutMS);
     }
 
-    public Task SendTextMessageAsync(string body) // TODO: threadId?
+    public async Task<string> SendTextMessageAsync(string body) // TODO: threadId?
     {
-        var messageRequest = new MessageRequest { MsgType = "m.Text", Body = body };
-        return MatrixHelper.PutMessageAsync(Client.Core.HttpClientParameters, RoomId, messageRequest);
+        var messageRequest = new MessageRequest { MsgType = "m.text", Body = body };
+        var response = await MatrixHelper.PutMessageAsync(Client.Core.HttpClientParameters, RoomId, messageRequest).ConfigureAwait(false);
+        return response.EventId ?? "";
     }
 
     public override string ToString()

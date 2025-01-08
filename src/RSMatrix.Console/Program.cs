@@ -14,10 +14,6 @@ if (string.IsNullOrWhiteSpace(userid) || string.IsNullOrWhiteSpace(password) || 
 {
     throw new ArgumentException("Please provide the required environment variables: MATRIX_USER_ID, MATRIX_PASSWORD, MATRIX_DEVICE_ID");
 }
-    Curve25519Helper.Test();
-        var helper = new Ed25519Helper();
-        helper.Test("Hello, World!");
-        return;
 
 //set up dependency injection
 var services = new ServiceCollection()
@@ -69,7 +65,9 @@ finally
 async Task MessageReceivedAsync(ReceivedTextMessage message)
 {
     Console.WriteLine(message);
-    if(message.Body?.Contains("ping") == true)
+    var dto = message.Timestamp.ToString("HH:mm:ss");
+    var age = DateTimeOffset.Now - message.Timestamp;
+    if(message.Body?.Contains("ping") == true && age.TotalSeconds < 10)
     {
         await message.Room.SendTypingNotificationAsync();
         await Task.Delay(2000);
