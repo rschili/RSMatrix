@@ -305,29 +305,7 @@ public sealed class MatrixTextClient
             switch(e.Type)
             {
                 case "m.room.member":
-                    var roomMember = JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content);
-                    if(roomMember == null)
-                    {
-                        Logger.LogWarning("Received m.room.member event deserialize returned null in room {RoomId}.", roomId.Full);
-                        break;
-                    }
-                    var userIdStr = e.StateKey ?? e.Sender;
-                    if(!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
-                    {
-                        Logger.LogWarning("Received m.room.member event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, roomId.Full);
-                        break;
-                    }
-                    var user = GetOrAddUser(userId);
-                    RoomUser? roomUser = GetOrAddUser(user, room);
-
-                    if(roomUser.DisplayName != roomMember.DisplayName || roomUser.Membership != roomMember.Membership)
-                    { //TODO we may want to expose more properties of the room member
-                        lock(roomUser)
-                        {
-                            roomUser.DisplayName = roomMember.DisplayName;
-                            roomUser.Membership = roomMember.Membership;
-                        }
-                    }
+                    HandleRoomMemberEvent(room, e);
                     break;
                 case "m.room.name":
                     var nameEvent = JsonSerializer.Deserialize<RoomNameEvent>((JsonElement)e.Content);
@@ -366,6 +344,33 @@ public sealed class MatrixTextClient
         }
     }
 
+    private void HandleRoomMemberEvent(Room room, ClientEventWithoutRoomID e)
+    {
+        var roomMember = JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content);
+        if (roomMember == null)
+        {
+            Logger.LogWarning("Received m.room.member event deserialize returned null in room {RoomId}.", room.RoomId.Full);
+            return;
+        }
+        var userIdStr = e.StateKey ?? e.Sender;
+        if (!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
+        {
+            Logger.LogWarning("Received m.room.member event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, room.RoomId.Full);
+            return;
+        }
+        var user = GetOrAddUser(userId);
+        RoomUser? roomUser = GetOrAddUser(user, room);
+
+        if (roomUser.DisplayName != roomMember.DisplayName || roomUser.Membership != roomMember.Membership)
+        { //TODO we may want to expose more properties of the room member, respect server timestamp to see which is newer
+            lock (roomUser)
+            {
+                roomUser.DisplayName = roomMember.DisplayName;
+                roomUser.Membership = roomMember.Membership;
+            }
+        }
+    }
+
     private void HandleTimelineReceived(MatrixId roomId, List<ClientEventWithoutRoomID> events, List<ReceivedTextMessage> messages)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
@@ -381,6 +386,8 @@ public sealed class MatrixTextClient
                 HandleRoomEncryptionEvent(room, e);
             else if(e.Type == "m.room.encrypted")
                 HandleEncryptedEvent(room, e);
+            else if(e.Type == "m.room.member")
+                HandleRoomMemberEvent(room, e);
             else
             {
                 Logger.LogWarning("Received unknown timeline event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
