@@ -27,6 +27,7 @@ var services = new ServiceCollection()
             options.TimestampFormat = "hh:mm:ss ";
         });
         logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning); // Filter logs from HttpClient
+        logging.SetMinimumLevel(LogLevel.Warning); // Set minimum log level to Warning
     })
     .BuildServiceProvider();
 

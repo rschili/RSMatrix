@@ -205,6 +205,18 @@ public class RoomMessageEvent
     
     [JsonPropertyName("m.mentions")]
     public RoomMessageMention? Mentions { get; set; }
+
+    [JsonPropertyName("m.relates_to")]
+    public RoomMessageRelatesTo? RelatesTo { get; set; }
+}
+
+public class RoomMessageRelatesTo
+{
+    [JsonPropertyName("event_id")]
+    public string? EventId { get; set; }
+
+    [JsonPropertyName("rel_type")]
+    public string? RelType { get; set; }
 }
 
 public class RoomMessageMention

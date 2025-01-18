@@ -12,19 +12,20 @@ public class ReceivedTextMessage
 
     public List<RoomUser>? Mentions { get; internal set; }
 
-    internal string EventId { get; set; }
+    public string EventId { get; set; }
 
-    internal string? ThreadId { get; set; }
+    public string? ThreadId { get; set; }
 
     public DateTimeOffset Timestamp { get; internal set; }
 
-    internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, MatrixTextClient client)
+    internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, string? threadId, MatrixTextClient client)
     {
         Body = body;
         Room = room;
         Sender = sender;
         Client = client;
         EventId = eventId;
+        ThreadId = threadId;
         Timestamp = timestamp;
     }
 

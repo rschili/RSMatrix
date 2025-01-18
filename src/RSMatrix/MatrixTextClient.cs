@@ -83,6 +83,11 @@ public sealed class MatrixTextClient
         if(response == null)
             return;
 
+        if(response.AccountData?.Events?.Count == 0 &&
+            response.Presence?.Events?.Count == 0 &&
+            response.Rooms?.Joined?.Count == 0)
+            return; // do not log boring empty syncs
+
         try
         {
             var directory = Path.Combine(Path.GetTempPath(), "matrix");
@@ -479,7 +484,14 @@ public sealed class MatrixTextClient
 
         var user = GetOrAddUser(userId);
         var roomUser = GetOrAddUser(user, room);
-        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, e.EventId, serverTs, this);
+        var threadId = (string?)null;
+        if(messageEvent.RelatesTo != null && messageEvent.RelatesTo.EventId != null
+            && messageEvent.RelatesTo.RelType == "m.thread")
+        {
+            threadId = messageEvent.RelatesTo.EventId;
+        }
+
+        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, e.EventId, serverTs, threadId, this);
         if (messageEvent.Mentions != null && messageEvent.Mentions.UserIds != null && messageEvent.Mentions.UserIds.Count > 0)
         {
             message.Mentions = messageEvent.Mentions.UserIds
