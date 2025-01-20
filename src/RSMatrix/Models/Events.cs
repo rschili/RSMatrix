@@ -217,12 +217,21 @@ public class RoomMessageRelatesTo
 
     [JsonPropertyName("rel_type")]
     public string? RelType { get; set; }
+
+    [JsonPropertyName("m.in_reply_to")] // Sometimes this is not 
+    public RoomMessageInReplyTo? InReplyTo { get; set; }
 }
 
 public class RoomMessageMention
 {
     [JsonPropertyName("user_ids")]
     public List<string>? UserIds { get; set; }
+}
+
+public class RoomMessageInReplyTo
+{
+    [JsonPropertyName("event_id")]
+    public required string EventId { get; set; }
 }
 
 public class RoomEncryptionEvent

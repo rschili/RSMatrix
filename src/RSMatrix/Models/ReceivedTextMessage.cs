@@ -40,9 +40,15 @@ public class ReceivedTextMessage
         await MatrixHelper.PostReadMarkersAsync(Client.Core.HttpClientParameters, Room.RoomId, EventId, true);
     }
 
-    public Task SendResponseAsync(string body)
+    /// <summary>
+    /// Sends a response to the room.
+    /// </summary>
+    /// <param name="body"></param>
+    /// <param name="isReply">True, to set the relation to this message</param>
+    /// <returns></returns>
+    public Task SendResponseAsync(string body, bool isReply = false, IList<MatrixId>? mentions = null)
     {
-        return Room.SendTextMessageAsync(body);
+        return Room.SendTextMessageAsync(body, isReply ? EventId : null, mentions);
     }
 
     public override string ToString()

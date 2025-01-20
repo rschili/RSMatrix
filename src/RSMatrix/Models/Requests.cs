@@ -102,6 +102,9 @@ internal class MessageRequest
 
     [JsonPropertyName("m.mentions")]
     public RoomMessageMention? Mentions { get; set; }
+
+    [JsonPropertyName("m.relates_to")]
+    public RoomMessageRelatesTo? RelatesTo { get; set; }
 }
 
 internal class QueryKeysRequest
