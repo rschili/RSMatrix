@@ -351,7 +351,7 @@ public sealed class MatrixTextClient
 
     private void HandleRoomMemberEvent(Room room, ClientEventWithoutRoomID e)
     {
-        var roomMember = JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content);
+        var roomMember = JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content!);
         if (roomMember == null)
         {
             Logger.LogWarning("Received m.room.member event deserialize returned null in room {RoomId}.", room.RoomId.Full);
