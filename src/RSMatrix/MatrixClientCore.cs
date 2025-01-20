@@ -167,6 +167,8 @@ internal sealed class MatrixClientCore
     /// <returns></returns>
     internal async Task SyncAsync(SyncReceivedHandler? handler = null)
     {
+        //TODO: Refresh auth token,
+        //TODO: Errors that cannot be recovered from and should end the sync instead of spamming the server with requests
         if (handler == null)
             handler = DefaultSyncReceivedHandler;
 
