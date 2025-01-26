@@ -69,11 +69,11 @@ public class RoomNameEvent
 
 public enum Presence
 {
-    [JsonPropertyName("offline")]
+    [JsonStringEnumMemberName ("offline")]
     Offline,
-    [JsonPropertyName("online")]
+    [JsonStringEnumMemberName ("online")]
     Online,
-    [JsonPropertyName("unavailable")]
+    [JsonStringEnumMemberName ("unavailable")]
     Unavailable
 }
 
@@ -111,15 +111,15 @@ public class PresenceEvent
 
 public enum Membership
 {
-    [JsonPropertyName("invite")]
+    [JsonStringEnumMemberName("invite")]
     Invite,
-    [JsonPropertyName("join")]
+    [JsonStringEnumMemberName("join")]
     Join,
-    [JsonPropertyName("knock")]
+    [JsonStringEnumMemberName("knock")]
     Knock,
-    [JsonPropertyName("leave")]
+    [JsonStringEnumMemberName("leave")]
     Leave,
-    [JsonPropertyName("ban")]
+    [JsonStringEnumMemberName("ban")]
     Ban
 }
 

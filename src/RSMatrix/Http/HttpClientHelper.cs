@@ -48,24 +48,28 @@ public static class HttpClientHelper
         await SendRequestAsync(parameters, path, method, content, ignoreRateLimit).ConfigureAwait(false);
     }
 
-    private static async Task<HttpResponseMessage> SendRequestAsync(HttpClientParameters parameters, string path, HttpMethod? method, HttpContent? content, bool ignoreRateLimit)
+    private static async Task<HttpResponseMessage> SendRequestAsync(HttpClientParameters parameters, string relativePath, HttpMethod? method, HttpContent? content, bool ignoreRateLimit)
     {
+        var fullPath =  string.Concat(parameters.BaseUri, relativePath);
+        var requestMethod = method ?? HttpMethod.Get;
+        var debugPath = $"{requestMethod} {fullPath}";
+
         //Rate limiter. System.Threading.RateLimiting considered, but we don't want timers and disposable objects.
         var rateLimiter = parameters.RateLimiter;
         if (!ignoreRateLimit && rateLimiter != null && !rateLimiter.Leak())
         {
-            parameters.Logger.LogWarning("Rate limit exceeded. Request to {Path} will be delayed.", path);
+            parameters.Logger.LogWarning("Rate limit exceeded. Request to {Path} will be delayed.", relativePath);
             throw new HttpRequestException("Rate limit exceeded.");
         }
 
         var cancellationToken = parameters.CancellationToken;
         ArgumentNullException.ThrowIfNull(parameters, nameof(parameters));
-        ArgumentException.ThrowIfNullOrEmpty(path, nameof(path));
-        parameters.Logger.LogInformation("Sending request to {Path}", path);
+        ArgumentException.ThrowIfNullOrEmpty(relativePath, nameof(relativePath));
+        parameters.Logger.LogInformation("Sending request {Path}", debugPath);
         using var client = parameters.Factory.CreateClient("MatrixClient");
         client.MaxResponseContentBufferSize = 1024 * 1024 * 2; // 2 MB;
 
-        var request = new HttpRequestMessage(method ?? HttpMethod.Get, string.Concat(parameters.BaseUri, path));
+        var request = new HttpRequestMessage(requestMethod, fullPath);
         request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
         if (!string.IsNullOrWhiteSpace(parameters.BearerToken))
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", parameters.BearerToken);
@@ -74,7 +78,7 @@ public static class HttpClientHelper
             request.Content = content;
 
         var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        parameters.Logger.LogInformation("Request to {Path} completed with status code {Status}", path, response.StatusCode);
+        parameters.Logger.LogInformation("Request '{Path}' completed with status code {Status}", debugPath, response.StatusCode);
         if (!response.IsSuccessStatusCode)
         {
             if (response.Content != null && response.Content.Headers.ContentLength > 0)
@@ -83,19 +87,19 @@ public static class HttpClientHelper
                 var error = JsonSerializer.Deserialize<MatrixErrorResponse>(errorStream);
                 if (error != null)
                 {
-                    parameters.Logger.LogError("{Path} failed with error: {ErrorCode}, {ErrorMessage}", path, error.ErrorCode, error.ErrorMessage);
+                    parameters.Logger.LogError("{Path} failed with error: {ErrorCode}, {ErrorMessage}", debugPath, error.ErrorCode, error.ErrorMessage);
                     throw new MatrixResponseException(error.ErrorCode, error.ErrorMessage);
                 }
             }
 
-            parameters.Logger.LogError("{Path} failed with status code {Status}, no further details provided.", path, response.StatusCode);
-            throw new HttpRequestException($"{path} failed with status code {response.StatusCode.ToString()}.");
+            parameters.Logger.LogError("{Path} failed with status code {Status}, no further details provided.", debugPath, response.StatusCode);
+            throw new HttpRequestException($"{relativePath} failed with status code {response.StatusCode.ToString()}.");
         }
 
         if (response.Content == null || response.Content.Headers.ContentLength == 0)
         {
-            parameters.Logger.LogError("Response content is empty for {Url}", request.RequestUri);
-            throw new HttpRequestException($"Response content is empty for {request.RequestUri}");
+            parameters.Logger.LogError("Response content is empty for {Path}", debugPath);
+            throw new HttpRequestException($"Response content is empty for {debugPath}");
         }
 
         return response;
