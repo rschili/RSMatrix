@@ -1,4 +1,5 @@
 using RSMatrix.Http;
+using TUnit.Assertions.AssertConditions.Throws;
 
 
 namespace RSMatrix.Tests
