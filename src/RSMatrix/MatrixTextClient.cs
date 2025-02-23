@@ -14,7 +14,7 @@ namespace RSMatrix;
 public sealed class MatrixTextClient
 {
     internal ILogger Logger => HttpClientParameters.Logger;
-    internal MatrixId User { get; }
+    public MatrixId CurrentUser { get; }
     internal IList<SpecVersion> SupportedSpecVersions { get; }
     internal static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 12, null, null);
     internal HttpClientParameters HttpClientParameters { get; private set; }
@@ -44,7 +44,7 @@ public sealed class MatrixTextClient
         Capabilities capabilities)
     {
         HttpClientParameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
-        User = userId ?? throw new ArgumentNullException(nameof(userId));
+        CurrentUser = userId ?? throw new ArgumentNullException(nameof(userId));
         if (userId.Kind != IdKind.User)
             throw new ArgumentException("User ID must be of type 'User'.", nameof(userId));
         SupportedSpecVersions = supportedSpecVersions ?? throw new ArgumentNullException(nameof(supportedSpecVersions));
@@ -166,7 +166,7 @@ public sealed class MatrixTextClient
     internal async Task<Filter> SetFilterAsync(Filter filter)
     {
         Logger.LogInformation("Setting filter new filter");
-        var filterResponse = await MatrixHelper.PostFilterAsync(HttpClientParameters, User, filter).ConfigureAwait(false);
+        var filterResponse = await MatrixHelper.PostFilterAsync(HttpClientParameters, CurrentUser, filter).ConfigureAwait(false);
         var filterId = filterResponse.FilterId;
         if (string.IsNullOrEmpty(filterId))
         {
@@ -174,7 +174,7 @@ public sealed class MatrixTextClient
             throw new InvalidOperationException("Failed to set filter.");
         }
 
-        var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, User, filterId).ConfigureAwait(false);
+        var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, CurrentUser, filterId).ConfigureAwait(false);
         if (updatedFilter != null)
         {
             updatedFilter.FilterId = filterId;
@@ -188,7 +188,7 @@ public sealed class MatrixTextClient
 
     private async Task InitAsync()
     {
-        await MatrixHelper.PutPresenceAsync(HttpClientParameters, User, new PresenceRequest() {Presence = Presence.Online }).ConfigureAwait(false);
+        await MatrixHelper.PutPresenceAsync(HttpClientParameters, CurrentUser, new PresenceRequest() {Presence = Presence.Online }).ConfigureAwait(false);
         // We only want to receive text messages, filter out spam we're not interested in
         Filter filter = new()
         {

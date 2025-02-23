@@ -28,7 +28,7 @@ public class Room
 
     public Task SendTypingNotificationAsync(uint? timeoutMS = null)
     {
-        return MatrixHelper.PutTypingNotificationAsync(Client.HttpClientParameters, RoomId, Client.User, timeoutMS);
+        return MatrixHelper.PutTypingNotificationAsync(Client.HttpClientParameters, RoomId, Client.CurrentUser, timeoutMS);
     }
 
     public async Task<string> SendTextMessageAsync(string body, string? inReplyTo, IList<MatrixId>? mentions) // TODO: threadId?

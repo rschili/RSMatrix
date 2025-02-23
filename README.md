@@ -15,7 +15,8 @@ End-to-End Encryption is a bonus, not sure if it will eventually be supported.
 
 ## Example
 
-Check the github repository for a minimalistic console example. Here is the basic usage:
+Check the github repository for a minimalistic [console example](https://github.com/rschili/RSMatrix/blob/main/src/RSMatrix.Console/Program.cs).
+Here is the basic usage:
 
 ```cs
 MatrixTextClient client = await MatrixTextClient.ConnectAsync(userid, password, device,
@@ -25,7 +26,7 @@ MatrixTextClient client = await MatrixTextClient.ConnectAsync(userid, password, 
 and to handle messages:
 
 ```cs
-await foreach (var message in client.Messages.ReadAllAsync(cancellationTokenSource.Token))
+await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
 {
     Console.WriteLine(message);
     await message.Room.SendTypingNotificationAsync();
