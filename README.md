@@ -20,17 +20,17 @@ Check the github repository for a minimalistic console example. Here is the basi
 ```cs
 MatrixTextClient client = await MatrixTextClient.ConnectAsync(userid, password, device,
     httpClientFactory, cancellationToken, logger);
-await client.SyncAsync(MessageReceivedAsync);
 ```
 
 and to handle messages:
 
 ```cs
-async Task MessageReceivedAsync(ReceivedTextMessage message)
+await foreach (var message in client.Messages.ReadAllAsync(cancellationTokenSource.Token))
 {
     Console.WriteLine(message);
     await message.Room.SendTypingNotificationAsync();
-    await message.SendResponseAsync("pong!");
+    if(message.Body.Equals("ping", StringComparison.OrdinalIgnoreCase))
+        await message.SendResponseAsync("pong!");
 }
 ```
 

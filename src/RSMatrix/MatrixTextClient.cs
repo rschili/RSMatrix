@@ -2,9 +2,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using RSMatrix.Models;
 using RSMatrix.Http;
-using System.Reflection.Metadata;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Threading.Channels;
 
 namespace RSMatrix;
 
@@ -13,9 +13,16 @@ namespace RSMatrix;
 /// </summary>
 public sealed class MatrixTextClient
 {
-    internal MatrixClientCore Core { get; private init; }
-    private ILogger Logger => Core.Logger;
-    public MatrixId CurrentUser => Core.User;
+    internal ILogger Logger => HttpClientParameters.Logger;
+    internal MatrixId User { get; }
+    internal IList<SpecVersion> SupportedSpecVersions { get; }
+    internal static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 12, null, null);
+    internal HttpClientParameters HttpClientParameters { get; private set; }
+    internal Capabilities ServerCapabilities { get; private set; }
+
+    internal Filter? Filter { get; private set; }
+
+    internal delegate Task SyncReceivedHandler(SyncResponse matrixEvent);
 
     private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.OrdinalIgnoreCase);
 
@@ -23,29 +30,165 @@ public sealed class MatrixTextClient
 
     public delegate Task MessageHandler(ReceivedTextMessage message);
 
-    private MessageHandler? _messageHandler = null; // We use this to track if the sync has been started
+    private Channel<ReceivedTextMessage> MessageChannel { get; set; }
+
+    public ChannelReader<ReceivedTextMessage> Messages => MessageChannel.Reader;
 
     public bool DebugMode = false;
 
-    private MatrixTextClient(MatrixClientCore core)
+    public bool IsSyncing { get; private set;}
+
+    private MatrixTextClient(HttpClientParameters parameters,
+        MatrixId userId,
+        IList<SpecVersion> supportedSpecVersions,
+        Capabilities capabilities)
     {
-        Core = core ?? throw new ArgumentNullException(nameof(core));
+        HttpClientParameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
+        User = userId ?? throw new ArgumentNullException(nameof(userId));
+        if (userId.Kind != IdKind.User)
+            throw new ArgumentException("User ID must be of type 'User'.", nameof(userId));
+        SupportedSpecVersions = supportedSpecVersions ?? throw new ArgumentNullException(nameof(supportedSpecVersions));
+        ServerCapabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
+        MessageChannel = Channel.CreateUnbounded<ReceivedTextMessage>();
     }
 
     public static async Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
     {
-        var core = await MatrixClientCore.ConnectAsync(userId, password, deviceId, httpClientFactory, cancellationToken, logger).ConfigureAwait(false);
-        var client = new MatrixTextClient(core);
+        if (logger == null)
+            logger = NullLogger<MatrixTextClient>.Instance;
+
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            logger.LogError("User ID cannot be null or empty.");
+            throw new ArgumentException("User ID cannot be null or empty.", nameof(userId));
+        }
+
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            logger.LogError("Password cannot be null or empty.");
+            throw new ArgumentException("Password cannot be null or empty.", nameof(password));
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            logger.LogError("Device ID cannot be null or empty.");
+            throw new ArgumentException("Device ID cannot be null or empty.", nameof(deviceId));
+        }
+
+        if (!UserId.TryParse(userId, out var parsedUserId) || parsedUserId == null)
+        {
+            logger.LogError("The user id '{UserId}' seems invalid, it should look like: '@user:example.org'.", userId);
+            throw new ArgumentException("The user id seems invalid, it should look like: '@user:example.org'.", nameof(userId));
+        }
+
+        var baseUri = $"https://{parsedUserId.Domain}";
+        if (!Uri.IsWellFormedUriString(baseUri, UriKind.Absolute))
+        {
+            logger.LogError("The server address '{Url}' seems invalid, it should look like : 'https://matrix.org'.", baseUri);
+            throw new ArgumentException("The server address seems invalid, it should be a well formed Uri.", nameof(userId));
+        }
+        logger.LogInformation("Connecting to {Url}", baseUri);
+        HttpClientParameters httpClientParameters = new(httpClientFactory, baseUri, null, logger, cancellationToken);
+        var wkUri = await MatrixHelper.FetchWellKnownUriAsync(httpClientParameters).ConfigureAwait(false);
+        if (wkUri.HomeServer == null || string.IsNullOrEmpty(wkUri.HomeServer.BaseUrl))
+        {
+            logger.LogError("Failed to load home server uri from provided server.");
+            throw new InvalidOperationException("Failed to load home server uri from provided server.");
+        }
+        baseUri = wkUri.HomeServer.BaseUrl;
+        if (string.IsNullOrEmpty(baseUri))
+        {
+            logger.LogError("The 'base_url' returned by server property is empty.");
+            throw new InvalidOperationException("The 'base_url' property returned by the server is empty.");
+        }
+        if (baseUri.EndsWith('/')) // according to doc, it may end with a trailing slash
+            baseUri = baseUri.Substring(0, baseUri.Length - 1);
+
+        logger.LogInformation("Resolved Base URL: {BaseUrl}", baseUri);
+        httpClientParameters.BaseUri = baseUri;
+
+        if (!Uri.IsWellFormedUriString(baseUri, UriKind.Absolute))
+        {
+            logger.LogError("The server address '{Url}' seems invalid, it should look like : 'https://matrix.org'.", baseUri);
+            throw new InvalidOperationException("The resolved base uri seems invalid, it should be a well formed Uri.");
+        }
+
+        var versions = await MatrixHelper.FetchSupportedSpecVersionsAsync(httpClientParameters).ConfigureAwait(false);
+        if (versions.Versions == null || versions.Versions.Count == 0)
+        {
+            logger.LogError("Failed to load supported spec versions from server.");
+            throw new InvalidOperationException("Failed to load supported spec versions from server.");
+        }
+
+        var parsedVersions = versions.Versions.Select(v => SpecVersion.TryParse(v, out var cv) ? cv! : throw new FormatException($"Failed to parse version number {v}"))
+            .OrderBy(v => v, SpecVersion.Comparer.Instance).ToList();
+
+        if (!parsedVersions.Contains(CurrentSpecVersion))
+            logger.LogWarning("The server does not support the spec version which was used to implement this library ({ExpectedVersion}), so errors may occur. Supported versions by the server are: {SupportedVersions}",
+                CurrentSpecVersion.VersionString, string.Join(',', parsedVersions));
+
+        var authFlows = await MatrixHelper.FetchSupportedAuthFlowsAsync(httpClientParameters).ConfigureAwait(false);
+        var authFlowsList = authFlows.Flows.Select(f => f.Type).ToList();
+        if (!authFlowsList.Contains("m.login.password"))
+        {
+            logger.LogError("The server does not support password based authentication. Supported types: {Types}", string.Join(", ", authFlows));
+            throw new InvalidOperationException("The server does not support password based authentication.");
+        }
+
+        var loginResponse = await MatrixHelper.PasswordLoginAsync(httpClientParameters, userId, password, deviceId).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(loginResponse.AccessToken))
+        {
+            logger.LogError("Failed to login to server.");
+            throw new InvalidOperationException("Failed to login to server.");
+        }
+
+        httpClientParameters.BearerToken = loginResponse.AccessToken;
+
+        var serverCapabilities = await MatrixHelper.FetchCapabilitiesAsync(httpClientParameters).ConfigureAwait(false);
+        httpClientParameters.RateLimiter = new LeakyBucketRateLimiter(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
+        var client = new MatrixTextClient(httpClientParameters, parsedUserId, parsedVersions, serverCapabilities.Capabilities);
+        await client.InitAsync();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+            await client.SyncAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+            logger.LogError(ex, "Error occurred during sync.");
+            }
+        });
+        client.IsSyncing = true;
         return client;
     }
 
-    public async Task SyncAsync(MessageHandler handler)
+    internal async Task<Filter> SetFilterAsync(Filter filter)
     {
-        if(_messageHandler != null)
-            throw new InvalidOperationException("Sync can only be started once.");
+        Logger.LogInformation("Setting filter new filter");
+        var filterResponse = await MatrixHelper.PostFilterAsync(HttpClientParameters, User, filter).ConfigureAwait(false);
+        var filterId = filterResponse.FilterId;
+        if (string.IsNullOrEmpty(filterId))
+        {
+            Logger.LogError("Failed to set filter.");
+            throw new InvalidOperationException("Failed to set filter.");
+        }
 
-        _messageHandler = handler ?? throw new ArgumentNullException(nameof(handler));
+        var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, User, filterId).ConfigureAwait(false);
+        if (updatedFilter != null)
+        {
+            updatedFilter.FilterId = filterId;
+            Filter = updatedFilter;
+            return updatedFilter;
+        }
 
+        Logger.LogError("Failed to get filter after setting it.");
+        throw new InvalidOperationException("Failed to get filter after setting it.");
+    }
+
+    private async Task InitAsync()
+    {
+        await MatrixHelper.PutPresenceAsync(HttpClientParameters, User, new PresenceRequest() {Presence = Presence.Online }).ConfigureAwait(false);
         // We only want to receive text messages, filter out spam we're not interested in
         Filter filter = new()
         {
@@ -71,11 +214,41 @@ public sealed class MatrixTextClient
                 }
             }
         };
-        filter = await Core.SetFilterAsync(filter).ConfigureAwait(false);
+
+        filter = await SetFilterAsync(filter).ConfigureAwait(false);
         if(filter.FilterId == null)
             Logger.LogWarning("No filter ID was returned after setting a filter. This should not happen. It won't break the client, but unnecessary events will be received.");
-        
-        await Core.SyncAsync(HandleSyncResponseAsync).ConfigureAwait(false);
+    }
+
+    private async Task SyncAsync()
+    {
+        //TODO: Refresh auth token,
+        //TODO: Errors that cannot be recovered from and should end the sync instead of spamming the server with requests
+        var request = new SyncParameters
+        {
+            FullState = false,
+            SetPresence = Presence.Online,
+            Timeout = 60000,
+            Filter = Filter?.FilterId
+        };
+
+        try
+        {
+            while (!HttpClientParameters.CancellationToken.IsCancellationRequested)
+            {
+                var response = await MatrixHelper.GetSyncAsync(HttpClientParameters, request).ConfigureAwait(false);
+                if (response != null)
+                {
+                    await HandleSyncResponseAsync(response).ConfigureAwait(false);
+                    request.Since = response.NextBatch;
+                }
+            }
+        }
+        finally
+        {
+        MessageChannel.Writer.TryComplete();
+        IsSyncing = false;
+        }
     }
 
     private async Task WriteSyncResponseToFileAsync(SyncResponse response)
@@ -167,7 +340,7 @@ public sealed class MatrixTextClient
                 {
                     try
                     {
-                        await _messageHandler!(message).ConfigureAwait(false);
+                        await MessageChannel.Writer.WriteAsync(message, HttpClientParameters.CancellationToken).ConfigureAwait(false);
                     }
                     catch(TaskCanceledException)
                     {

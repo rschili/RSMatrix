@@ -46,7 +46,10 @@ try
         services.GetRequiredService<ILogger<MatrixTextClient>>());
 
     client.DebugMode = true;
-    await client.SyncAsync(MessageReceivedAsync);
+    await foreach (var message in client.Messages.ReadAllAsync(cancellationTokenSource.Token))
+    {
+        await MessageReceivedAsync(message);
+    }
     Console.WriteLine("Sync has ended.");
 }
 catch (OperationCanceledException)

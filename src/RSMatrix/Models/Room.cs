@@ -28,7 +28,7 @@ public class Room
 
     public Task SendTypingNotificationAsync(uint? timeoutMS = null)
     {
-        return MatrixHelper.PutTypingNotificationAsync(Client.Core.HttpClientParameters, RoomId, Client.CurrentUser, timeoutMS);
+        return MatrixHelper.PutTypingNotificationAsync(Client.HttpClientParameters, RoomId, Client.User, timeoutMS);
     }
 
     public async Task<string> SendTextMessageAsync(string body, string? inReplyTo, IList<MatrixId>? mentions) // TODO: threadId?
@@ -46,7 +46,7 @@ public class Room
         }
 
         var messageRequest = new MessageRequest { MsgType = "m.text", Body = body, Mentions = roomMessageMention, RelatesTo = relatesTo };
-        var response = await MatrixHelper.PutMessageAsync(Client.Core.HttpClientParameters, RoomId, messageRequest).ConfigureAwait(false);
+        var response = await MatrixHelper.PutMessageAsync(Client.HttpClientParameters, RoomId, messageRequest).ConfigureAwait(false);
         return response.EventId ?? "";
     }
 
