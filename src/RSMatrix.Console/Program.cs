@@ -64,6 +64,7 @@ finally
 {
     await services.DisposeAsync();
 }
+Console.WriteLine("Goodbye!");
 
 
 async Task MessageReceivedAsync(ReceivedTextMessage message)

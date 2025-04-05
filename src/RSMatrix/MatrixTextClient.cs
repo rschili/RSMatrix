@@ -32,6 +32,11 @@ public sealed class MatrixTextClient
 
     private Channel<ReceivedTextMessage> MessageChannel { get; set; }
 
+    /// <summary>
+    /// The channel to receive messages from the server.
+    /// The channel is unbounded, so it will not block the sender.
+    /// The channel will be closed when the client is disconnected or the sync fails.
+    /// </summary>
     public ChannelReader<ReceivedTextMessage> Messages => MessageChannel.Reader;
 
     public bool DebugMode = false;
@@ -52,6 +57,25 @@ public sealed class MatrixTextClient
         MessageChannel = Channel.CreateUnbounded<ReceivedTextMessage>();
     }
 
+    /// <summary>
+    /// Connects to the Matrix server using the provided credentials.
+    /// The Task will finish when the client is connected and ready to receive messages.
+    /// Use <see cref="Messages" />  to retrieve messages.
+    /// </summary>
+    /// <remarks>
+    /// The client will continue to sync until cancellation is requested or the sync fails.
+    /// On failed sync, the client will not try to reconnect. Instead, the Messages channel will be closed and the logger will write an error message.
+    /// To reconnect, call ConnectAsync again. Best practice: Retry with increasing delay and a maximum number of retries.
+    /// </remarks>
+    /// <param name="userId">User id e.g. @user:example.org</param>
+    /// <param name="password">password for the user</param>
+    /// <param name="deviceId">device id to identify this client to the server</param>
+    /// <param name="httpClientFactory">factory to use for creating http clients</param>
+    /// <param name="cancellationToken">cancellation token used to disconnect</param>
+    /// <param name="logger">logger</param>
+    /// <returns></returns>
+    /// <exception cref="ArgumentException">Provided arguments not valid</exception>
+    /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
     public static async Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
     {
         if (logger == null)
@@ -120,7 +144,7 @@ public sealed class MatrixTextClient
             throw new InvalidOperationException("Failed to load supported spec versions from server.");
         }
 
-        var parsedVersions = versions.Versions.Select(v => SpecVersion.TryParse(v, out var cv) ? cv! : throw new FormatException($"Failed to parse version number {v}"))
+        var parsedVersions = versions.Versions.Select(v => SpecVersion.TryParse(v, out var cv) ? cv! : throw new InvalidOperationException($"Failed to parse server spec version number {v}"))
             .OrderBy(v => v, SpecVersion.Comparer.Instance).ToList();
 
         if (!parsedVersions.Contains(CurrentSpecVersion))
@@ -223,7 +247,6 @@ public sealed class MatrixTextClient
     private async Task SyncAsync()
     {
         //TODO: Refresh auth token,
-        //TODO: Errors that cannot be recovered from and should end the sync instead of spamming the server with requests
         var request = new SyncParameters
         {
             FullState = false,
@@ -246,7 +269,9 @@ public sealed class MatrixTextClient
         }
         finally
         {
-        MessageChannel.Writer.TryComplete();
+        if(!MessageChannel.Writer.TryComplete())
+            Logger.LogError("Sync ended, but failed to complete message channel.");
+
         IsSyncing = false;
         }
     }
