@@ -5,6 +5,7 @@ using RSMatrix.Http;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
+using RSFlowControl;
 
 namespace RSMatrix;
 
@@ -169,7 +170,7 @@ public sealed class MatrixTextClient
         httpClientParameters.BearerToken = loginResponse.AccessToken;
 
         var serverCapabilities = await MatrixHelper.FetchCapabilitiesAsync(httpClientParameters).ConfigureAwait(false);
-        httpClientParameters.RateLimiter = new LeakyBucketRateLimiter(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
+        httpClientParameters.RateLimiter = new LeakyBucket(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
         var client = new MatrixTextClient(httpClientParameters, parsedUserId, parsedVersions, serverCapabilities.Capabilities);
         await client.InitAsync();
         _ = Task.Run(async () =>
@@ -302,7 +303,7 @@ public sealed class MatrixTextClient
     }
 
 
-    private LeakyBucketRateLimiter _receiptRateLimiter = new LeakyBucketRateLimiter(1, 30);
+    private LeakyBucket _receiptRateLimiter = new LeakyBucket(1, 30);
 
     private async Task HandleSyncResponseAsync(SyncResponse response)
     {

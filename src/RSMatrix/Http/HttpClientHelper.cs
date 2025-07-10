@@ -2,7 +2,7 @@ using RSMatrix.Models;
 using Microsoft.Extensions.Logging;
 using System.Net.Mime;
 using System.Text.Json;
-using System.Web;
+using RSFlowControl;
 
 namespace RSMatrix.Http;
 public record HttpClientParameters
@@ -11,7 +11,7 @@ public record HttpClientParameters
     public string BaseUri { get; set; }
     public string? BearerToken { get; set; }
     public ILogger Logger { get; init; }
-    public LeakyBucketRateLimiter? RateLimiter { get; set; }
+    public LeakyBucket? RateLimiter { get; set; }
 
     public CancellationToken CancellationToken { get; init; }
 
