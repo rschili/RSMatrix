@@ -31,21 +31,32 @@ public class Room
         return MatrixHelper.PutTypingNotificationAsync(Client.HttpClientParameters, RoomId, Client.CurrentUser, timeoutMS);
     }
 
-    public async Task<string> SendTextMessageAsync(string body, string? inReplyTo, IList<MatrixId>? mentions) // TODO: threadId?
+    public Task<string> SendTextMessageAsync(string body, string? inReplyTo, IList<MatrixId>? mentions) // TODO: threadId?
+     => SendMessageInternalAsync(body, null, inReplyTo, mentions);
+
+    public Task<string> SendHtmlMessageAsync(string body, string htmlBody, string? inReplyTo, IList<MatrixId>? mentions) // TODO: threadId?
+        => SendMessageInternalAsync(body, (Format: "org.matrix.custom.html", FormattedBody: htmlBody), inReplyTo, mentions);
+    
+    private async Task<string> SendMessageInternalAsync(string body, (string Format, string FormattedBody)? formatted, string? inReplyTo, IList<MatrixId>? mentions)
     {
         //TODO: mentions and inReplyTo are generic and should be moved to a common location
         RoomMessageMention? roomMessageMention = null;
-        if(mentions != null)
+        if (mentions != null)
         {
             roomMessageMention = new RoomMessageMention { UserIds = mentions.Select(m => m.Full).ToList() };
         }
         RoomMessageRelatesTo? relatesTo = null;
-        if(inReplyTo != null)
+        if (inReplyTo != null)
         {
-            relatesTo = new RoomMessageRelatesTo { InReplyTo = new RoomMessageInReplyTo() { EventId = inReplyTo }};
+            relatesTo = new RoomMessageRelatesTo { InReplyTo = new RoomMessageInReplyTo() { EventId = inReplyTo } };
         }
 
         var messageRequest = new MessageRequest { MsgType = "m.text", Body = body, Mentions = roomMessageMention, RelatesTo = relatesTo };
+        if (formatted.HasValue)
+        {
+            messageRequest.Format = formatted.Value.Format;
+            messageRequest.FormattedBody = formatted.Value.FormattedBody;
+        }
         var response = await MatrixHelper.PutMessageAsync(Client.HttpClientParameters, RoomId, messageRequest).ConfigureAwait(false);
         return response.EventId ?? "";
     }

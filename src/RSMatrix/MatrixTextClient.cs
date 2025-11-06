@@ -17,7 +17,7 @@ public sealed class MatrixTextClient
     internal ILogger Logger => HttpClientParameters.Logger;
     public MatrixId CurrentUser { get; }
     internal IList<SpecVersion> SupportedSpecVersions { get; }
-    internal static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 12, null, null);
+    internal static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 16, null, null);
     internal HttpClientParameters HttpClientParameters { get; private set; }
     internal Capabilities ServerCapabilities { get; private set; }
 

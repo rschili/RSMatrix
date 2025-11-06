@@ -18,6 +18,7 @@ public class ReceivedTextMessage
 
     public DateTimeOffset Timestamp { get; internal set; }
 
+    //TODO: format and formatted_body
     internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, string? threadId, MatrixTextClient client)
     {
         Body = body;
@@ -47,9 +48,18 @@ public class ReceivedTextMessage
     /// <param name="isReply">True, to set the relation to this message</param>
     /// <returns></returns>
     public Task SendResponseAsync(string body, bool isReply = false, IList<MatrixId>? mentions = null)
-    {
-        return Room.SendTextMessageAsync(body, isReply ? EventId : null, mentions);
-    }
+        => Room.SendTextMessageAsync(body, isReply ? EventId : null, mentions);
+
+    /// <summary>
+    /// Sends an HTML response to the room.
+    /// </summary>
+    /// <param name="body"></param>
+    /// <param name="htmlBody"></param>
+    /// <param name="isReply"></param>
+    /// <param name="mentions"></param>
+    /// <returns></returns>
+    public Task SendHtmlResponseAsync(string body, string htmlBody, bool isReply = false, IList<MatrixId>? mentions = null)
+        => Room.SendHtmlMessageAsync(body, htmlBody, isReply ? EventId : null, mentions);
 
     public override string ToString()
     {

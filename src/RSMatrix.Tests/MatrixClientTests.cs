@@ -21,7 +21,7 @@ public class MatrixClientTests
     public async Task ConnectAsync_InvalidUserId_ThrowsArgumentException(string? userId, string password, string deviceId)
     {
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixTextClient.ConnectAsync(userId!, password, deviceId, _httpClientFactoryMock.Object, CancellationToken.None, _logger));
-        await Assert.That(ex.ParamName).IsEqualTo("userId");
+        await Assert.That(ex?.ParamName).IsEqualTo("userId");
     }
 
     [Test]
@@ -31,7 +31,7 @@ public class MatrixClientTests
     public async Task ConnectAsync_InvalidPassword_ThrowsArgumentException(string userId, string? password, string deviceId)
     {
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixTextClient.ConnectAsync(userId, password!, deviceId, _httpClientFactoryMock.Object, CancellationToken.None, _logger));
-        await Assert.That(ex.ParamName).IsEqualTo("password");
+        await Assert.That(ex?.ParamName).IsEqualTo("password");
     }
 
     [Test]
@@ -41,7 +41,7 @@ public class MatrixClientTests
     public async Task ConnectAsync_InvalidDeviceId_ThrowsArgumentException(string userId, string password, string? deviceId)
     {
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixTextClient.ConnectAsync(userId, password, deviceId!, _httpClientFactoryMock.Object, CancellationToken.None, _logger));
-        await Assert.That(ex.ParamName).IsEqualTo("deviceId");
+        await Assert.That(ex?.ParamName).IsEqualTo("deviceId");
     }
 
     [Test]
@@ -50,7 +50,7 @@ public class MatrixClientTests
     public async Task ConnectAsync_InvalidUserIdFormat_ThrowsArgumentException(string userId, string password, string deviceId)
     {
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => MatrixTextClient.ConnectAsync(userId, password, deviceId, _httpClientFactoryMock.Object, CancellationToken.None, _logger));
-        await Assert.That(ex.ParamName).IsEqualTo("userId");
+        await Assert.That(ex?.ParamName).IsEqualTo("userId");
     }
 }
 

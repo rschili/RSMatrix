@@ -100,9 +100,15 @@ internal class MessageRequest
     [JsonPropertyName("body")]
     public required string Body { get; set; }
 
+    [JsonPropertyName("format")]
+    public string? Format { get; set; }
+
+    [JsonPropertyName("formatted_body")]
+    public string? FormattedBody { get; set; }
+
     [JsonPropertyName("m.mentions")]
     public RoomMessageMention? Mentions { get; set; }
-
+    
     [JsonPropertyName("m.relates_to")]
     public RoomMessageRelatesTo? RelatesTo { get; set; }
 }
