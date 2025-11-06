@@ -11,7 +11,7 @@ The goal is to have a simple text client which can retrieve and send text messag
 
 I will try to make it conform to all requirements. It sends automatic receipts and read notifications.
 
-End-to-End Encryption is a bonus, not sure if it will eventually be supported.
+End-to-End Encryption is **NOT** supported. I looked into it a bit, but seemed too much work and I do not need it myself.
 
 ## Example
 
