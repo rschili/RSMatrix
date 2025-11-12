@@ -13,7 +13,7 @@ public class LoginTests
     /// Goes through the process of a full password login
     /// </summary>
     [Test]
-    public async Task TestSuccessfulPasswordLogin()
+    public void TestSuccessfulPasswordLogin()
     {
         // TODO: We do not actually verify the server request contents. This test flow is tedious enough as it is. May add later.
         // arrange

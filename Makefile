@@ -5,6 +5,12 @@ default: build
 build:
 	dotnet build src/
 
+test:
+	dotnet run --configuration Release --project src/RSMatrix.Tests/RSMatrix.Tests.csproj --coverage --report-trx
+
+ide:
+	code .
+
 clean-release:
 	rm -rf src/RSMatrix/bin/Release/
 

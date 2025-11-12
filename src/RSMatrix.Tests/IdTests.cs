@@ -20,7 +20,7 @@ public class IdTests
         await Assert.That(result).IsEqualTo(expectedResult);
         if(expectedResult)
         {
-            await Assert.That(userId).IsNotEqualTo(null);
+            await Assert.That(userId).IsNotNull();
             await Assert.That(userId!.Localpart.ToString()).IsEqualTo(expectedUser);
             await Assert.That(userId!.Domain.ToString()).IsEqualTo(expectedServer);
             await Assert.That(userId!.Full).IsEqualTo(input);
@@ -43,7 +43,7 @@ public class IdTests
         await Assert.That(result).IsEqualTo(expectedResult);
         if(expectedResult)
         {
-            await Assert.That(roomId).IsNotEqualTo(null);
+            await Assert.That(roomId).IsNotNull();
             await Assert.That(roomId!.Localpart.ToString()).IsEqualTo(expectedRoom);
             await Assert.That(roomId!.Domain.ToString()).IsEqualTo(expectedServer);
             await Assert.That(roomId!.Full).IsEqualTo(input);
@@ -66,7 +66,7 @@ public class IdTests
         await Assert.That(result).IsEqualTo(expectedResult);
         if(expectedResult)
         {
-            await Assert.That(roomAlias).IsNotEqualTo(null);
+            await Assert.That(roomAlias).IsNotNull();
             await Assert.That(roomAlias!.Localpart.ToString()).IsEqualTo(expectedAlias);
             await Assert.That(roomAlias!.Domain.ToString()).IsEqualTo(expectedServer);
             await Assert.That(roomAlias!.Full).IsEqualTo(input);
