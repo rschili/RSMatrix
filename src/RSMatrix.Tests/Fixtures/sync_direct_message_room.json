@@ -1,0 +1,40 @@
+{
+  "next_batch": "s1_12",
+  "rooms": {
+    "join": {
+      "!dm_room:example.org": {
+        "state": {
+          "events": [
+            {
+              "type": "m.room.member",
+              "sender": "@friend:example.org",
+              "event_id": "$dm_state1",
+              "origin_server_ts": 1699999000000,
+              "state_key": "@testuser:example.org",
+              "content": {
+                "membership": "join",
+                "displayname": "Test User",
+                "is_direct": true
+              }
+            }
+          ]
+        },
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@friend:example.org",
+              "event_id": "$dm_msg1",
+              "origin_server_ts": 1700000000000,
+              "content": {
+                "msgtype": "m.text",
+                "body": "Hey, private message!"
+              }
+            }
+          ],
+          "limited": false
+        }
+      }
+    }
+  }
+}

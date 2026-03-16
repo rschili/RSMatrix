@@ -1,0 +1,66 @@
+{
+  "next_batch": "s1_9",
+  "rooms": {
+    "join": {
+      "!room1:example.org": {
+        "state": {
+          "events": [
+            {
+              "type": "m.room.name",
+              "sender": "@admin:example.org",
+              "event_id": "$name1",
+              "origin_server_ts": 1699999000000,
+              "state_key": "",
+              "content": { "name": "Room Alpha" }
+            }
+          ]
+        },
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@alice:example.org",
+              "event_id": "$r1_msg1",
+              "origin_server_ts": 1700000000000,
+              "content": { "msgtype": "m.text", "body": "Message in room 1" }
+            }
+          ],
+          "limited": false
+        }
+      },
+      "!room2:example.org": {
+        "state": {
+          "events": [
+            {
+              "type": "m.room.name",
+              "sender": "@admin:example.org",
+              "event_id": "$name2",
+              "origin_server_ts": 1699999000000,
+              "state_key": "",
+              "content": { "name": "Room Beta" }
+            }
+          ]
+        },
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@bob:example.org",
+              "event_id": "$r2_msg1",
+              "origin_server_ts": 1700000001000,
+              "content": { "msgtype": "m.text", "body": "Message in room 2" }
+            },
+            {
+              "type": "m.room.message",
+              "sender": "@alice:example.org",
+              "event_id": "$r2_msg2",
+              "origin_server_ts": 1700000002000,
+              "content": { "msgtype": "m.notice", "body": "Notice in room 2" }
+            }
+          ],
+          "limited": false
+        }
+      }
+    }
+  }
+}

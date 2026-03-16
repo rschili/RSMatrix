@@ -1,0 +1,29 @@
+{
+  "next_batch": "s1_6",
+  "presence": {
+    "events": [
+      {
+        "type": "m.presence",
+        "sender": "@alice:example.org",
+        "content": {
+          "presence": "online",
+          "currently_active": true,
+          "displayname": "Alice Online",
+          "avatar_url": "mxc://example.org/alice",
+          "status_msg": "Working on tests",
+          "last_active_ago": 5000
+        }
+      },
+      {
+        "type": "m.presence",
+        "sender": "@bob:example.org",
+        "content": {
+          "presence": "unavailable",
+          "currently_active": false,
+          "displayname": "Bob Away",
+          "status_msg": "AFK"
+        }
+      }
+    ]
+  }
+}

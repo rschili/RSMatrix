@@ -1,0 +1,24 @@
+{
+  "next_batch": "s1_11",
+  "rooms": {
+    "join": {
+      "!encrypted_room:example.org": {
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.encryption",
+              "sender": "@admin:example.org",
+              "event_id": "$enc1",
+              "origin_server_ts": 1700000000000,
+              "state_key": "",
+              "content": {
+                "algorithm": "m.megolm.v1.aes-sha2"
+              }
+            }
+          ],
+          "limited": false
+        }
+      }
+    }
+  }
+}

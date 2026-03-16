@@ -1,0 +1,23 @@
+{
+  "next_batch": "s1_8",
+  "rooms": {
+    "invite": {
+      "!dm_room:example.org": {
+        "invite_state": {
+          "events": [
+            {
+              "type": "m.room.member",
+              "sender": "@friend:example.org",
+              "state_key": "@testuser:example.org",
+              "content": {
+                "membership": "invite",
+                "displayname": "Test User",
+                "is_direct": true
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

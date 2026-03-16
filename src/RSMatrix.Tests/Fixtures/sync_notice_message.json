@@ -1,0 +1,24 @@
+{
+  "next_batch": "s1_2",
+  "rooms": {
+    "join": {
+      "!room1:example.org": {
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@bot:example.org",
+              "event_id": "$notice1",
+              "origin_server_ts": 1700000001000,
+              "content": {
+                "msgtype": "m.notice",
+                "body": "I am a bot response"
+              }
+            }
+          ],
+          "limited": false
+        }
+      }
+    }
+  }
+}

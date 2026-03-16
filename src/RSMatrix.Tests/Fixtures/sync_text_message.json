@@ -1,0 +1,24 @@
+{
+  "next_batch": "s1_1",
+  "rooms": {
+    "join": {
+      "!room1:example.org": {
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@alice:example.org",
+              "event_id": "$msg1",
+              "origin_server_ts": 1700000000000,
+              "content": {
+                "msgtype": "m.text",
+                "body": "Hello, world!"
+              }
+            }
+          ],
+          "limited": false
+        }
+      }
+    }
+  }
+}

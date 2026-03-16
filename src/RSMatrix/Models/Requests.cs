@@ -108,9 +108,60 @@ internal class MessageRequest
 
     [JsonPropertyName("m.mentions")]
     public RoomMessageMention? Mentions { get; set; }
-    
+
     [JsonPropertyName("m.relates_to")]
     public RoomMessageRelatesTo? RelatesTo { get; set; }
+
+    [JsonPropertyName("m.new_content")]
+    public MessageNewContent? NewContent { get; set; }
+}
+
+internal class MessageNewContent
+{
+    [JsonPropertyName("msgtype")]
+    public required string MsgType { get; set; }
+
+    [JsonPropertyName("body")]
+    public required string Body { get; set; }
+
+    [JsonPropertyName("format")]
+    public string? Format { get; set; }
+
+    [JsonPropertyName("formatted_body")]
+    public string? FormattedBody { get; set; }
+
+    [JsonPropertyName("m.mentions")]
+    public RoomMessageMention? Mentions { get; set; }
+}
+
+internal class RedactionRequest
+{
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+internal class JoinRoomRequest
+{
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public class MessagesParameters
+{
+    public string? From { get; set; }
+    public string? To { get; set; }
+    public required string Dir { get; set; }
+    public int? Limit { get; set; }
+    public string? Filter { get; set; }
+
+    public IEnumerable<KeyValuePair<string, string>> GetAsParameters()
+    {
+        yield return KeyValuePair.Create("dir", Dir);
+        if (!string.IsNullOrWhiteSpace(From)) yield return KeyValuePair.Create("from", From);
+        if (!string.IsNullOrWhiteSpace(To)) yield return KeyValuePair.Create("to", To);
+        if (Limit.HasValue) yield return KeyValuePair.Create("limit", Limit.Value.ToString());
+        if (!string.IsNullOrWhiteSpace(Filter)) yield return KeyValuePair.Create("filter", Filter);
+    }
 }
 
 internal class QueryKeysRequest

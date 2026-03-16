@@ -1,0 +1,57 @@
+{
+  "next_batch": "s1_3",
+  "rooms": {
+    "join": {
+      "!room1:example.org": {
+        "state": {
+          "events": [
+            {
+              "type": "m.room.name",
+              "sender": "@admin:example.org",
+              "event_id": "$state1",
+              "origin_server_ts": 1699999000000,
+              "state_key": "",
+              "content": {
+                "name": "Test Room"
+              }
+            },
+            {
+              "type": "m.room.canonical_alias",
+              "sender": "@admin:example.org",
+              "event_id": "$state2",
+              "origin_server_ts": 1699999000100,
+              "state_key": "",
+              "content": {
+                "alias": "#test:example.org",
+                "alt_aliases": ["#test2:example.org"]
+              }
+            },
+            {
+              "type": "m.room.member",
+              "sender": "@alice:example.org",
+              "event_id": "$state3",
+              "origin_server_ts": 1699999000200,
+              "state_key": "@alice:example.org",
+              "content": {
+                "membership": "join",
+                "displayname": "Alice Wonderland",
+                "avatar_url": "mxc://example.org/alice_avatar"
+              }
+            },
+            {
+              "type": "m.room.member",
+              "sender": "@bob:example.org",
+              "event_id": "$state4",
+              "origin_server_ts": 1699999000300,
+              "state_key": "@bob:example.org",
+              "content": {
+                "membership": "join",
+                "displayname": "Bob Builder"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

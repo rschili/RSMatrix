@@ -188,7 +188,6 @@ public static class MatrixHelper
 
     internal static async Task<MessageResponse> PutMessageAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessageRequest message)
     {
-        //TODO: How to send messages to a thread?
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(message, nameof(message));
@@ -201,6 +200,49 @@ public static class MatrixHelper
 
         var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/send/m.room.message/{txnId}";
         return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+    }
+
+    internal static async Task<MessageResponse> PutRedactionAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, string? reason)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentException.ThrowIfNullOrEmpty(eventId, nameof(eventId));
+
+        var txnIndex = Interlocked.Increment(ref httpClientParameters._txnId);
+        var txnId = $"{DateTimeOffset.Now.ToUnixTimeSeconds()}-{txnIndex}";
+
+        var request = new RedactionRequest { Reason = reason };
+        var content = JsonContent.Create(
+            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+
+        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/redact/{HttpUtility.UrlEncode(eventId)}/{txnId}";
+        return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+    }
+
+    internal static async Task<JoinRoomResponse> PostJoinRoomAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string? reason = null)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+
+        var request = new JoinRoomRequest { Reason = reason };
+        var content = JsonContent.Create(
+            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+
+        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/join";
+        return await HttpClientHelper.SendAsync<JoinRoomResponse>(httpClientParameters, path, HttpMethod.Post, content).ConfigureAwait(false);
+    }
+
+    internal static async Task<MessagesResponse> GetMessagesAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessagesParameters parameters)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentNullException.ThrowIfNull(parameters, nameof(parameters));
+
+        var path = HttpParameterHelper.AppendParameters(
+            $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/messages",
+            parameters.GetAsParameters());
+
+        return await HttpClientHelper.SendAsync<MessagesResponse>(httpClientParameters, path).ConfigureAwait(false);
     }
 
     internal static async Task<QueryKeysResponse> PostQueryKeys(HttpClientParameters httpClientParameters, QueryKeysRequest request)

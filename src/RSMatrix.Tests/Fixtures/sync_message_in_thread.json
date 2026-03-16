@@ -1,0 +1,28 @@
+{
+  "next_batch": "s1_5",
+  "rooms": {
+    "join": {
+      "!room1:example.org": {
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@alice:example.org",
+              "event_id": "$thread_reply1",
+              "origin_server_ts": 1700000003000,
+              "content": {
+                "msgtype": "m.text",
+                "body": "Thread reply here",
+                "m.relates_to": {
+                  "rel_type": "m.thread",
+                  "event_id": "$thread_root1"
+                }
+              }
+            }
+          ],
+          "limited": false
+        }
+      }
+    }
+  }
+}

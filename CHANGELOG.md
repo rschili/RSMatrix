@@ -5,6 +5,26 @@ All notable changes to RSMatrix will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-03-16
+
+### Added
+- **m.notice support**: `Room.SendNoticeAsync` / `SendHtmlNoticeAsync` and corresponding
+  `ReceivedTextMessage.SendNoticeResponseAsync` / `SendHtmlNoticeResponseAsync` for bot-appropriate
+  messages that won't trigger notification loops.
+- `ReceivedTextMessage.MsgType` property to distinguish `m.text` from `m.notice`.
+- Incoming `m.notice` messages are now delivered through the `Messages` channel.
+- **Message editing**: `Room.EditMessageAsync` / `EditHtmlMessageAsync` and
+  `ReceivedTextMessage.EditAsync` / `EditHtmlAsync` using `m.replace`.
+- **Redaction**: `Room.RedactEventAsync` and `ReceivedTextMessage.RedactAsync`.
+- **Auto-join on invite**: Set `MatrixTextClient.AutoJoinOnInvite = true` to automatically
+  accept room invitations. Invite `is_direct` flag is detected and exposed via `Room.IsDirect`.
+- **Message history**: `Room.FetchMessagesAsync` fetches previous messages with pagination
+  support via `MessageHistoryResult.NextToken`.
+
+### Changed
+- `ReceivedTextMessage.SendResponseAsync` and `SendHtmlResponseAsync` now return `Task<string>`
+  (the event ID) instead of `Task`.
+
 ## [1.2.0] - 2026-03-16
 
 ### Added

@@ -18,8 +18,13 @@ public class ReceivedTextMessage
 
     public DateTimeOffset Timestamp { get; internal set; }
 
+    /// <summary>
+    /// The message type, e.g. "m.text" or "m.notice".
+    /// </summary>
+    public string MsgType { get; private set; }
+
     //TODO: format and formatted_body
-    internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, string? threadId, MatrixTextClient client)
+    internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, string? threadId, string msgType, MatrixTextClient client)
     {
         Body = body;
         Room = room;
@@ -27,6 +32,7 @@ public class ReceivedTextMessage
         Client = client;
         EventId = eventId;
         ThreadId = threadId;
+        MsgType = msgType;
         Timestamp = timestamp;
     }
 
@@ -42,24 +48,36 @@ public class ReceivedTextMessage
     }
 
     /// <summary>
-    /// Sends a response to the room.
+    /// Sends a text response to the room.
     /// </summary>
-    /// <param name="body"></param>
+    /// <param name="body">The message body</param>
     /// <param name="isReply">True, to set the relation to this message</param>
-    /// <returns></returns>
-    public Task SendResponseAsync(string body, bool isReply = false, IList<MatrixId>? mentions = null)
+    /// <param name="mentions">Optional user mentions</param>
+    /// <returns>The event ID of the sent message</returns>
+    public Task<string> SendResponseAsync(string body, bool isReply = false, IList<MatrixId>? mentions = null)
         => Room.SendTextMessageAsync(body, isReply ? EventId : null, mentions);
 
     /// <summary>
     /// Sends an HTML response to the room.
     /// </summary>
-    /// <param name="body"></param>
-    /// <param name="htmlBody"></param>
-    /// <param name="isReply"></param>
-    /// <param name="mentions"></param>
-    /// <returns></returns>
-    public Task SendHtmlResponseAsync(string body, string htmlBody, bool isReply = false, IList<MatrixId>? mentions = null)
+    /// <returns>The event ID of the sent message</returns>
+    public Task<string> SendHtmlResponseAsync(string body, string htmlBody, bool isReply = false, IList<MatrixId>? mentions = null)
         => Room.SendHtmlMessageAsync(body, htmlBody, isReply ? EventId : null, mentions);
+
+    /// <summary>
+    /// Sends a notice (bot message) response to the room.
+    /// Per the Matrix spec, m.notice should be used for automated messages to avoid notification loops.
+    /// </summary>
+    /// <returns>The event ID of the sent message</returns>
+    public Task<string> SendNoticeResponseAsync(string body, bool isReply = false, IList<MatrixId>? mentions = null)
+        => Room.SendNoticeAsync(body, isReply ? EventId : null, mentions);
+
+    /// <summary>
+    /// Sends an HTML notice (bot message) response to the room.
+    /// </summary>
+    /// <returns>The event ID of the sent message</returns>
+    public Task<string> SendHtmlNoticeResponseAsync(string body, string htmlBody, bool isReply = false, IList<MatrixId>? mentions = null)
+        => Room.SendHtmlNoticeAsync(body, htmlBody, isReply ? EventId : null, mentions);
 
     /// <summary>
     /// Sends a reaction (annotation) to this message.
@@ -71,6 +89,28 @@ public class ReceivedTextMessage
     /// <returns>The event ID of the sent reaction</returns>
     public Task<string> SendReactionAsync(string key)
         => Room.SendReactionAsync(EventId, key);
+
+    /// <summary>
+    /// Edits this message with new text content.
+    /// </summary>
+    /// <returns>The event ID of the edit event</returns>
+    public Task<string> EditAsync(string newBody, IList<MatrixId>? mentions = null)
+        => Room.EditMessageAsync(EventId, newBody, mentions);
+
+    /// <summary>
+    /// Edits this message with new HTML content.
+    /// </summary>
+    /// <returns>The event ID of the edit event</returns>
+    public Task<string> EditHtmlAsync(string newBody, string newHtmlBody, IList<MatrixId>? mentions = null)
+        => Room.EditHtmlMessageAsync(EventId, newBody, newHtmlBody, mentions);
+
+    /// <summary>
+    /// Redacts (deletes) this message.
+    /// </summary>
+    /// <param name="reason">Optional reason for the redaction</param>
+    /// <returns>The event ID of the redaction event</returns>
+    public Task<string> RedactAsync(string? reason = null)
+        => Room.RedactEventAsync(EventId, reason);
 
     public override string ToString()
     {

@@ -1,0 +1,31 @@
+{
+  "next_batch": "s1_7",
+  "rooms": {
+    "invite": {
+      "!invited_room:example.org": {
+        "invite_state": {
+          "events": [
+            {
+              "type": "m.room.name",
+              "sender": "@inviter:example.org",
+              "state_key": "",
+              "content": {
+                "name": "Invited Room"
+              }
+            },
+            {
+              "type": "m.room.member",
+              "sender": "@inviter:example.org",
+              "state_key": "@testuser:example.org",
+              "content": {
+                "membership": "invite",
+                "displayname": "Test User",
+                "is_direct": false
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

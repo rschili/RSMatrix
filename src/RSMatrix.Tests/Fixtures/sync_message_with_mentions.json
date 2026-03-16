@@ -1,0 +1,27 @@
+{
+  "next_batch": "s1_4",
+  "rooms": {
+    "join": {
+      "!room1:example.org": {
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@alice:example.org",
+              "event_id": "$msg_mention1",
+              "origin_server_ts": 1700000002000,
+              "content": {
+                "msgtype": "m.text",
+                "body": "Hey @bob, check this out!",
+                "m.mentions": {
+                  "user_ids": ["@bob:example.org", "@charlie:example.org"]
+                }
+              }
+            }
+          ],
+          "limited": false
+        }
+      }
+    }
+  }
+}

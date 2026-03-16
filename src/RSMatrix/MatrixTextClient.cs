@@ -23,14 +23,9 @@ public sealed class MatrixTextClient
 
     internal Filter? Filter { get; private set; }
 
-    internal delegate Task SyncReceivedHandler(SyncResponse matrixEvent);
-
     private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.OrdinalIgnoreCase);
 
     private ConcurrentDictionary<string, User> _users = new(StringComparer.OrdinalIgnoreCase);
-
-    public delegate Task MessageHandler(ReceivedTextMessage message);
-
     private Channel<ReceivedTextMessage> MessageChannel { get; set; }
 
     /// <summary>
@@ -41,6 +36,12 @@ public sealed class MatrixTextClient
     public ChannelReader<ReceivedTextMessage> Messages => MessageChannel.Reader;
 
     public bool DebugMode = false;
+
+    /// <summary>
+    /// When true, the client will automatically join rooms when invited.
+    /// Default is false.
+    /// </summary>
+    public bool AutoJoinOnInvite { get; set; } = false;
 
     public bool IsSyncing { get; private set;}
 
@@ -57,6 +58,22 @@ public sealed class MatrixTextClient
         ServerCapabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
         MessageChannel = Channel.CreateUnbounded<ReceivedTextMessage>();
     }
+
+    /// <summary>
+    /// Creates a MatrixTextClient for testing purposes without connecting to a server.
+    /// </summary>
+    internal static MatrixTextClient CreateForTesting(HttpClientParameters parameters, MatrixId userId)
+    {
+        var versions = new List<SpecVersion> { CurrentSpecVersion };
+        var capabilities = new Capabilities();
+        return new MatrixTextClient(parameters, userId, versions, capabilities);
+    }
+
+    /// <summary>
+    /// Exposes HandleSyncResponseAsync for testing.
+    /// </summary>
+    internal Task HandleSyncResponseForTestingAsync(SyncResponse response)
+        => HandleSyncResponseAsync(response);
 
     /// <summary>
     /// Connects to the Matrix server using the provided credentials.
@@ -358,6 +375,14 @@ public sealed class MatrixTextClient
                         }
                     } // foreach joined room
                 } // if joined
+
+                if (response.Rooms.Invites != null)
+                {
+                    foreach (var pair in response.Rooms.Invites)
+                    {
+                        await HandleInviteReceivedAsync(pair.Key, pair.Value).ConfigureAwait(false);
+                    }
+                }
             } // if rooms
 
             if(messages.Count > 0)
@@ -578,11 +603,66 @@ public sealed class MatrixTextClient
         RoomUser? roomUser = GetOrAddUser(user, room);
 
         if (roomUser.DisplayName != roomMember.DisplayName || roomUser.Membership != roomMember.Membership)
-        { //TODO we may want to expose more properties of the room member, respect server timestamp to see which is newer
+        {
             lock (roomUser)
             {
                 roomUser.DisplayName = roomMember.DisplayName;
                 roomUser.Membership = roomMember.Membership;
+            }
+        }
+
+        if (roomMember.IsDirect == true)
+        {
+            lock (room)
+            {
+                room.IsDirect = true;
+            }
+        }
+    }
+
+    private async Task HandleInviteReceivedAsync(string roomIdString, InvitedRoomEvents invitedRoom)
+    {
+        if (!RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
+        {
+            Logger.LogWarning("Received invite for room with invalid ID: {RoomId}", roomIdString);
+            return;
+        }
+
+        var isDirect = false;
+        var inviterUserId = (string?)null;
+
+        if (invitedRoom.InviteState?.Events != null)
+        {
+            foreach (var ev in invitedRoom.InviteState.Events)
+            {
+                if (ev.Type == "m.room.member" && ev.StateKey == CurrentUser.Full)
+                {
+                    var memberEvent = JsonSerializer.Deserialize<RoomMemberEvent>(ev.Content);
+                    if (memberEvent?.IsDirect == true)
+                        isDirect = true;
+                    inviterUserId = ev.Sender;
+                }
+            }
+        }
+
+        Logger.LogInformation("Received invite for room {RoomId} (isDirect: {IsDirect}, inviter: {Inviter})",
+            roomId.Full, isDirect, inviterUserId ?? "unknown");
+
+        if (AutoJoinOnInvite)
+        {
+            try
+            {
+                await MatrixHelper.PostJoinRoomAsync(HttpClientParameters, roomId).ConfigureAwait(false);
+                var room = GetOrAddRoom(roomId);
+                lock (room)
+                {
+                    room.IsDirect = isDirect;
+                }
+                Logger.LogInformation("Auto-joined room {RoomId}", roomId.Full);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to auto-join room {RoomId}", roomId.Full);
             }
         }
     }
@@ -693,7 +773,7 @@ public sealed class MatrixTextClient
             Logger.LogWarning("Received m.room.message event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, roomId.Full);
             return;
         }
-        if (messageEvent.MsgType != "m.text")
+        if (messageEvent.MsgType is not "m.text" and not "m.notice")
         {
             Logger.LogInformation("Ignoring m.room.message event with non-text message type {MsgType} in room {RoomId}.", messageEvent.MsgType, roomId.Full);
             return;
@@ -710,7 +790,7 @@ public sealed class MatrixTextClient
             threadId = messageEvent.RelatesTo.EventId;
         }
 
-        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, e.EventId, serverTs, threadId, this);
+        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, e.EventId, serverTs, threadId, messageEvent.MsgType, this);
         if (messageEvent.Mentions != null && messageEvent.Mentions.UserIds != null && messageEvent.Mentions.UserIds.Count > 0)
         {
             message.Mentions = messageEvent.Mentions.UserIds
@@ -725,17 +805,17 @@ public sealed class MatrixTextClient
         room.LastMessage = message;
     }
 
-    private User GetOrAddUser(MatrixId id)
+    internal User GetOrAddUser(MatrixId id)
     {
         return _users.GetOrAdd(id.Full, (_) => new User(id));
     }
 
-    private Room GetOrAddRoom(MatrixId id)
+    internal Room GetOrAddRoom(MatrixId id)
     {
         return _rooms.GetOrAdd(id.Full, (_) => new Room(id, this));
     }
 
-    private RoomUser GetOrAddUser(User user, Room room)
+    internal RoomUser GetOrAddUser(User user, Room room)
     {
         if(room.Users.TryGetValue(user.UserId.Full, out var roomUser) && roomUser != null)
             {

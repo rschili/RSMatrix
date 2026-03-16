@@ -16,4 +16,8 @@
 		<ProjectReference Include="..\RSMatrix\RSMatrix.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<Content Include="Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+
 </Project>

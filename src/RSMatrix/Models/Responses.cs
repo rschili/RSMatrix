@@ -187,7 +187,7 @@ public class TimelineEventResponse
 public class RoomEvents
 {
     [JsonPropertyName("invite")]
-    public Dictionary<string, JsonElement>? Invites { get; set; }
+    public Dictionary<string, InvitedRoomEvents>? Invites { get; set; }
 
     [JsonPropertyName("join")]
     public Dictionary<string, JoinedRoomEvents>? Joined { get; set; }
@@ -197,6 +197,54 @@ public class RoomEvents
 
     [JsonPropertyName("leave")]
     public Dictionary<string, JsonElement>? Leaves { get; set; }
+}
+
+public class InvitedRoomEvents
+{
+    [JsonPropertyName("invite_state")]
+    public InviteState? InviteState { get; set; }
+}
+
+public class InviteState
+{
+    [JsonPropertyName("events")]
+    public List<StrippedStateEvent>? Events { get; set; }
+}
+
+public class StrippedStateEvent
+{
+    [JsonPropertyName("type")]
+    public required string Type { get; set; }
+
+    [JsonPropertyName("state_key")]
+    public required string StateKey { get; set; }
+
+    [JsonPropertyName("content")]
+    public required JsonElement Content { get; set; }
+
+    [JsonPropertyName("sender")]
+    public required string Sender { get; set; }
+}
+
+public class JoinRoomResponse
+{
+    [JsonPropertyName("room_id")]
+    public required string RoomId { get; set; }
+}
+
+public class MessagesResponse
+{
+    [JsonPropertyName("start")]
+    public required string Start { get; set; }
+
+    [JsonPropertyName("end")]
+    public string? End { get; set; }
+
+    [JsonPropertyName("chunk")]
+    public required List<ClientEvent> Chunk { get; set; }
+
+    [JsonPropertyName("state")]
+    public List<ClientEvent>? State { get; set; }
 }
 
 public class JoinedRoomEvents
