@@ -61,6 +61,21 @@ public class Room
         return response.EventId ?? "";
     }
 
+    /// <summary>
+    /// Sends a reaction (annotation) to the specified event.
+    /// Per the Matrix spec (v1.7+), the key can be any string, though emoji are the typical use case.
+    /// The server will reject duplicate reactions (same event type + key) from the same user
+    /// with M_DUPLICATE_ANNOTATION. To change a reaction, redact the original and send a new one.
+    /// </summary>
+    /// <param name="eventId">The event ID to react to</param>
+    /// <param name="key">The reaction key — any string, typically an emoji like 👍</param>
+    /// <returns>The event ID of the sent reaction</returns>
+    public async Task<string> SendReactionAsync(string eventId, string key)
+    {
+        var response = await MatrixHelper.PutReactionAsync(Client.HttpClientParameters, RoomId, eventId, key).ConfigureAwait(false);
+        return response.EventId ?? "";
+    }
+
     public override string ToString()
     {
         return DisplayName ?? RoomId.Localpart.ToString();

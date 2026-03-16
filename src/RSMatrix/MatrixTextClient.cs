@@ -17,7 +17,7 @@ public sealed class MatrixTextClient
     internal ILogger Logger => HttpClientParameters.Logger;
     public MatrixId CurrentUser { get; }
     internal IList<SpecVersion> SupportedSpecVersions { get; }
-    internal static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 16, null, null);
+    internal static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 17, null, null);
     internal HttpClientParameters HttpClientParameters { get; private set; }
     internal Capabilities ServerCapabilities { get; private set; }
 
@@ -539,9 +539,21 @@ public sealed class MatrixTextClient
                 case "m.room.join_rules":
                 case "m.room.topic":
                 case "m.room.avatar":
+                case "m.room.create":
+                case "m.room.pinned_events":
+                case "m.room.tombstone":
+                case "m.room.retention":
+                case "m.room.related_groups":
+                case "m.room.history_visibility":
+                case "m.room.guest_access":
                     // We don't care about these
                     break;
                 default:
+                    if (e.Type.StartsWith("io.element.") || e.Type.StartsWith("org.matrix.") || e.Type.StartsWith("net.nordeck.") || e.Type.StartsWith("im.vector."))
+                    {
+                        Logger.LogDebug("Ignoring vendor-specific state event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
+                        break;
+                    }
                     Logger.LogWarning("Received unknown state event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
                     break;
             }
@@ -592,6 +604,14 @@ public sealed class MatrixTextClient
                 HandleEncryptedEvent(room, e);
             else if(e.Type == "m.room.member")
                 HandleRoomMemberEvent(room, e);
+            else if(e.Type is "m.room.canonical_alias" or "m.room.name")
+                HandleStateReceived(roomId, [e]); // These state events can also appear in the timeline
+            else if(e.Type is "m.room.power_levels" or "m.room.topic" or "m.room.tombstone"
+                or "m.room.pinned_events" or "m.room.create" or "m.reaction")
+            {
+                // Known event types we don't process yet
+                Logger.LogDebug("Ignoring timeline event type {Type} in room {RoomId}.", e.Type, roomId.Full);
+            }
             else
             {
                 Logger.LogWarning("Received unknown timeline event type in room {RoomId}: {Type}.", roomId.Full, e.Type);

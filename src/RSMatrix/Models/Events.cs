@@ -240,6 +240,32 @@ public class RoomEncryptionEvent
     public required string Algorithm { get; set; }
 }
 
+public class ReactionRelatesTo
+{
+    [JsonPropertyName("rel_type")]
+    public required string RelType { get; set; }
+
+    [JsonPropertyName("event_id")]
+    public required string EventId { get; set; }
+
+    /// <summary>
+    /// The reaction being applied. Per the Matrix spec (v1.7+), this can be any string,
+    /// not just emoji — though emoji are the typical use case.
+    /// If using an emoji, include the unicode emoji presentation selector (\uFE0F)
+    /// for codepoints that support it (see the
+    /// <see href="https://www.unicode.org/Public/UCD/latest/ucd/emoji/emoji-variation-sequences.txt">emoji variation sequences list</see>).
+    /// Clients should take care to render long keys in a sensible manner (e.g. elide overly-long values).
+    /// </summary>
+    [JsonPropertyName("key")]
+    public required string Key { get; set; }
+}
+
+internal class ReactionRequest
+{
+    [JsonPropertyName("m.relates_to")]
+    public required ReactionRelatesTo RelatesTo { get; set; }
+}
+
 public class RoomEncryptedEvent
 {
     [JsonPropertyName("algorithm")]

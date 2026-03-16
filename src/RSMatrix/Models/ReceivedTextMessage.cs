@@ -61,6 +61,17 @@ public class ReceivedTextMessage
     public Task SendHtmlResponseAsync(string body, string htmlBody, bool isReply = false, IList<MatrixId>? mentions = null)
         => Room.SendHtmlMessageAsync(body, htmlBody, isReply ? EventId : null, mentions);
 
+    /// <summary>
+    /// Sends a reaction (annotation) to this message.
+    /// The key can be any string per the spec, but is typically an emoji like 👍.
+    /// The server will reject duplicate reactions (same event type + key) from the same user
+    /// with M_DUPLICATE_ANNOTATION.
+    /// </summary>
+    /// <param name="key">The reaction key — any string, typically an emoji</param>
+    /// <returns>The event ID of the sent reaction</returns>
+    public Task<string> SendReactionAsync(string key)
+        => Room.SendReactionAsync(EventId, key);
+
     public override string ToString()
     {
         var mentionsString = Mentions != null ? string.Join(", ", Mentions) : "None";

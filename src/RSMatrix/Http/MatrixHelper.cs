@@ -159,6 +159,33 @@ public static class MatrixHelper
         await HttpClientHelper.SendAsync(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
+    internal static async Task<MessageResponse> PutReactionAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, string key)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentException.ThrowIfNullOrEmpty(eventId, nameof(eventId));
+        ArgumentException.ThrowIfNullOrEmpty(key, nameof(key));
+
+        var txnIndex = Interlocked.Increment(ref httpClientParameters._txnId);
+        var txnId = $"{DateTimeOffset.Now.ToUnixTimeSeconds()}-{txnIndex}";
+
+        var request = new ReactionRequest
+        {
+            RelatesTo = new ReactionRelatesTo
+            {
+                RelType = "m.annotation",
+                EventId = eventId,
+                Key = key
+            }
+        };
+
+        var content = JsonContent.Create(
+            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
+
+        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/send/m.reaction/{txnId}";
+        return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+    }
+
     internal static async Task<MessageResponse> PutMessageAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessageRequest message)
     {
         //TODO: How to send messages to a thread?
