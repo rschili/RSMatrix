@@ -135,8 +135,11 @@ public static class HttpParameterHelper
         if (parameters == null)
             return path;
 
-        //var formattedParameters = string.Join("&", parameters.Select(kvp => $"{HttpUtility.UrlEncode(kvp.Key)}={HttpUtility.UrlEncode(kvp.Value)}"));
-        var formattedParameters = string.Join("&", parameters.Select(kvp => $"{kvp.Key}={kvp.Value}"));
+        // Keys and values must be percent-encoded, otherwise parameters containing characters
+        // that are reserved in query strings (e.g. '&', '=', '#', '+', ' ') break the request.
+        // Uri.EscapeDataString is used instead of HttpUtility.UrlEncode because the latter
+        // encodes spaces as '+', which is only correct for form data, not for query strings.
+        var formattedParameters = string.Join("&", parameters.Select(kvp => $"{Uri.EscapeDataString(kvp.Key)}={Uri.EscapeDataString(kvp.Value)}"));
         if (string.IsNullOrWhiteSpace(formattedParameters))
             return path;
 
