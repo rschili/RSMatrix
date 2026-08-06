@@ -5,6 +5,19 @@ All notable changes to RSMatrix will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-08-06
+
+### Fixed
+- Query string parameters are now percent-encoded with `Uri.EscapeDataString`. Previously keys
+  and values were interpolated raw, so `since`, `from` and `filter` values containing `&`, `=`,
+  `#`, `+` or spaces produced malformed URLs — parameters got split, the query was truncated at
+  `#`, and `+` arrived at the server as a space. Inline JSON filters were affected in particular.
+  Thanks to @keryx-io (#86).
+
+### Changed
+- Updated dependencies: BouncyCastle.Cryptography 2.6.2 → 2.7.0, Microsoft.Extensions.Http
+  10.0.3 → 10.0.10.
+
 ## [1.3.0] - 2026-03-16
 
 ### Added
