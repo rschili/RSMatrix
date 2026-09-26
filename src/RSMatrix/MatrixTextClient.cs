@@ -31,7 +31,8 @@ public sealed class MatrixTextClient
     /// <summary>
     /// The channel to receive messages from the server.
     /// The channel is unbounded, so it will not block the sender.
-    /// The channel will be closed when the client is disconnected or the sync fails.
+    /// The channel closes on cancellation and faults on a terminal sync error.
+    /// Transient failures are retried with the existing session.
     /// </summary>
     public ChannelReader<ReceivedTextMessage> Messages => MessageChannel.Reader;
 
@@ -81,9 +82,11 @@ public sealed class MatrixTextClient
     /// Use <see cref="Messages" />  to retrieve messages.
     /// </summary>
     /// <remarks>
-    /// The client will continue to sync until cancellation is requested or the sync fails.
-    /// On failed sync, the client will not try to reconnect. Instead, the Messages channel will be closed and the logger will write an error message.
-    /// To reconnect, call ConnectAsync again. Best practice: Retry with increasing delay and a maximum number of retries.
+    /// Rate-limited requests wait for the server's retry delay. Transient failures during
+    /// post-login initialization and sync are retried until cancellation, using the same
+    /// access token and sync position. No session information is written to disk.
+    /// Terminal sync errors fault the Messages channel. Only reauthenticate when needed,
+    /// for example after M_UNKNOWN_TOKEN with soft_logout=true; do not retry bad credentials.
     /// </remarks>
     /// <param name="userId">User id e.g. @user:example.org</param>
     /// <param name="password">password for the user</param>
@@ -94,7 +97,13 @@ public sealed class MatrixTextClient
     /// <returns></returns>
     /// <exception cref="ArgumentException">Provided arguments not valid</exception>
     /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
-    public static async Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
+    public static Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
+        => ConnectAsync(userId, password, deviceId, httpClientFactory, cancellationToken, logger,
+            (delay, token) => Task.Delay(delay, token));
+
+    internal static async Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId,
+        IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger,
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync)
     {
         if (logger == null)
             logger = NullLogger<MatrixTextClient>.Instance;
@@ -130,7 +139,10 @@ public sealed class MatrixTextClient
             throw new ArgumentException("The server address seems invalid, it should be a well formed Uri.", nameof(userId));
         }
         logger.LogInformation("Connecting to {Url}", baseUri);
-        HttpClientParameters httpClientParameters = new(httpClientFactory, baseUri, null, logger, cancellationToken);
+        HttpClientParameters httpClientParameters = new(httpClientFactory, baseUri, null, logger, cancellationToken)
+        {
+            RetryDelayAsync = retryDelayAsync
+        };
         var wkUri = await MatrixHelper.FetchWellKnownUriAsync(httpClientParameters).ConfigureAwait(false);
         if (wkUri.HomeServer == null || string.IsNullOrEmpty(wkUri.HomeServer.BaseUrl))
         {
@@ -186,22 +198,15 @@ public sealed class MatrixTextClient
 
         httpClientParameters.BearerToken = loginResponse.AccessToken;
 
-        var serverCapabilities = await MatrixHelper.FetchCapabilitiesAsync(httpClientParameters).ConfigureAwait(false);
+        // A successful login must not be repeated just because initialization hit a
+        // network error or an unavailable server. Retain this session while retrying.
+        var serverCapabilities = await MatrixRetry.ExecuteAsync(httpClientParameters, "Fetching capabilities",
+            () => MatrixHelper.FetchCapabilitiesAsync(httpClientParameters)).ConfigureAwait(false);
         httpClientParameters.RateLimiter = new LeakyBucket(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
         var client = new MatrixTextClient(httpClientParameters, parsedUserId, parsedVersions, serverCapabilities.Capabilities);
-        await client.InitAsync();
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-            await client.SyncAsync().ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-            logger.LogError(ex, "Error occurred during sync.");
-            }
-        });
+        await MatrixRetry.ExecuteAsync(httpClientParameters, "Initializing Matrix", client.InitAsync).ConfigureAwait(false);
         client.IsSyncing = true;
+        _ = client.SyncAsync();
         return client;
     }
 
@@ -262,9 +267,10 @@ public sealed class MatrixTextClient
             Logger.LogWarning("No filter ID was returned after setting a filter. This should not happen. It won't break the client, but unnecessary events will be received.");
     }
 
-    private async Task SyncAsync()
+    internal async Task SyncAsync()
     {
-        //TODO: Refresh auth token,
+        // Refresh-token support is not advertised by this client. A terminal token
+        // error is surfaced to the caller rather than silently reauthenticating.
         var request = new SyncParameters
         {
             FullState = false,
@@ -273,24 +279,32 @@ public sealed class MatrixTextClient
             Filter = Filter?.FilterId
         };
 
+        Exception? failure = null;
+        IsSyncing = true;
         try
         {
             while (!HttpClientParameters.CancellationToken.IsCancellationRequested)
             {
-                var response = await MatrixHelper.GetSyncAsync(HttpClientParameters, request).ConfigureAwait(false);
-                if (response != null)
-                {
-                    await HandleSyncResponseAsync(response).ConfigureAwait(false);
-                    request.Since = response.NextBatch;
-                }
+                var response = await MatrixRetry.ExecuteAsync(HttpClientParameters, "Matrix sync",
+                    () => MatrixHelper.GetSyncAsync(HttpClientParameters, request)).ConfigureAwait(false);
+                await HandleSyncResponseAsync(response).ConfigureAwait(false);
+                request.Since = response.NextBatch;
             }
+        }
+        catch (OperationCanceledException) when (HttpClientParameters.CancellationToken.IsCancellationRequested)
+        {
+            // Normal shutdown, not a failed connection.
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+            Logger.LogError(ex, "Matrix sync stopped after a terminal error.");
         }
         finally
         {
-        if(!MessageChannel.Writer.TryComplete())
-            Logger.LogError("Sync ended, but failed to complete message channel.");
-
-        IsSyncing = false;
+            IsSyncing = false;
+            if (!MessageChannel.Writer.TryComplete(failure))
+                Logger.LogError("Sync ended, but failed to complete message channel.");
         }
     }
 

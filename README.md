@@ -36,4 +36,3 @@ await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
 ```
 
 Room and user information is cached and updated on the client object. Associated rooms and users are included in the message given to the handler.
-The Messages channel is closed when the client is disconnected through CancellationToken or if a request fails. Consider reconnecting in that case by calling ConnectAsync() again.

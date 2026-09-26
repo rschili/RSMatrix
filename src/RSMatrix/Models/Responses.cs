@@ -8,7 +8,13 @@ public class MatrixErrorResponse
     public required string ErrorCode { get; set; }
 
     [JsonPropertyName("error")]
-    public required string ErrorMessage { get; set; }
+    public string? ErrorMessage { get; set; }
+
+    [JsonPropertyName("retry_after_ms")]
+    public long? RetryAfterMs { get; set; }
+
+    [JsonPropertyName("soft_logout")]
+    public bool SoftLogout { get; set; }
 }
 
 
