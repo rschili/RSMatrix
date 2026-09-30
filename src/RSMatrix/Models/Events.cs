@@ -220,6 +220,10 @@ public class RoomMessageRelatesTo
 
     [JsonPropertyName("m.in_reply_to")] // Sometimes this is not 
     public RoomMessageInReplyTo? InReplyTo { get; set; }
+
+    [JsonPropertyName("is_falling_back")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsFallingBack { get; set; }
 }
 
 public class RoomMessageMention

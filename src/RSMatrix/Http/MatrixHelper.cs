@@ -3,7 +3,6 @@ using RSMatrix.Models;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Web;
 
 namespace RSMatrix.Http;
 /// <summary>
@@ -70,7 +69,7 @@ public static class MatrixHelper
             throw new ArgumentException("User must be a user ID", nameof(user));
         ArgumentNullException.ThrowIfNull(filter);
         var content = JsonContent.Create(filter, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-        string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.Full)}/filter";
+        string path = $"/_matrix/client/v3/user/{Uri.EscapeDataString(user.Full)}/filter";
         return await HttpClientHelper.SendAsync<FilterResponse>(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
@@ -78,7 +77,7 @@ public static class MatrixHelper
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(user);
-        string path = $"/_matrix/client/v3/presence/{HttpUtility.UrlEncode(user.Full)}/status";
+        string path = $"/_matrix/client/v3/presence/{Uri.EscapeDataString(user.Full)}/status";
         return await HttpClientHelper.SendAsync<PresenceResponse>(parameters, path).ConfigureAwait(false);
     }
 
@@ -90,7 +89,7 @@ public static class MatrixHelper
 
         var content = JsonContent.Create(
             presence, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-        string path = $"/_matrix/client/v3/presence/{HttpUtility.UrlEncode(userId.Full)}/status";
+        string path = $"/_matrix/client/v3/presence/{Uri.EscapeDataString(userId.Full)}/status";
         await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
@@ -102,7 +101,7 @@ public static class MatrixHelper
         var receipt = new ReceiptRequest { ThreadId = threadId };
         var content = JsonContent.Create(
             receipt, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-        string path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(room.Full)}/receipt/m.read/{HttpUtility.UrlEncode(eventId)}";
+        string path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(room.Full)}/receipt/m.read/{Uri.EscapeDataString(eventId)}";
         await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
@@ -117,7 +116,7 @@ public static class MatrixHelper
 
         var content = JsonContent.Create(
             request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-        string path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(room.Full)}/read_markers";
+        string path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(room.Full)}/read_markers";
         await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
@@ -130,7 +129,7 @@ public static class MatrixHelper
         if (user.Kind != IdKind.User)
             throw new ArgumentException("User must be a user ID", nameof(user));
         ArgumentException.ThrowIfNullOrEmpty(filterId, nameof(filterId));
-        string path = $"/_matrix/client/v3/user/{HttpUtility.UrlEncode(user.Full)}/filter/{HttpUtility.UrlEncode(filterId)}";
+        string path = $"/_matrix/client/v3/user/{Uri.EscapeDataString(user.Full)}/filter/{Uri.EscapeDataString(filterId)}";
         return await HttpClientHelper.SendAsync<Filter>(parameters, path).ConfigureAwait(false);
     }
 
@@ -155,7 +154,7 @@ public static class MatrixHelper
         var content = JsonContent.Create(
             typingRequest, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
-        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/typing/{HttpUtility.UrlEncode(userId.Full)}";
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/typing/{Uri.EscapeDataString(userId.Full)}";
         await HttpClientHelper.SendAsync(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
@@ -182,7 +181,7 @@ public static class MatrixHelper
         var content = JsonContent.Create(
             request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
-        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/send/m.reaction/{txnId}";
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/send/m.reaction/{txnId}";
         return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
@@ -198,7 +197,7 @@ public static class MatrixHelper
         var content = JsonContent.Create(
             message, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
-        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/send/m.room.message/{txnId}";
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/send/m.room.message/{txnId}";
         return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
@@ -215,7 +214,7 @@ public static class MatrixHelper
         var content = JsonContent.Create(
             request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
-        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/redact/{HttpUtility.UrlEncode(eventId)}/{txnId}";
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/redact/{Uri.EscapeDataString(eventId)}/{txnId}";
         return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
@@ -228,7 +227,7 @@ public static class MatrixHelper
         var content = JsonContent.Create(
             request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
-        var path = $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/join";
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/join";
         return await HttpClientHelper.SendAsync<JoinRoomResponse>(httpClientParameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
@@ -239,7 +238,7 @@ public static class MatrixHelper
         ArgumentNullException.ThrowIfNull(parameters, nameof(parameters));
 
         var path = HttpParameterHelper.AppendParameters(
-            $"/_matrix/client/v3/rooms/{HttpUtility.UrlEncode(roomId.Full)}/messages",
+            $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/messages",
             parameters.GetAsParameters());
 
         return await HttpClientHelper.SendAsync<MessagesResponse>(httpClientParameters, path).ConfigureAwait(false);

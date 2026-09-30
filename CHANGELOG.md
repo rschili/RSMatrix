@@ -5,15 +5,19 @@ All notable changes to RSMatrix will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-09-30
 
 ### Added
 - `Room.StateEvents`: immutable snapshots of observed room state, keyed by event
   type and state key, including space links and arbitrary custom integrations.
 
 ### Fixed
-- Malformed state/message content no longer discards subsequent room events in a
-  sync batch. Raw state is replaced, not merged, including empty-content updates.
+- Reject plaintext messages and edits in rooms with observed encryption, including invites.
+- Support domain-less room IDs, Unicode/IPv6 identifiers and case-sensitive ID caches.
+- URI-escape identifier path segments correctly.
+- Keep responses in their original thread.
+- Isolate malformed sync events and preserve cancellation/delivery failures.
+- Raw state updates replace previous content, including empty-content updates.
 
 ## [1.3.2] - 2026-09-26
 

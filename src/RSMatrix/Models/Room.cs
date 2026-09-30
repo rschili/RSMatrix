@@ -3,6 +3,9 @@ using RSMatrix.Http;
 
 namespace RSMatrix.Models;
 
+/// <summary>A room observed by the client.</summary>
+/// <remarks>Message, notice and edit sends throw <see cref="NotSupportedException"/>
+/// when encryption has been observed; this library cannot encrypt their content.</remarks>
 public class Room
 {
     internal MatrixTextClient Client { get; }
@@ -25,7 +28,7 @@ public class Room
         = ImmutableDictionary<(string Type, string StateKey), RoomStateEvent>.Empty;
 
     // ConcurrentDictionary is expensive, we only use it for the global things. Inside the room we use ImmutableDictionary instead as there is less data and less movement
-    public ImmutableDictionary<string, RoomUser> Users { get; internal set; } = ImmutableDictionary<string, RoomUser>.Empty.WithComparers(StringComparer.OrdinalIgnoreCase);
+    public ImmutableDictionary<string, RoomUser> Users { get; internal set; } = ImmutableDictionary<string, RoomUser>.Empty.WithComparers(StringComparer.Ordinal);
     public string? DisplayName { get; internal set; }
     public MatrixId? CanonicalAlias { get; internal set; }
     public List<MatrixId>? AltAliases { get; internal set; }
@@ -34,7 +37,13 @@ public class Room
 
     public string? LastReceiptEventId { get; internal set; }
     public RoomEncryption? Encryption { get; internal set; }
-    public bool IsEncrypted => Encryption != null;
+    internal bool HasEncryptionState { get; set; }
+
+    /// <summary>
+    /// Whether encryption has been observed, even if its algorithm is unknown or
+    /// its state was cleared. False does not establish safety before room state is synced.
+    /// </summary>
+    public bool IsEncrypted => HasEncryptionState || Encryption != null;
 
     /// <summary>
     /// Whether this room is a direct message room, as indicated by is_direct on the m.room.member event.
@@ -66,17 +75,35 @@ public class Room
     public Task<string> SendHtmlNoticeAsync(string body, string htmlBody, string? inReplyTo, IList<MatrixId>? mentions)
         => SendMessageInternalAsync("m.notice", body, (Format: "org.matrix.custom.html", FormattedBody: htmlBody), inReplyTo, mentions);
 
-    private async Task<string> SendMessageInternalAsync(string msgType, string body, (string Format, string FormattedBody)? formatted, string? inReplyTo, IList<MatrixId>? mentions)
+    private Task<string> SendMessageInternalAsync(string msgType, string body, (string Format, string FormattedBody)? formatted, string? inReplyTo, IList<MatrixId>? mentions)
+        => SendMessageInternalAsync(msgType, body, formatted, inReplyTo, mentions, null, null);
+
+    internal async Task<string> SendMessageInternalAsync(string msgType, string body, (string Format, string FormattedBody)? formatted,
+        string? inReplyTo, IList<MatrixId>? mentions, string? threadRootId, string? threadFallbackEventId)
     {
+        EnsurePlaintextAllowed();
         RoomMessageMention? roomMessageMention = null;
         if (mentions != null)
         {
             roomMessageMention = new RoomMessageMention { UserIds = mentions.Select(m => m.Full).ToList() };
         }
         RoomMessageRelatesTo? relatesTo = null;
-        if (inReplyTo != null)
+        if (threadRootId != null)
         {
-            relatesTo = new RoomMessageRelatesTo { InReplyTo = new RoomMessageInReplyTo() { EventId = inReplyTo } };
+            relatesTo = new RoomMessageRelatesTo
+            {
+                RelType = "m.thread",
+                EventId = threadRootId,
+                IsFallingBack = inReplyTo == null
+            };
+        }
+
+        // A thread continuation uses the received event as its fallback, not as the thread root.
+        var replyTarget = inReplyTo ?? (threadRootId != null ? threadFallbackEventId : null);
+        if (replyTarget != null)
+        {
+            relatesTo ??= new RoomMessageRelatesTo();
+            relatesTo.InReplyTo = new RoomMessageInReplyTo { EventId = replyTarget };
         }
 
         var messageRequest = new MessageRequest { MsgType = msgType, Body = body, Mentions = roomMessageMention, RelatesTo = relatesTo };
@@ -109,6 +136,7 @@ public class Room
     private async Task<string> EditMessageInternalAsync(string originalEventId, string msgType, string newBody,
         (string Format, string FormattedBody)? formatted, IList<MatrixId>? mentions)
     {
+        EnsurePlaintextAllowed();
         RoomMessageMention? roomMessageMention = null;
         if (mentions != null)
         {
@@ -214,6 +242,14 @@ public class Room
         }
 
         return new MessageHistoryResult { Messages = messages, NextToken = response.End };
+    }
+
+    private void EnsurePlaintextAllowed()
+    {
+        // A caller can construct another Room wrapper; do not let that bypass the
+        // encryption state already known by the client's canonical room cache.
+        if (IsEncrypted || Client.IsRoomEncrypted(RoomId))
+            throw new NotSupportedException($"Cannot send plaintext messages to encrypted room {RoomId.Full}: end-to-end encryption is not supported.");
     }
 
     public override string ToString()

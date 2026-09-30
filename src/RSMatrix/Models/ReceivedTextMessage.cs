@@ -48,36 +48,38 @@ public class ReceivedTextMessage
     }
 
     /// <summary>
-    /// Sends a text response to the room.
+    /// Sends a text response, keeping it in this message's thread when present.
     /// </summary>
     /// <param name="body">The message body</param>
-    /// <param name="isReply">True, to set the relation to this message</param>
+    /// <param name="isReply">True for an explicit reply; false continues the thread or sends to the room</param>
     /// <param name="mentions">Optional user mentions</param>
     /// <returns>The event ID of the sent message</returns>
     public Task<string> SendResponseAsync(string body, bool isReply = false, IList<MatrixId>? mentions = null)
-        => Room.SendTextMessageAsync(body, isReply ? EventId : null, mentions);
+        => Room.SendMessageInternalAsync("m.text", body, null, isReply ? EventId : null, mentions, ThreadId, EventId);
 
     /// <summary>
-    /// Sends an HTML response to the room.
+    /// Sends an HTML response, keeping it in this message's thread when present.
     /// </summary>
     /// <returns>The event ID of the sent message</returns>
     public Task<string> SendHtmlResponseAsync(string body, string htmlBody, bool isReply = false, IList<MatrixId>? mentions = null)
-        => Room.SendHtmlMessageAsync(body, htmlBody, isReply ? EventId : null, mentions);
+        => Room.SendMessageInternalAsync("m.text", body, (Format: "org.matrix.custom.html", FormattedBody: htmlBody),
+            isReply ? EventId : null, mentions, ThreadId, EventId);
 
     /// <summary>
-    /// Sends a notice (bot message) response to the room.
+    /// Sends a notice (bot message) response, keeping it in this message's thread when present.
     /// Per the Matrix spec, m.notice should be used for automated messages to avoid notification loops.
     /// </summary>
     /// <returns>The event ID of the sent message</returns>
     public Task<string> SendNoticeResponseAsync(string body, bool isReply = false, IList<MatrixId>? mentions = null)
-        => Room.SendNoticeAsync(body, isReply ? EventId : null, mentions);
+        => Room.SendMessageInternalAsync("m.notice", body, null, isReply ? EventId : null, mentions, ThreadId, EventId);
 
     /// <summary>
-    /// Sends an HTML notice (bot message) response to the room.
+    /// Sends an HTML notice (bot message) response, keeping it in this message's thread when present.
     /// </summary>
     /// <returns>The event ID of the sent message</returns>
     public Task<string> SendHtmlNoticeResponseAsync(string body, string htmlBody, bool isReply = false, IList<MatrixId>? mentions = null)
-        => Room.SendHtmlNoticeAsync(body, htmlBody, isReply ? EventId : null, mentions);
+        => Room.SendMessageInternalAsync("m.notice", body, (Format: "org.matrix.custom.html", FormattedBody: htmlBody),
+            isReply ? EventId : null, mentions, ThreadId, EventId);
 
     /// <summary>
     /// Sends a reaction (annotation) to this message.

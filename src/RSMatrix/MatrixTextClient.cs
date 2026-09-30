@@ -23,9 +23,9 @@ public sealed class MatrixTextClient
 
     internal Filter? Filter { get; private set; }
 
-    private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.OrdinalIgnoreCase);
+    private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
 
-    private ConcurrentDictionary<string, User> _users = new(StringComparer.OrdinalIgnoreCase);
+    private ConcurrentDictionary<string, User> _users = new(StringComparer.Ordinal);
     private Channel<ReceivedTextMessage> MessageChannel { get; set; }
 
     /// <summary>
@@ -341,107 +341,85 @@ public sealed class MatrixTextClient
         if (response == null)
             return;
 
-        if(DebugMode)
+        var cancellationToken = HttpClientParameters.CancellationToken;
+        cancellationToken.ThrowIfCancellationRequested();
+        if (DebugMode)
             await WriteSyncResponseToFileAsync(response).ConfigureAwait(false);
 
         List<ReceivedTextMessage> messages = new();
+        if (response.AccountData?.Events is { } accountData)
+            HandleAccountDataReceived(null, accountData);
+        if (response.Presence?.Events is { } presence)
+            HandlePresenceReceived(presence);
 
-        try
+        if (response.Rooms?.Joined is { } joined)
         {
-            if (response.AccountData != null && response.AccountData.Events != null)
+            foreach (var pair in joined)
             {
-                HandleAccountDataReceived(null, response.AccountData.Events);
-            }
-
-            if (response.Presence != null && response.Presence.Events != null)
-            {
-                HandlePresenceReceived(response.Presence.Events);
-            }
-
-            if (response.Rooms != null)
-            {
-                if (response.Rooms.Joined != null)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!RoomId.TryParse(pair.Key, out var roomId) || roomId == null || pair.Value == null)
                 {
-                    foreach (var pair in response.Rooms.Joined)
-                    {
-                        var roomIdString = pair.Key;
-                        if (!RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
-                        {
-                            Logger.LogWarning("Received joined room event with invalid room ID: {roomId}", roomIdString);
-                            continue;
-                        }
-
-                        if(pair.Value.Summary != null)
-                            HandleRoomSummaryReceived(roomId, pair.Value.Summary);
-
-                        if(pair.Value.AccountData != null && pair.Value.AccountData.Events != null)
-                            HandleAccountDataReceived(roomId, pair.Value.AccountData.Events);
-
-                        if(pair.Value.Ephemeral != null && pair.Value.Ephemeral.Events != null)
-                            HandleEphemeralReceived(roomId, pair.Value.Ephemeral.Events);
-
-                        if(pair.Value.State != null && pair.Value.State.Events != null)
-                            HandleStateReceived(roomId, pair.Value.State.Events);
-
-                        if(pair.Value.Timeline != null && pair.Value.Timeline.Events != null)
-                        {
-                            HandleTimelineReceived(roomId, pair.Value.Timeline.Events, messages);
-                        }
-                    } // foreach joined room
-                } // if joined
-
-                if (response.Rooms.Invites != null)
-                {
-                    foreach (var pair in response.Rooms.Invites)
-                    {
-                        await HandleInviteReceivedAsync(pair.Key, pair.Value).ConfigureAwait(false);
-                    }
-                }
-            } // if rooms
-
-            if(messages.Count > 0)
-            {
-                foreach(var message in messages)
-                {
-                    try
-                    {
-                        await MessageChannel.Writer.WriteAsync(message, HttpClientParameters.CancellationToken).ConfigureAwait(false);
-                    }
-                    catch(TaskCanceledException)
-                    {
-                        throw;
-                    }
-                    catch(Exception ex)
-                    {
-                        Logger.LogError(ex, "Error during handling of message {MessageId}.", message.Body);
-                    }
-                }
-            }
-
-            // process receipts
-            foreach(var room in _rooms.Values)
-            {
-                if(room.LastMessage == null)
+                    Logger.LogWarning("Received invalid joined room entry: {RoomId}", pair.Key);
                     continue;
-
-                if(room.LastMessage.EventId != room.LastReceiptEventId)
-                {
-                    if(_receiptRateLimiter.Leak())
-                    { // This is not thread safe, we may mix receipts, but that's not a big deal
-                        await room.LastMessage.SendReceiptAsync().ConfigureAwait(false);
-                        room.LastReceiptEventId = room.LastMessage.EventId;
-                    }
                 }
+
+                var roomEvents = pair.Value;
+                if (roomEvents.Summary != null)
+                    HandleRoomSummaryReceived(roomId, roomEvents.Summary);
+                if (roomEvents.AccountData?.Events is { } roomAccountData)
+                    HandleAccountDataReceived(roomId, roomAccountData);
+                if (roomEvents.Ephemeral?.Events is { } ephemeral)
+                    HandleEphemeralReceived(roomId, ephemeral);
+                if (roomEvents.State?.Events is { } state)
+                    HandleStateReceived(roomId, state);
+                if (roomEvents.Timeline?.Events is { } timeline)
+                    HandleTimelineReceived(roomId, timeline, messages);
             }
         }
-        catch(TaskCanceledException)
+
+        // Stripped invite state can already tell us that a room is encrypted.
+        // Record it before delivering messages or making optional join requests.
+        if (response.Rooms?.Invites is { } inviteState)
         {
-            Logger.LogInformation("Sync was cancelled.");
-            throw;
+            foreach (var pair in inviteState)
+                HandleInviteEncryptionState(pair.Key, pair.Value);
         }
-        catch(Exception ex)
-        { // we only allow TaskCanceledException to bubble up
-            Logger.LogError(ex, "Error during handling of message.");
+
+        // Malformed events are skipped at their own boundary. Delivery failures or
+        // unexpected processing errors must propagate, not advance the sync token.
+        foreach (var message in messages)
+            await MessageChannel.Writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+
+        // Optional HTTP side effects cannot discard messages already collected.
+        if (response.Rooms?.Invites is { } invites)
+        {
+            foreach (var pair in invites)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await HandleInviteReceivedAsync(pair.Key, pair.Value).ConfigureAwait(false);
+            }
+        }
+
+        foreach (var room in _rooms.Values)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var message = room.LastMessage;
+            if (message == null || message.EventId == room.LastReceiptEventId || !_receiptRateLimiter.Leak())
+                continue;
+
+            try
+            {
+                await message.SendReceiptAsync().ConfigureAwait(false);
+                room.LastReceiptEventId = message.EventId;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or MatrixResponseException or JsonException or OperationCanceledException)
+            {
+                Logger.LogWarning(ex, "Failed to send read marker in room {RoomId}.", room.RoomId.Full);
+            }
         }
     }
 
@@ -470,15 +448,20 @@ public sealed class MatrixTextClient
         ArgumentNullException.ThrowIfNull(events, nameof(events));
         foreach(var ev in events)
         {
+            if (ev == null)
+            {
+                Logger.LogWarning("Received null presence event.");
+                continue;
+            }
             if(ev.Type != "m.presence")
             {
                 Logger.LogWarning("Received event of type {Type} in presence events.", ev.Type);
                 continue;
             }
 
-            if(ev.Content == null)
+            if (ev.Content is not { ValueKind: JsonValueKind.Object })
             {
-                Logger.LogWarning("Received presence event with no content.");
+                Logger.LogWarning("Received presence event without object content.");
                 continue;
             }
 
@@ -490,8 +473,17 @@ public sealed class MatrixTextClient
             }
             var user = GetOrAddUser(userId);
 
-            var parsedPresence = JsonSerializer.Deserialize<PresenceEvent>((JsonElement)ev.Content);
-            if(parsedPresence == null)
+            PresenceEvent? parsedPresence;
+            try
+            {
+                parsedPresence = JsonSerializer.Deserialize<PresenceEvent>(ev.Content.Value);
+            }
+            catch (JsonException ex)
+            {
+                Logger.LogWarning(ex, "Could not interpret presence event from {Sender}.", ev.Sender);
+                continue;
+            }
+            if (parsedPresence == null || !Enum.IsDefined(parsedPresence.Presence))
             {
                 Logger.LogWarning("Received presence event with no valid content.");
                 continue;
@@ -524,7 +516,7 @@ public sealed class MatrixTextClient
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(events, nameof(events));
-        foreach(var e in events.Where(ev => ev.Type != "m.typing" && ev.Type != "m.receipt"))
+        foreach(var e in events.Where(ev => ev != null && ev.Type != "m.typing" && ev.Type != "m.receipt"))
         {
             // Just track these for now. We are not interested in typing and receipt events
             Logger.LogWarning("Received unknown Ephemeral event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
@@ -540,10 +532,17 @@ public sealed class MatrixTextClient
 
         foreach (var e in events)
         {
-            if (e.StateKey == null || string.IsNullOrEmpty(e.Type) ||
+            // Encryption cannot be disabled by clearing/redacting its content or
+            // by advertising an algorithm this text-only client cannot interpret.
+            if (e?.Type == "m.room.encryption" && e.StateKey == "")
+            {
+                lock (room)
+                    room.HasEncryptionState = true;
+            }
+            if (e == null || e.StateKey == null || string.IsNullOrEmpty(e.Type) ||
                 e.Content is not { ValueKind: JsonValueKind.Object })
             {
-                Logger.LogWarning("Received malformed state event in room {RoomId}. Type {Type}", roomId.Full, e.Type);
+                Logger.LogWarning("Received malformed state event in room {RoomId}. Type {Type}", roomId.Full, e?.Type);
                 continue;
             }
 
@@ -598,7 +597,8 @@ public sealed class MatrixTextClient
                 }
                 break;
             case "m.room.encryption":
-                HandleRoomEncryptionEvent(room, e);
+                if (e.StateKey == "")
+                    HandleRoomEncryptionEvent(room, e.Content);
                 break;
             case "m.room.power_levels":
             case "m.room.join_rules":
@@ -624,9 +624,9 @@ public sealed class MatrixTextClient
     private void HandleRoomMemberEvent(Room room, ClientEventWithoutRoomID e)
     {
         var roomMember = JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content!);
-        if (roomMember == null)
+        if (roomMember == null || !Enum.IsDefined(roomMember.Membership))
         {
-            Logger.LogWarning("Received m.room.member event deserialize returned null in room {RoomId}.", room.RoomId.Full);
+            Logger.LogWarning("Received invalid m.room.member content in room {RoomId}.", room.RoomId.Full);
             return;
         }
         var userIdStr = e.StateKey ?? e.Sender;
@@ -656,9 +656,34 @@ public sealed class MatrixTextClient
         }
     }
 
-    private async Task HandleInviteReceivedAsync(string roomIdString, InvitedRoomEvents invitedRoom)
+    private void HandleInviteEncryptionState(string roomIdString, InvitedRoomEvents? invitedRoom)
     {
-        if (!RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
+        if (invitedRoom?.InviteState?.Events is not { } events ||
+            !RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
+            return;
+
+        foreach (var ev in events)
+        {
+            if (ev?.Type != "m.room.encryption" || ev.StateKey != "")
+                continue;
+
+            var room = GetOrAddRoom(roomId);
+            lock (room)
+                room.HasEncryptionState = true;
+            try
+            {
+                HandleRoomEncryptionEvent(room, ev.Content);
+            }
+            catch (JsonException ex)
+            {
+                Logger.LogWarning(ex, "Could not interpret encryption invite state in room {RoomId}.", roomId.Full);
+            }
+        }
+    }
+
+    private async Task HandleInviteReceivedAsync(string roomIdString, InvitedRoomEvents? invitedRoom)
+    {
+        if (invitedRoom == null || !RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
         {
             Logger.LogWarning("Received invite for room with invalid ID: {RoomId}", roomIdString);
             return;
@@ -671,12 +696,19 @@ public sealed class MatrixTextClient
         {
             foreach (var ev in invitedRoom.InviteState.Events)
             {
-                if (ev.Type == "m.room.member" && ev.StateKey == CurrentUser.Full)
+                if (ev?.Type == "m.room.member" && ev.StateKey == CurrentUser.Full)
                 {
-                    var memberEvent = JsonSerializer.Deserialize<RoomMemberEvent>(ev.Content);
-                    if (memberEvent?.IsDirect == true)
-                        isDirect = true;
-                    inviterUserId = ev.Sender;
+                    try
+                    {
+                        var memberEvent = JsonSerializer.Deserialize<RoomMemberEvent>(ev.Content);
+                        if (memberEvent?.IsDirect == true)
+                            isDirect = true;
+                        inviterUserId = ev.Sender;
+                    }
+                    catch (JsonException ex)
+                    {
+                        Logger.LogWarning(ex, "Could not interpret invite state in room {RoomId}.", roomId.Full);
+                    }
                 }
             }
         }
@@ -696,7 +728,11 @@ public sealed class MatrixTextClient
                 }
                 Logger.LogInformation("Auto-joined room {RoomId}", roomId.Full);
             }
-            catch (Exception ex)
+            catch (OperationCanceledException) when (HttpClientParameters.CancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or MatrixResponseException or JsonException or OperationCanceledException)
             {
                 Logger.LogError(ex, "Failed to auto-join room {RoomId}", roomId.Full);
             }
@@ -712,6 +748,11 @@ public sealed class MatrixTextClient
 
         foreach (var e in events)
         {
+            if (e == null)
+            {
+                Logger.LogWarning("Received null timeline event in room {RoomId}.", roomId.Full);
+                continue;
+            }
             try
             {
                 // The presence of state_key (including "") identifies state, not
@@ -759,31 +800,33 @@ public sealed class MatrixTextClient
         // TODO handle ciphertext
     }
 
-    private void HandleRoomEncryptionEvent(Room room, ClientEventWithoutRoomID e)
+    private void HandleRoomEncryptionEvent(Room room, JsonElement? content)
     {
-        if(e.Content == null)
+        if (content is not { ValueKind: JsonValueKind.Object })
         {
-            Logger.LogWarning("Received m.room.encryption event with no content in room {RoomId}.", room.RoomId.Full);
+            Logger.LogWarning("Received encryption state without object content in room {RoomId}.", room.RoomId.Full);
             return;
         }
 
-        var encryptionEvent = JsonSerializer.Deserialize<RoomEncryptionEvent>((JsonElement)e.Content);
+        var encryptionEvent = JsonSerializer.Deserialize<RoomEncryptionEvent>(content.Value);
         if(encryptionEvent == null)
         {
             Logger.LogWarning("Received m.room.encryption event deserialize returned null in room {RoomId}.", room.RoomId.Full);
             return;
         }
 
-        if(encryptionEvent.Algorithm != "m.megolm.v1.aes-sha2")
+        if (string.IsNullOrWhiteSpace(encryptionEvent.Algorithm))
         {
-            Logger.LogWarning("Received m.room.encryption event with unknown algorithm {Algorithm} in room {RoomId}.", encryptionEvent.Algorithm, room.RoomId.Full);
+            Logger.LogWarning("Received encryption state without an algorithm in room {RoomId}.", room.RoomId.Full);
             return;
         }
 
-        lock(room)
+        lock (room)
         {
             room.Encryption = new RoomEncryption(encryptionEvent.Algorithm);
         }
+        if (encryptionEvent.Algorithm != "m.megolm.v1.aes-sha2")
+            Logger.LogWarning("Received unknown encryption algorithm {Algorithm} in room {RoomId}.", encryptionEvent.Algorithm, room.RoomId.Full);
     }
 
     private void HandleMessageReceived(MatrixId roomId, List<ReceivedTextMessage> messages, Room room, ClientEventWithoutRoomID e)
@@ -848,6 +891,9 @@ public sealed class MatrixTextClient
         return _rooms.GetOrAdd(id.Full, (_) => new Room(id, this));
     }
 
+    internal bool IsRoomEncrypted(MatrixId id)
+        => _rooms.TryGetValue(id.Full, out var room) && room.IsEncrypted;
+
     internal RoomUser GetOrAddUser(User user, Room room)
     {
         if(room.Users.TryGetValue(user.UserId.Full, out var roomUser) && roomUser != null)
@@ -872,7 +918,7 @@ public sealed class MatrixTextClient
         // Sadly, we don't have any account data events we're interested in
         foreach(var ev in accountData)
         {
-            Logger.LogDebug("Received account data event: {Event} in Room {Room}", ev.Type, roomId?.Full ?? "(global)");
+            Logger.LogDebug("Received account data event: {Event} in Room {Room}", ev?.Type, roomId?.Full ?? "(global)");
         }
     }
 }
