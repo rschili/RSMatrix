@@ -1,0 +1,51 @@
+# Local, disposable integration-test server ONLY. Never deploy this configuration.
+server_name: localhost
+# The lifecycle script substitutes the actual loopback address/host port.
+public_baseurl: http://localhost:8008/
+serve_client_wellknown: true
+report_stats: false
+
+listeners:
+  - port: 8008
+    type: http
+    tls: false
+    bind_addresses: ['0.0.0.0']
+    resources:
+      - names: [client]
+        compress: false
+
+# All state lives on the container's /data tmpfs, including generated keys.
+database:
+  name: sqlite3
+  args:
+    database: /data/homeserver.db
+media_store_path: /data/media_store
+signing_key_path: /data/localhost.signing.key
+pid_file: /data/homeserver.pid
+
+# No public signup: the lifecycle script provisions two non-admin test users.
+enable_registration: false
+registration_shared_secret: rsmatrix-local-test-registration-only
+macaroon_secret_key: rsmatrix-local-test-macaroon-only
+form_secret: rsmatrix-local-test-form-only
+
+# This server must not participate in federation or fetch remote previews/keys.
+federation_domain_whitelist: []
+trusted_key_servers: []
+url_preview_enabled: false
+
+# Avoid throttling repeated local test runs. These are NOT production limits.
+rc_login:
+  address: {per_second: 1000, burst_count: 1000}
+  account: {per_second: 1000, burst_count: 1000}
+  failed_attempts: {per_second: 1000, burst_count: 1000}
+rc_message: {per_second: 1000, burst_count: 1000}
+rc_registration: {per_second: 1000, burst_count: 1000}
+rc_joins:
+  local: {per_second: 1000, burst_count: 1000}
+  remote: {per_second: 1000, burst_count: 1000}
+rc_joins_per_room: {per_second: 1000, burst_count: 1000}
+rc_invites:
+  per_room: {per_second: 1000, burst_count: 1000}
+  per_user: {per_second: 1000, burst_count: 1000}
+  per_issuer: {per_second: 1000, burst_count: 1000}

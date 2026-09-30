@@ -36,3 +36,26 @@ await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
 ```
 
 Room and user information is cached and updated on the client object. Associated rooms and users are included in the message given to the handler.
+
+## Testing
+
+`make test` runs the server-free unit tests used by CI.
+
+For opt-in tests against a disposable local Synapse homeserver (requires Podman):
+
+```sh
+make test-integration-disposable  # start, test, and remove automatically
+```
+
+Or keep the server running while developing:
+
+```sh
+make matrix-up
+make test-integration
+make matrix-down               # removes the server and all its data
+```
+
+See [local homeserver notes](src/RSMatrix.IntegrationTests/Homeserver/README.md)
+for prerequisites and lifecycle caveats. The integration project is built with
+the solution, but CI still runs only the unit-test project. Live tests skip when
+`RSMATRIX_INTEGRATION_URL` is unset; the Make targets above set it automatically.

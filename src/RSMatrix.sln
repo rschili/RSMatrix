@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RSMatrix.Console", "RSMatri
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RSMatrix.Tests", "RSMatrix.Tests\RSMatrix.Tests.csproj", "{A893D334-35A8-4EAA-9E5E-EE2AEFDFA28E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RSMatrix.IntegrationTests", "RSMatrix.IntegrationTests\RSMatrix.IntegrationTests.csproj", "{D5C0AFD5-6723-48EA-B3F2-5BBE5FCB5A6D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,10 @@ Global
 		{A893D334-35A8-4EAA-9E5E-EE2AEFDFA28E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A893D334-35A8-4EAA-9E5E-EE2AEFDFA28E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A893D334-35A8-4EAA-9E5E-EE2AEFDFA28E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D5C0AFD5-6723-48EA-B3F2-5BBE5FCB5A6D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D5C0AFD5-6723-48EA-B3F2-5BBE5FCB5A6D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D5C0AFD5-6723-48EA-B3F2-5BBE5FCB5A6D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D5C0AFD5-6723-48EA-B3F2-5BBE5FCB5A6D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
