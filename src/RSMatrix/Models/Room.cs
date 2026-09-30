@@ -14,6 +14,16 @@ public class Room
 
     public MatrixId RoomId { get; }
 
+    /// <summary>
+    /// Latest observed state events, keyed by (type, state_key), including custom
+    /// events such as uk.half-shot.matrix-hookshot.feed and m.space.parent.
+    /// This is a filtered, lazily populated snapshot, not the room's complete state
+    /// or an event history. Empty content replaces previous content, it is not merged.
+    /// Space parent declarations are not verified hierarchy/permission relationships.
+    /// </summary>
+    public ImmutableDictionary<(string Type, string StateKey), RoomStateEvent> StateEvents { get; internal set; }
+        = ImmutableDictionary<(string Type, string StateKey), RoomStateEvent>.Empty;
+
     // ConcurrentDictionary is expensive, we only use it for the global things. Inside the room we use ImmutableDictionary instead as there is less data and less movement
     public ImmutableDictionary<string, RoomUser> Users { get; internal set; } = ImmutableDictionary<string, RoomUser>.Empty.WithComparers(StringComparer.OrdinalIgnoreCase);
     public string? DisplayName { get; internal set; }

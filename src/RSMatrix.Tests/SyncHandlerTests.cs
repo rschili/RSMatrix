@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -19,7 +20,8 @@ public class SyncHandlerTests
     public SyncHandlerTests()
     {
         var httpClientFactoryMock = new Mock<IHttpClientFactory>();
-        httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
+        httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>()))
+            .Returns(() => new HttpClient(new ReceiptHandler()));
         var parameters = new HttpClientParameters(
             httpClientFactoryMock.Object,
             "https://example.org",
@@ -372,6 +374,14 @@ public class SyncHandlerTests
         var messages = await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
         await Assert.That(messages[0].Sender.User.Presence).IsEqualTo(Presence.Online);
         await Assert.That(messages[0].Sender.User.StatusMessage).IsEqualTo("Working on tests");
+    }
+
+    // Sync processing sends read markers. Keep fixture tests entirely offline,
+    // and return a fresh client because the production HTTP helper disposes it.
+    private sealed class ReceiptHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
     }
 
     private static MatrixId ParseUserId(string input)

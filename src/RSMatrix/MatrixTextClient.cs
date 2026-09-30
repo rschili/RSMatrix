@@ -538,64 +538,86 @@ public sealed class MatrixTextClient
         ArgumentNullException.ThrowIfNull(events, nameof(events));
         var room = GetOrAddRoom(roomId);
 
-        foreach(var e in events)
+        foreach (var e in events)
         {
-            if(e.Content == null)
+            if (e.StateKey == null || string.IsNullOrEmpty(e.Type) ||
+                e.Content is not { ValueKind: JsonValueKind.Object })
             {
-                Logger.LogWarning("Received state event with no content in room {RoomId}. Type {Type}", roomId.Full, e.Type);
+                Logger.LogWarning("Received malformed state event in room {RoomId}. Type {Type}", roomId.Full, e.Type);
                 continue;
             }
-            switch(e.Type)
+
+            var stateEvent = new RoomStateEvent(e);
+            lock (room)
             {
-                case "m.room.member":
-                    HandleRoomMemberEvent(room, e);
-                    break;
-                case "m.room.name":
-                    var nameEvent = JsonSerializer.Deserialize<RoomNameEvent>((JsonElement)e.Content);
-                    if(nameEvent == null)
-                    {
-                        Logger.LogWarning("Received m.room.name event deserialize returned null in room {RoomId}.", roomId.Full);
-                        break;
-                    }
-                    
-                    lock(room)
-                    {
-                        room.DisplayName = nameEvent.Name;
-                    }
-                    break;
-                case "m.room.canonical_alias":
-                    var parsed = JsonSerializer.Deserialize<CanonicalAliasEvent>((JsonElement)e.Content);
-                    RoomAlias.TryParse(parsed?.Alias, out MatrixId? alias);
-                    var altAliases = parsed?.AltAliases?.Select(a => RoomAlias.TryParse(a, out MatrixId? id) ? id : null).Where(id => id != null).Select(id => id!).ToList();
-                    lock(room)
-                    {
-                        room.CanonicalAlias = alias;
-                        if(altAliases != null)
-                            room.AltAliases = room.AltAliases?.Union(altAliases).ToList() ?? altAliases;
-                    }
-                    break;
-                case "m.room.power_levels":
-                case "m.room.join_rules":
-                case "m.room.topic":
-                case "m.room.avatar":
-                case "m.room.create":
-                case "m.room.pinned_events":
-                case "m.room.tombstone":
-                case "m.room.retention":
-                case "m.room.related_groups":
-                case "m.room.history_visibility":
-                case "m.room.guest_access":
-                    // We don't care about these
-                    break;
-                default:
-                    if (e.Type.StartsWith("io.element.") || e.Type.StartsWith("org.matrix.") || e.Type.StartsWith("net.nordeck.") || e.Type.StartsWith("im.vector."))
-                    {
-                        Logger.LogDebug("Ignoring vendor-specific state event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
-                        break;
-                    }
-                    Logger.LogWarning("Received unknown state event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
-                    break;
+                room.StateEvents = room.StateEvents.SetItem((e.Type, e.StateKey), stateEvent);
             }
+
+            try
+            {
+                ApplyStateEvent(room, e);
+            }
+            catch (JsonException ex)
+            {
+                // One malformed/redacted event must not discard the rest of the sync.
+                Logger.LogWarning(ex, "Could not interpret state event {Type} in room {RoomId}.", e.Type, roomId.Full);
+            }
+        }
+    }
+
+    private void ApplyStateEvent(Room room, ClientEventWithoutRoomID e)
+    {
+        var roomId = room.RoomId;
+        switch (e.Type)
+        {
+            case "m.room.member":
+                HandleRoomMemberEvent(room, e);
+                break;
+            case "m.room.name":
+                var nameEvent = JsonSerializer.Deserialize<RoomNameEvent>(e.Content!.Value);
+                if (nameEvent == null)
+                {
+                    Logger.LogWarning("Received m.room.name event deserialize returned null in room {RoomId}.", roomId.Full);
+                    break;
+                }
+
+                lock (room)
+                {
+                    room.DisplayName = nameEvent.Name;
+                }
+                break;
+            case "m.room.canonical_alias":
+                var parsed = JsonSerializer.Deserialize<CanonicalAliasEvent>(e.Content!.Value);
+                RoomAlias.TryParse(parsed?.Alias, out MatrixId? alias);
+                var altAliases = parsed?.AltAliases?.Select(a => RoomAlias.TryParse(a, out MatrixId? id) ? id : null).Where(id => id != null).Select(id => id!).ToList();
+                lock (room)
+                {
+                    room.CanonicalAlias = alias;
+                    if (altAliases != null)
+                        room.AltAliases = room.AltAliases?.Union(altAliases).ToList() ?? altAliases;
+                }
+                break;
+            case "m.room.encryption":
+                HandleRoomEncryptionEvent(room, e);
+                break;
+            case "m.room.power_levels":
+            case "m.room.join_rules":
+            case "m.room.topic":
+            case "m.room.avatar":
+            case "m.room.create":
+            case "m.room.pinned_events":
+            case "m.room.tombstone":
+            case "m.room.retention":
+            case "m.room.related_groups":
+            case "m.room.history_visibility":
+            case "m.room.guest_access":
+                // Retained as raw state, but not projected onto other Room properties.
+                break;
+            default:
+                // Custom and future event types are normal in Matrix. Preserve
+                // their content without requiring a built-in model or vendor allowlist.
+                Logger.LogDebug("Retained unhandled state event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
+                break;
         }
     }
 
@@ -688,27 +710,24 @@ public sealed class MatrixTextClient
         ArgumentNullException.ThrowIfNull(messages, nameof(messages));
         var room = GetOrAddRoom(roomId);
 
-        foreach(var e in events)
+        foreach (var e in events)
         {
-            if(e.Type == "m.room.message")
-                HandleMessageReceived(roomId, messages, room, e);
-            else if(e.Type == "m.room.encryption")
-                HandleRoomEncryptionEvent(room, e);
-            else if(e.Type == "m.room.encrypted")
-                HandleEncryptedEvent(room, e);
-            else if(e.Type == "m.room.member")
-                HandleRoomMemberEvent(room, e);
-            else if(e.Type is "m.room.canonical_alias" or "m.room.name")
-                HandleStateReceived(roomId, [e]); // These state events can also appear in the timeline
-            else if(e.Type is "m.room.power_levels" or "m.room.topic" or "m.room.tombstone"
-                or "m.room.pinned_events" or "m.room.create" or "m.reaction")
+            try
             {
-                // Known event types we don't process yet
-                Logger.LogDebug("Ignoring timeline event type {Type} in room {RoomId}.", e.Type, roomId.Full);
+                // The presence of state_key (including "") identifies state, not
+                // a hardcoded list of event types. State precedes message dispatch.
+                if (e.StateKey != null)
+                    HandleStateReceived(roomId, [e]);
+                else if (e.Type == "m.room.message")
+                    HandleMessageReceived(roomId, messages, room, e);
+                else if (e.Type == "m.room.encrypted")
+                    HandleEncryptedEvent(room, e);
+                else
+                    Logger.LogDebug("Ignoring unhandled timeline event type {Type} in room {RoomId}.", e.Type, roomId.Full);
             }
-            else
+            catch (Exception ex) when (ex is JsonException or ArgumentOutOfRangeException)
             {
-                Logger.LogWarning("Received unknown timeline event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
+                Logger.LogWarning(ex, "Could not interpret timeline event {Type} in room {RoomId}.", e.Type, roomId.Full);
             }
         }
     }
