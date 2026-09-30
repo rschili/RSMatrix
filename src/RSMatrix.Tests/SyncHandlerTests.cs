@@ -220,7 +220,7 @@ public class SyncHandlerTests
 
         var alice = _client.GetOrAddUser(ParseUserId("@alice:example.org"));
         await Assert.That(alice.Presence).IsEqualTo(Presence.Online);
-        await Assert.That(alice.CurrentlyActive).IsEqualTo(true);
+        await Assert.That(alice.CurrentlyActive).IsTrue();
         await Assert.That(alice.StatusMessage).IsEqualTo("Working on tests");
         await Assert.That(alice.DisplayName).IsEqualTo("Alice Online");
         await Assert.That(alice.AvatarUrl).IsEqualTo("mxc://example.org/alice");
@@ -233,7 +233,7 @@ public class SyncHandlerTests
 
         var bob = _client.GetOrAddUser(ParseUserId("@bob:example.org"));
         await Assert.That(bob.Presence).IsEqualTo(Presence.Unavailable);
-        await Assert.That(bob.CurrentlyActive).IsEqualTo(false);
+        await Assert.That(bob.CurrentlyActive).IsFalse();
         await Assert.That(bob.StatusMessage).IsEqualTo("AFK");
     }
 
