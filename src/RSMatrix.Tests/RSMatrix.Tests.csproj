@@ -9,7 +9,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Moq" Version="4.21.0" />
-		<PackageReference Include="TUnit" Version="1.75.0" />
+		<PackageReference Include="TUnit" Version="1.76.0" />
 	</ItemGroup>
 
 	<ItemGroup>
