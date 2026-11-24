@@ -1,0 +1,54 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:RSMatrix.Desktop.ViewModels"
+             xmlns:controls="using:RSMatrix.Desktop.Controls"
+             x:Class="RSMatrix.Desktop.Views.TimelineView"
+             x:DataType="vm:RoomViewModel">
+  <Panel>
+    <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Disabled">
+      <ItemsControl x:Name="Items" ItemsSource="{Binding Timeline.Items}" Padding="0,6,0,12">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <VirtualizingStackPanel />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.DataTemplates>
+          <DataTemplate DataType="vm:DaySeparatorViewModel">
+            <Grid ColumnDefinitions="*,Auto,*" Margin="24,18,24,2">
+              <Border Height="1" Background="{DynamicResource DividerBrush}" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Classes="caption secondary" FontWeight="SemiBold" Margin="12,0" Text="{Binding Text}" />
+              <Border Grid.Column="2" Height="1" Background="{DynamicResource DividerBrush}" VerticalAlignment="Center" />
+            </Grid>
+          </DataTemplate>
+          <DataTemplate DataType="vm:MessageViewModel">
+            <Border Classes="message" Classes.groupStart="{Binding IsGroupStart}" Classes.pending="{Binding IsPending}" Padding="24,3,24,3">
+              <Grid ColumnDefinitions="52,*">
+                <controls:AvatarView Width="36" Height="36" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
+                                     IsVisible="{Binding IsGroupStart}"
+                                     DisplayName="{Binding Sender.DisplayName}" ColorSeed="{Binding Sender.UserId}" />
+                <TextBlock Classes="hoverTime tertiary" FontSize="11" VerticalAlignment="Top" Margin="0,3,0,0"
+                           IsVisible="{Binding !IsGroupStart}" Text="{Binding TimeText}" ToolTip.Tip="{Binding FullTimeText}" />
+                <StackPanel Grid.Column="1" Spacing="2">
+                  <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsGroupStart}">
+                    <TextBlock FontWeight="SemiBold" Text="{Binding Sender.DisplayName}" ToolTip.Tip="{Binding Sender.UserId}" />
+                    <TextBlock Classes="caption tertiary" VerticalAlignment="Bottom" Margin="0,0,0,1"
+                               Text="{Binding TimeText}" ToolTip.Tip="{Binding FullTimeText}" />
+                  </StackPanel>
+                  <controls:MessageDocumentView Document="{Binding Content}" Classes.notice="{Binding IsNotice}" />
+                  <StackPanel Orientation="Horizontal" Spacing="8"
+                              IsVisible="{Binding StatusText, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock Classes="caption tertiary" Text="{Binding StatusText}" />
+                    <Button Classes="link" FontSize="12" Content="Retry" Command="{Binding RetryCommand}" CommandParameter="{Binding}"
+                            IsVisible="{Binding SendError, Converter={x:Static ObjectConverters.IsNotNull}}" ToolTip.Tip="{Binding SendError}" />
+                  </StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.DataTemplates>
+      </ItemsControl>
+    </ScrollViewer>
+    <ProgressBar VerticalAlignment="Top" IsIndeterminate="True" MinHeight="2" Height="2"
+                 IsVisible="{Binding LoadOlderMessagesCommand.IsRunning}" />
+  </Panel>
+</UserControl>

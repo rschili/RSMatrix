@@ -1,0 +1,37 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:RSMatrix.Desktop.ViewModels"
+             xmlns:views="using:RSMatrix.Desktop.Views"
+             x:Class="RSMatrix.Desktop.App"
+             Name="RSMatrix"
+             RequestedThemeVariant="Default">
+
+  <Application.DataTemplates>
+    <DataTemplate DataType="vm:LoginViewModel">
+      <views:LoginView />
+    </DataTemplate>
+    <DataTemplate DataType="vm:ChatViewModel">
+      <views:ChatView />
+    </DataTemplate>
+  </Application.DataTemplates>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="/Styles/Colors.axaml" />
+        <ResourceInclude Source="/Styles/Icons.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+      <FontFamily x:Key="MonospaceFont">Cascadia Mono, JetBrains Mono, Consolas, Menlo, DejaVu Sans Mono, Liberation Mono, monospace</FontFamily>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#3366CC" RegionColor="#FFFFFF" />
+        <ColorPaletteResources x:Key="Dark" Accent="#6F9BF2" RegionColor="#17191C" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+    <StyleInclude Source="/Styles/AppStyles.axaml" />
+  </Application.Styles>
+</Application>

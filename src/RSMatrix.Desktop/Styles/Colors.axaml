@@ -1,0 +1,55 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#F5F6F8" />
+      <SolidColorBrush x:Key="SidebarItemHoverBrush" Color="#ECEEF2" />
+      <SolidColorBrush x:Key="SidebarItemSelectedBrush" Color="#E2E6EE" />
+      <SolidColorBrush x:Key="DividerBrush" Color="#E5E7EB" />
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1D2127" />
+      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#5F6670" />
+      <SolidColorBrush x:Key="TextTertiaryBrush" Color="#959BA4" />
+      <SolidColorBrush x:Key="MessageHoverBrush" Color="#F7F8FA" />
+      <SolidColorBrush x:Key="CodeBackgroundBrush" Color="#F3F4F6" />
+      <SolidColorBrush x:Key="CodeBorderBrush" Color="#E3E5E9" />
+      <SolidColorBrush x:Key="QuoteBarBrush" Color="#D3D7DE" />
+      <SolidColorBrush x:Key="LinkBrush" Color="#2A5DB8" />
+      <SolidColorBrush x:Key="MentionForegroundBrush" Color="#2A5DB8" />
+      <SolidColorBrush x:Key="MentionBackgroundBrush" Color="#E3EBFA" />
+      <SolidColorBrush x:Key="SpoilerBrush" Color="#C9CDD4" />
+      <SolidColorBrush x:Key="ComposerBackgroundBrush" Color="#F5F6F8" />
+      <SolidColorBrush x:Key="ComposerBorderBrush" Color="#E1E4E9" />
+      <SolidColorBrush x:Key="UnreadBadgeBrush" Color="#3366CC" />
+      <SolidColorBrush x:Key="OnlineBrush" Color="#2E9E5B" />
+      <SolidColorBrush x:Key="WarningBrush" Color="#B7791F" />
+      <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#FDF6E7" />
+      <SolidColorBrush x:Key="ErrorBrush" Color="#C53030" />
+    </ResourceDictionary>
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#17191C" />
+      <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#1E2024" />
+      <SolidColorBrush x:Key="SidebarItemHoverBrush" Color="#26292E" />
+      <SolidColorBrush x:Key="SidebarItemSelectedBrush" Color="#2D3137" />
+      <SolidColorBrush x:Key="DividerBrush" Color="#2A2D32" />
+      <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E4E6EA" />
+      <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A1A7B0" />
+      <SolidColorBrush x:Key="TextTertiaryBrush" Color="#6C727B" />
+      <SolidColorBrush x:Key="MessageHoverBrush" Color="#1C1E22" />
+      <SolidColorBrush x:Key="CodeBackgroundBrush" Color="#22252A" />
+      <SolidColorBrush x:Key="CodeBorderBrush" Color="#30343A" />
+      <SolidColorBrush x:Key="QuoteBarBrush" Color="#3D424A" />
+      <SolidColorBrush x:Key="LinkBrush" Color="#82A9F5" />
+      <SolidColorBrush x:Key="MentionForegroundBrush" Color="#A9C4F8" />
+      <SolidColorBrush x:Key="MentionBackgroundBrush" Color="#25324A" />
+      <SolidColorBrush x:Key="SpoilerBrush" Color="#3A3E45" />
+      <SolidColorBrush x:Key="ComposerBackgroundBrush" Color="#1F2226" />
+      <SolidColorBrush x:Key="ComposerBorderBrush" Color="#2E3238" />
+      <SolidColorBrush x:Key="UnreadBadgeBrush" Color="#4F7FE0" />
+      <SolidColorBrush x:Key="OnlineBrush" Color="#3FB971" />
+      <SolidColorBrush x:Key="WarningBrush" Color="#E0B252" />
+      <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#2B261A" />
+      <SolidColorBrush x:Key="ErrorBrush" Color="#F07070" />
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

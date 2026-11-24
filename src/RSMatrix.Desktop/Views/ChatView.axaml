@@ -1,0 +1,112 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:RSMatrix.Desktop.ViewModels"
+             xmlns:views="using:RSMatrix.Desktop.Views"
+             xmlns:controls="using:RSMatrix.Desktop.Controls"
+             x:Class="RSMatrix.Desktop.Views.ChatView"
+             x:DataType="vm:ChatViewModel"
+             controls:MediaImageView.Loader="{Binding Media}">
+  <Grid ColumnDefinitions="280,*">
+
+    <!-- Room list -->
+    <Border Background="{DynamicResource SidebarBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,1,0">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="20,18,18,10">
+          <TextBlock Classes="title" Text="Rooms" />
+          <TextBlock Grid.Column="1" Classes="caption tertiary" Text="{Binding ServerName}" VerticalAlignment="Center" />
+        </Grid>
+
+        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" Padding="16,10,10,10">
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+            <controls:AvatarView Width="32" Height="32" DisplayName="{Binding CurrentUser.DisplayName}" ColorSeed="{Binding CurrentUser.UserId}" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+              <TextBlock Text="{Binding CurrentUser.DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                         ToolTip.Tip="{Binding CurrentUser.UserId}" />
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Ellipse Width="7" Height="7" VerticalAlignment="Center" Classes.online="{Binding IsOnline}" Classes="status" />
+                <TextBlock Classes="caption secondary" Text="{Binding ConnectionText}" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </StackPanel>
+            <Button Grid.Column="2" Classes="icon" Command="{Binding DisconnectCommand}" ToolTip.Tip="Disconnect">
+              <Path Classes="icon" Data="{StaticResource SignOutIcon}" />
+            </Button>
+          </Grid>
+        </Border>
+
+        <Panel>
+          <ListBox Classes="rooms" ItemsSource="{Binding Rooms}" SelectedItem="{Binding SelectedRoom}">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:RoomViewModel">
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                  <controls:AvatarView Width="36" Height="36" IsSquare="{Binding !IsDirect}"
+                                       DisplayName="{Binding Name}" ColorSeed="{Binding RoomId}" />
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                    <TextBlock Classes="roomName" Classes.unread="{Binding HasUnread}" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="caption secondary" Text="{Binding LastMessagePreview}" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center">
+                    <TextBlock Classes="caption tertiary" Text="{Binding LastActivityText}" HorizontalAlignment="Right" />
+                    <Border Classes="badge" IsVisible="{Binding HasUnread}" HorizontalAlignment="Right">
+                      <TextBlock Text="{Binding UnreadCount}" />
+                    </Border>
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Classes="secondary" Margin="24,8" TextWrapping="Wrap" IsVisible="{Binding !Rooms.Count}"
+                     Text="Rooms show up here once they have messages." />
+        </Panel>
+      </DockPanel>
+    </Border>
+
+    <!-- Selected room -->
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto">
+      <Border Height="56" Padding="24,0" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1"
+              IsVisible="{Binding SelectedRoom, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <TextBlock Classes="title" Text="{Binding SelectedRoom.Name}" />
+          <Path Classes="icon" Width="13" Height="13" Data="{StaticResource LockIcon}"
+                IsVisible="{Binding SelectedRoom.IsEncrypted}" ToolTip.Tip="End-to-end encrypted" VerticalAlignment="Center" />
+        </StackPanel>
+      </Border>
+
+      <StackPanel Grid.Row="1">
+        <Border Classes="banner" IsVisible="{Binding IsStopped}">
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+            <Path Classes="icon warning" Data="{StaticResource WarningIcon}" />
+            <TextBlock Grid.Column="1" Text="{Binding ConnectionText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Classes="link" Content="Back to sign in" Command="{Binding ReturnToLoginCommand}" />
+          </Grid>
+        </Border>
+        <Border Classes="banner" IsVisible="{Binding Issue, Converter={x:Static ObjectConverters.IsNotNull}}">
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+            <Path Classes="icon warning" Data="{StaticResource WarningIcon}" />
+            <TextBlock Grid.Column="1" Text="{Binding Issue}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Classes="icon" Padding="4" Command="{Binding DismissIssueCommand}" ToolTip.Tip="Dismiss">
+              <Path Classes="icon" Width="12" Height="12" Data="{StaticResource CloseIcon}" />
+            </Button>
+          </Grid>
+        </Border>
+      </StackPanel>
+
+      <Panel Grid.Row="2" IsVisible="{Binding SelectedRoom, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <views:TimelineView DataContext="{Binding SelectedRoom}" />
+      </Panel>
+      <TextBlock Grid.Row="2" Classes="secondary" HorizontalAlignment="Center" VerticalAlignment="Center"
+                 Text="Select a room" IsVisible="{Binding SelectedRoom, Converter={x:Static ObjectConverters.IsNull}}" />
+
+      <Border Grid.Row="3" Classes="composer" Margin="20,6,20,18" Padding="14,3,5,3"
+              IsVisible="{Binding SelectedRoom, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+          <TextBox x:Name="Composer" Classes="composer" MaxHeight="220"
+                   Text="{Binding SelectedRoom.Draft}" PlaceholderText="{Binding SelectedRoom.ComposerPlaceholder}" />
+          <Button Grid.Column="1" Classes="icon" VerticalAlignment="Bottom" Command="{Binding SelectedRoom.SendCommand}"
+                  ToolTip.Tip="Send (Enter). Shift+Enter starts a new line.">
+            <Path Classes="icon" Data="{StaticResource SendIcon}" />
+          </Button>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

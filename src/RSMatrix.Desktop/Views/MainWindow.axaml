@@ -1,0 +1,10 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:RSMatrix.Desktop.ViewModels"
+        x:Class="RSMatrix.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="RSMatrix"
+        Width="1180" Height="760"
+        MinWidth="720" MinHeight="460"
+        WindowStartupLocation="CenterScreen"
+        Content="{Binding CurrentPage}" />

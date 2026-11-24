@@ -1,0 +1,55 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:RSMatrix.Desktop.ViewModels"
+             x:Class="RSMatrix.Desktop.Views.LoginView"
+             x:DataType="vm:LoginViewModel">
+  <ScrollViewer>
+    <StackPanel Width="340" Margin="24,48" Spacing="16" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <StackPanel Spacing="4" Margin="0,0,0,8">
+        <TextBlock Text="RSMatrix" FontSize="26" FontWeight="SemiBold" />
+        <TextBlock Classes="secondary" Text="Sign in with your Matrix account." />
+      </StackPanel>
+
+      <StackPanel Spacing="6">
+        <TextBlock Classes="caption secondary" Text="User ID" />
+        <TextBox x:Name="UserIdBox" Text="{Binding UserId}" PlaceholderText="@alice:example.org" />
+      </StackPanel>
+
+      <StackPanel Spacing="6">
+        <TextBlock Classes="caption secondary" Text="Password" />
+        <TextBox Text="{Binding Password}" PasswordChar="•" RevealPassword="False">
+          <TextBox.KeyBindings>
+            <KeyBinding Gesture="Enter" Command="{Binding SignInCommand}" />
+          </TextBox.KeyBindings>
+        </TextBox>
+      </StackPanel>
+
+      <StackPanel Spacing="6">
+        <TextBlock Classes="caption secondary" Text="Homeserver (optional)" />
+        <TextBox Text="{Binding Homeserver}" PlaceholderText="Found through the user ID's domain" />
+      </StackPanel>
+
+      <TextBlock Text="{Binding ErrorMessage}" IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}"
+                 Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" />
+
+      <Panel Margin="0,4,0,0">
+        <Button Classes="accent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,8"
+                Command="{Binding SignInCommand}" IsVisible="{Binding !SignInCommand.IsRunning}" Content="Sign in" />
+        <StackPanel Spacing="10" IsVisible="{Binding SignInCommand.IsRunning}">
+          <ProgressBar IsIndeterminate="True" MinHeight="3" Height="3" />
+          <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,8"
+                  Command="{Binding SignInCancelCommand}" Content="Cancel" />
+        </StackPanel>
+      </Panel>
+
+      <StackPanel Spacing="4" IsVisible="{Binding CanResetDevice}">
+        <TextBlock Classes="caption secondary" TextWrapping="Wrap"
+                   Text="If the server forgot this device, for example after the test server was recreated, sign in as a new device. This deletes the local encryption keys of this account." />
+        <Button Classes="link" Content="Sign in as a new device" Command="{Binding ResetDeviceCommand}" />
+      </StackPanel>
+
+      <Border Height="1" Background="{DynamicResource DividerBrush}" Margin="0,8" />
+      <Button Classes="link" HorizontalAlignment="Center" Content="Look around with sample data" Command="{Binding OpenSampleCommand}" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>
