@@ -54,7 +54,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>The room or thread shown on the right.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WindowTitle))]
     public partial ConversationViewModel? SelectedConversation { get; set; }
+
+    /// <summary>The selected room's name, or the server name when no room is selected.</summary>
+    public string WindowTitle
+    {
+        get
+        {
+            if (SelectedConversation?.Room.Name is { Length: > 0 } roomName)
+                return roomName;
+            return string.IsNullOrEmpty(ServerName) ? MainWindowViewModel.DefaultWindowTitle : ServerName;
+        }
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ConnectionText), nameof(IsOnline), nameof(IsStopped))]
@@ -193,6 +205,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         else
         {
             room.Update(info);
+            if (room == SelectedConversation?.Room)
+                OnPropertyChanged(nameof(WindowTitle));
         }
 
         if (!room.AddReceivedMessage(message))

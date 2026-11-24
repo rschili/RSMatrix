@@ -7,10 +7,12 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>RSMatrix.Desktop</AssemblyName>
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Sample\*.png" />
+    <AvaloniaResource Include="Assets\icon.ico" />
   </ItemGroup>
 
   <ItemGroup>

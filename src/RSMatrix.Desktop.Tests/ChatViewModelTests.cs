@@ -44,6 +44,22 @@ public class ChatViewModelTests
     }
 
     [Test]
+    public async Task The_Window_Title_Shows_The_Selected_Room_Or_The_Server()
+    {
+        await using var chat = CreateChat();
+        await Assert.That(chat.WindowTitle).IsEqualTo("sample.local");
+
+        chat.Apply(new MessageReceived(Room, Message("$root", Noon, "Root")));
+        chat.Apply(new MessageReceived(Room, Message("$reply", Noon.AddMinutes(1), "Reply", threadRootId: "$root")));
+        var room = chat.Rooms.Single();
+        chat.SelectedConversation = room.GetOrCreateThread("$root");
+        await Assert.That(chat.WindowTitle).IsEqualTo("Room");
+
+        chat.Apply(new MessageReceived(Room with { Name = "Renamed" }, Message("$next", Noon.AddMinutes(2), "Next")));
+        await Assert.That(chat.WindowTitle).IsEqualTo("Renamed");
+    }
+
+    [Test]
     public async Task Collection_Sync_Moves_Inserts_And_Removes()
     {
         string a = "a", b = "b", c = "c", d = "d";

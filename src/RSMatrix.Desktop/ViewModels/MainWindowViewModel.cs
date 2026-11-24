@@ -19,8 +19,27 @@ public sealed partial class MainWindowViewModel : ObservableObject
         CurrentPage = CreateLogin();
     }
 
+    public const string DefaultWindowTitle = "Matrix";
+
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WindowTitle))]
     public partial ObservableObject CurrentPage { get; private set; }
+
+    public string WindowTitle => (CurrentPage as ChatViewModel)?.WindowTitle ?? DefaultWindowTitle;
+
+    partial void OnCurrentPageChanged(ObservableObject? oldValue, ObservableObject newValue)
+    {
+        if (oldValue is ChatViewModel oldChat)
+            oldChat.PropertyChanged -= OnChatPropertyChanged;
+        if (newValue is ChatViewModel newChat)
+            newChat.PropertyChanged += OnChatPropertyChanged;
+    }
+
+    private void OnChatPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ChatViewModel.WindowTitle))
+            OnPropertyChanged(nameof(WindowTitle));
+    }
 
     /// <summary>Applies command line options: sample mode, or a prefilled login that signs in right away.</summary>
     public void Start(StartupOptions options)
