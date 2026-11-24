@@ -7,7 +7,7 @@ public class RoomEncryptionTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task KnownEncryptedRoom_RejectsAllMessageAndEditHelpers(bool timeline)
+    public async Task KnownEncryptedRoom_WithoutEncryption_RejectsAllContentSends(bool timeline)
     {
         using var context = new MatrixTestContext();
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""", timeline);
@@ -28,7 +28,9 @@ public class RoomEncryptionTests
             () => message.SendNoticeResponseAsync("secret"),
             () => message.SendHtmlNoticeResponseAsync("secret", "<b>secret</b>"),
             () => message.EditAsync("secret"),
-            () => message.EditHtmlAsync("secret", "<b>secret</b>")
+            () => message.EditHtmlAsync("secret", "<b>secret</b>"),
+            () => room.SendReactionAsync("$original", "🤫"),
+            () => message.SendReactionAsync("🤫")
         ];
         foreach (var send in sends)
         {
@@ -105,10 +107,29 @@ public class RoomEncryptionTests
         using var context = new MatrixTestContext();
         await Assert.That(await context.Room().SendTextMessageAsync("hello", null, null)).IsEqualTo("$sent");
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""");
-        await context.Room().SendReactionAsync("$event", "👍");
         await context.Room().RedactEventAsync("$event");
         await context.Room().SendTypingNotificationAsync();
-        await Assert.That(context.Requests.Count).IsEqualTo(4);
+        await Assert.That(context.Requests.Count).IsEqualTo(3);
+    }
+
+    [Test]
+    public async Task WithoutEncryption_PlaintextIsMarkedUnencrypted_AndEncryptedEventsAreSkipped()
+    {
+        using var context = new MatrixTestContext();
+        await Assert.That(context.Client.IsEncryptionEnabled).IsFalse();
+        await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""");
+        await context.Process("""
+        {"next_batch":"next","rooms":{"join":{"!room:example.org":{"timeline":{"events":[
+         {"type":"m.room.encrypted","sender":"@a:example.org","event_id":"$encrypted","origin_server_ts":1700000000000,
+          "content":{"algorithm":"m.megolm.v1.aes-sha2","session_id":"s","ciphertext":"c"}},
+         {"type":"m.room.message","sender":"@a:example.org","event_id":"$plain","origin_server_ts":1700000000000,
+          "content":{"msgtype":"m.text","body":"hello"}}]}}}}}
+        """);
+        await Assert.That(context.Client.Messages.TryRead(out var message)).IsTrue();
+        await Assert.That(message!.EventId).IsEqualTo("$plain");
+        await Assert.That(message.IsEncrypted).IsFalse();
+        await Assert.That(message.Room.IsEncrypted).IsTrue();
+        await Assert.That(context.Client.Messages.TryRead(out _)).IsFalse();
     }
 
     private static Task SetEncryption(MatrixTestContext context, string content, bool timeline = false)

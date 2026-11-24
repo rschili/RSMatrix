@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
 using RSFlowControl;
+using RSMatrix.Crypto;
 
 namespace RSMatrix;
 
@@ -23,6 +24,15 @@ public sealed class MatrixTextClient
 
     internal Filter? Filter { get; private set; }
 
+    /// <summary>Set when the client was connected with an encryption store directory.</summary>
+    internal EncryptionEngine? Encryption { get; set; }
+
+    /// <summary>
+    /// Whether the client was connected with an encryption store directory. Without it,
+    /// messages in encrypted rooms are not received and sending to them throws.
+    /// </summary>
+    public bool IsEncryptionEnabled => Encryption != null;
+
     private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
 
     private ConcurrentDictionary<string, User> _users = new(StringComparer.Ordinal);
@@ -35,6 +45,27 @@ public sealed class MatrixTextClient
     /// Transient failures are retried with the existing session.
     /// </summary>
     public ChannelReader<ReceivedTextMessage> Messages => MessageChannel.Reader;
+
+    internal const int IssueChannelCapacity = 100;
+    private readonly Channel<ClientIssue> _issueChannel = Channel.CreateBounded<ClientIssue>(
+        new BoundedChannelOptions(IssueChannelCapacity) { FullMode = BoundedChannelFullMode.DropOldest });
+
+    /// <summary>
+    /// Problems the client ran into while it keeps running, like messages it could not decrypt.
+    /// Reading is optional. The channel keeps the latest 100 issues and drops older ones.
+    /// It completes when syncing ends.
+    /// </summary>
+    public ChannelReader<ClientIssue> Issues => _issueChannel.Reader;
+
+    private long _lastSyncAtUnixMilliseconds;
+
+    /// <summary>
+    /// When the last sync with the server succeeded, or null before the first one.
+    /// A sync is a long poll that returns at least every minute, so an older value means the connection is down.
+    /// </summary>
+    public DateTimeOffset? LastSyncAt => Interlocked.Read(ref _lastSyncAtUnixMilliseconds) is var value and > 0
+        ? DateTimeOffset.FromUnixTimeMilliseconds(value)
+        : null;
 
     public bool DebugMode = false;
 
@@ -94,16 +125,23 @@ public sealed class MatrixTextClient
     /// <param name="httpClientFactory">factory to use for creating http clients</param>
     /// <param name="cancellationToken">cancellation token used to disconnect</param>
     /// <param name="logger">logger</param>
+    /// <param name="encryptionStoreDirectory">
+    /// Enables end-to-end encryption. The directory holds this device's private keys as plain JSON;
+    /// protect it accordingly. It belongs to one user and device ID and must persist across restarts.
+    /// Only one client at a time can use it. Without it, encrypted messages are ignored and sending
+    /// to encrypted rooms throws <see cref="NotSupportedException"/>.
+    /// </param>
     /// <returns></returns>
     /// <exception cref="ArgumentException">Provided arguments not valid</exception>
     /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
-    public static Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger = null)
+    public static Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory,
+        CancellationToken cancellationToken, ILogger? logger = null, string? encryptionStoreDirectory = null)
         => ConnectAsync(userId, password, deviceId, httpClientFactory, cancellationToken, logger,
-            (delay, token) => Task.Delay(delay, token));
+            (delay, token) => Task.Delay(delay, token), encryptionStoreDirectory);
 
     internal static async Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId,
         IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger,
-        Func<TimeSpan, CancellationToken, Task> retryDelayAsync)
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, string? encryptionStoreDirectory = null)
     {
         if (logger == null)
             logger = NullLogger<MatrixTextClient>.Instance;
@@ -132,6 +170,27 @@ public sealed class MatrixTextClient
             throw new ArgumentException("The user id seems invalid, it should look like: '@user:example.org'.", nameof(userId));
         }
 
+        // Fail on a wrong or busy store before creating a session on the server.
+        var encryptionStore = encryptionStoreDirectory == null
+            ? null
+            : EncryptionEngine.OpenStore(encryptionStoreDirectory, parsedUserId.Full, deviceId);
+        try
+        {
+            return await ConnectAsync(parsedUserId, password, deviceId, httpClientFactory, cancellationToken, logger,
+                retryDelayAsync, encryptionStore).ConfigureAwait(false);
+        }
+        catch
+        {
+            encryptionStore?.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task<MatrixTextClient> ConnectAsync(MatrixId parsedUserId, string password, string deviceId,
+        IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger logger,
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, EncryptionStore? encryptionStore)
+    {
+        var userId = parsedUserId.Full;
         var baseUri = $"https://{parsedUserId.Domain}";
         if (!Uri.IsWellFormedUriString(baseUri, UriKind.Absolute))
         {
@@ -204,6 +263,8 @@ public sealed class MatrixTextClient
             () => MatrixHelper.FetchCapabilitiesAsync(httpClientParameters)).ConfigureAwait(false);
         httpClientParameters.RateLimiter = new LeakyBucket(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
         var client = new MatrixTextClient(httpClientParameters, parsedUserId, parsedVersions, serverCapabilities.Capabilities);
+        if (encryptionStore != null)
+            client.Encryption = await EncryptionEngine.StartAsync(encryptionStore, httpClientParameters).ConfigureAwait(false);
         await MatrixRetry.ExecuteAsync(httpClientParameters, "Initializing Matrix", client.InitAsync).ConfigureAwait(false);
         client.IsSyncing = true;
         _ = client.SyncAsync();
@@ -286,9 +347,12 @@ public sealed class MatrixTextClient
             while (!HttpClientParameters.CancellationToken.IsCancellationRequested)
             {
                 var response = await MatrixRetry.ExecuteAsync(HttpClientParameters, "Matrix sync",
-                    () => MatrixHelper.GetSyncAsync(HttpClientParameters, request)).ConfigureAwait(false);
+                    () => MatrixHelper.GetSyncAsync(HttpClientParameters, request),
+                    onFirstTransientFailure: ex => ReportIssue(ClientIssueKind.SyncInterrupted,
+                        $"Sync with the server failed, retrying until it works again: {ex.Message}", exception: ex)).ConfigureAwait(false);
                 await HandleSyncResponseAsync(response).ConfigureAwait(false);
                 request.Since = response.NextBatch;
+                Interlocked.Exchange(ref _lastSyncAtUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             }
         }
         catch (OperationCanceledException) when (HttpClientParameters.CancellationToken.IsCancellationRequested)
@@ -303,8 +367,10 @@ public sealed class MatrixTextClient
         finally
         {
             IsSyncing = false;
+            Encryption?.Dispose();
             if (!MessageChannel.Writer.TryComplete(failure))
                 Logger.LogError("Sync ended, but failed to complete message channel.");
+            _issueChannel.Writer.TryComplete();
         }
     }
 
@@ -345,6 +411,10 @@ public sealed class MatrixTextClient
         cancellationToken.ThrowIfCancellationRequested();
         if (DebugMode)
             await WriteSyncResponseToFileAsync(response).ConfigureAwait(false);
+
+        // Room keys arrive as to-device messages and must be stored before decrypting the timeline.
+        if (Encryption != null)
+            await Encryption.HandleSyncAsync(response).ConfigureAwait(false);
 
         List<ReceivedTextMessage> messages = new();
         if (response.AccountData?.Events is { } accountData)
@@ -637,6 +707,7 @@ public sealed class MatrixTextClient
         }
         var user = GetOrAddUser(userId);
         RoomUser? roomUser = GetOrAddUser(user, room);
+        Encryption?.OnMembershipChanged(room.RoomId.Full, roomMember.Membership);
 
         if (roomUser.DisplayName != roomMember.DisplayName || roomUser.Membership != roomMember.Membership)
         {
@@ -735,6 +806,8 @@ public sealed class MatrixTextClient
             catch (Exception ex) when (ex is HttpRequestException or MatrixResponseException or JsonException or OperationCanceledException)
             {
                 Logger.LogError(ex, "Failed to auto-join room {RoomId}", roomId.Full);
+                ReportIssue(ClientIssueKind.AutoJoinFailed, $"Could not join room {roomId.Full} after an invite: {ex.Message}",
+                    GetOrAddRoom(roomId), inviterUserId, exception: ex);
             }
         }
     }
@@ -762,7 +835,7 @@ public sealed class MatrixTextClient
                 else if (e.Type == "m.room.message")
                     HandleMessageReceived(roomId, messages, room, e);
                 else if (e.Type == "m.room.encrypted")
-                    HandleEncryptedEvent(room, e);
+                    HandleEncryptedEvent(room, e, messages);
                 else
                     Logger.LogDebug("Ignoring unhandled timeline event type {Type} in room {RoomId}.", e.Type, roomId.Full);
             }
@@ -773,31 +846,56 @@ public sealed class MatrixTextClient
         }
     }
 
-    private void HandleEncryptedEvent(Room room, ClientEventWithoutRoomID e)
+    private void HandleEncryptedEvent(Room room, ClientEventWithoutRoomID e, List<ReceivedTextMessage> messages)
     {
-        ArgumentNullException.ThrowIfNull(room, nameof(room));
-        ArgumentNullException.ThrowIfNull(e, nameof(e));
+        var decrypted = DecryptRoomEvent(room, e);
+        if (decrypted?.Type == "m.room.message")
+            HandleMessageReceived(room.RoomId, messages, room, decrypted, isEncrypted: true);
+        else if (decrypted != null)
+            Logger.LogDebug("Ignoring decrypted event type {Type} in room {RoomId}.", decrypted.Type, room.RoomId.Full);
+    }
 
-        if(e.Content == null)
+    /// <summary>Decrypts an m.room.encrypted event, or reports why it can't and returns null.</summary>
+    internal ClientEventWithoutRoomID? DecryptRoomEvent(Room room, ClientEventWithoutRoomID e)
+    {
+        string failure;
+        if (Encryption == null)
         {
-            Logger.LogWarning("Received m.room.encrypted event with no content in room {RoomId}.", room.RoomId.Full);
-            return;
+            Logger.LogDebug("Ignoring encrypted event {EventId} in room {RoomId}: encryption is not enabled.", e.EventId, room.RoomId.Full);
+            failure = "encryption is not enabled for this client";
+        }
+        else if (Encryption.DecryptRoomEvent(room.RoomId.Full, e, out var engineFailure) is { } decrypted)
+        {
+            return decrypted;
+        }
+        else
+        {
+            failure = engineFailure ?? "unknown error";
         }
 
-        var encryptedEvent = JsonSerializer.Deserialize<RoomEncryptedEvent>((JsonElement)e.Content);
-        if(encryptedEvent == null)
+        // Reactions are not delivered even when they can be decrypted.
+        if (!IsAnnotation(e))
         {
-            Logger.LogWarning("Received m.room.encrypted event deserialize returned null in room {RoomId}.", room.RoomId.Full);
-            return;
+            ReportIssue(ClientIssueKind.DecryptionFailed,
+                $"Could not decrypt event {e.EventId} from {e.Sender} in room {room.RoomId.Full}: {failure}.",
+                room, e.Sender, e.EventId);
         }
+        return null;
+    }
 
-        if(encryptedEvent.Algorithm != room.Encryption?.Algorithm)
-        {
-            Logger.LogWarning("Received m.room.encrypted event with mismatching algorithm for room {RoomId}. Expected: {ExpectedAlgorithm}, Received: {ReceivedAlgorithm}", room.RoomId.Full, room.Encryption?.Algorithm, encryptedEvent.Algorithm);
-            return;
-        }
+    private static bool IsAnnotation(ClientEventWithoutRoomID e)
+        => e.Content is { ValueKind: JsonValueKind.Object } content &&
+           content.TryGetProperty("m.relates_to", out var relatesTo) && relatesTo.ValueKind == JsonValueKind.Object &&
+           relatesTo.TryGetProperty("rel_type", out var relType) && relType.ValueKind == JsonValueKind.String &&
+           relType.GetString() == "m.annotation";
 
-        // TODO handle ciphertext
+    internal void ReportIssue(ClientIssueKind kind, string message, Room? room = null, string? userId = null,
+        string? eventId = null, Exception? exception = null)
+    {
+        RoomUser? user = null;
+        if (room != null && userId != null && UserId.TryParse(userId, out var parsedUserId) && parsedUserId != null)
+            user = GetOrAddUser(GetOrAddUser(parsedUserId), room);
+        _issueChannel.Writer.TryWrite(new ClientIssue(kind, message, room, user, eventId, exception));
     }
 
     private void HandleRoomEncryptionEvent(Room room, JsonElement? content)
@@ -829,7 +927,8 @@ public sealed class MatrixTextClient
             Logger.LogWarning("Received unknown encryption algorithm {Algorithm} in room {RoomId}.", encryptionEvent.Algorithm, room.RoomId.Full);
     }
 
-    private void HandleMessageReceived(MatrixId roomId, List<ReceivedTextMessage> messages, Room room, ClientEventWithoutRoomID e)
+    private void HandleMessageReceived(MatrixId roomId, List<ReceivedTextMessage> messages, Room room, ClientEventWithoutRoomID e,
+        bool isEncrypted = false)
     {
         if (e.Content == null)
         {
@@ -866,7 +965,7 @@ public sealed class MatrixTextClient
             threadId = messageEvent.RelatesTo.EventId;
         }
 
-        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, e.EventId, serverTs, threadId, messageEvent.MsgType, this);
+        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, e.EventId, serverTs, threadId, messageEvent.MsgType, this, isEncrypted);
         if (messageEvent.Mentions != null && messageEvent.Mentions.UserIds != null && messageEvent.Mentions.UserIds.Count > 0)
         {
             message.Mentions = messageEvent.Mentions.UserIds

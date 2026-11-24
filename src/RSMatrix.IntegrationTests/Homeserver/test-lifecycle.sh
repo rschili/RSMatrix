@@ -148,7 +148,7 @@ def assert_up(calls):
          "--config", "/data/homeserver.yaml", "--user", user,
          "--password", "rsmatrix-test-password", "--no-admin",
          "http://127.0.0.1:8008"]
-        for user in ("alice", "bob")
+        for user in ("alice", "bob", "carol")
     ]
 
 
@@ -222,7 +222,7 @@ assert not selected(calls, "exec")
 assert_cleanup(calls, failed=True)
 print("PASS: readiness detects an exited server and cleans up")
 
-calls, _ = run("up", expected=23, MOCK_FAIL_USER="bob")
+calls, _ = run("up", expected=23, MOCK_FAIL_USER="carol")
 assert_up(calls)
 assert_cleanup(calls, failed=True)
 print("PASS: failed provisioning removes the created container by ID")

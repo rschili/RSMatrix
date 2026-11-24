@@ -3,13 +3,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RSMatrix.Models;
 using RSMatrix.Http;
-using RSMatrix.Crypto;
 
 // load environment variables or a .env file
 DotNetEnv.Env.TraversePath().Load();
 var userid = Environment.GetEnvironmentVariable("MATRIX_USER_ID");
 var password = Environment.GetEnvironmentVariable("MATRIX_PASSWORD");
 var device = Environment.GetEnvironmentVariable("MATRIX_DEVICE_ID");
+// Optional. Enables end-to-end encryption; keep the directory between runs.
+var encryptionStore = Environment.GetEnvironmentVariable("MATRIX_ENCRYPTION_STORE");
 if (string.IsNullOrWhiteSpace(userid) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(device))
 {
     throw new ArgumentException("Please provide the required environment variables: MATRIX_USER_ID, MATRIX_PASSWORD, MATRIX_DEVICE_ID");
@@ -43,7 +44,8 @@ try
 {
     var client = await MatrixTextClient.ConnectAsync(userid, password, device,
         services.GetRequiredService<IHttpClientFactory>(), cancellationTokenSource.Token,
-        services.GetRequiredService<ILogger<MatrixTextClient>>());
+        services.GetRequiredService<ILogger<MatrixTextClient>>(),
+        string.IsNullOrWhiteSpace(encryptionStore) ? null : encryptionStore);
 
     client.DebugMode = true;
     await foreach (var message in client.Messages.ReadAllAsync(cancellationTokenSource.Token))

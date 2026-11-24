@@ -5,6 +5,13 @@ All notable changes to RSMatrix will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Experimental end-to-end encryption, with Olm and Megolm implemented in C#. Pass `encryptionStoreDirectory` to `ConnectAsync` to enable it. Messages in encrypted rooms are then decrypted, and messages, replies, edits and reactions are encrypted automatically. Not supported: device verification, cross-signing, key backup, key requests and encrypted attachments.
+- `ReceivedTextMessage.IsEncrypted` and `MatrixTextClient.IsEncryptionEnabled`.
+- `MatrixTextClient.Issues`: a channel that reports problems the client keeps running through (`DecryptionFailed`, `RoomKeyNotShared`, `AutoJoinFailed`, `SyncInterrupted`). It keeps the latest 100 issues.
+
 ## [1.4.0] - 2026-09-30
 
 ### Added

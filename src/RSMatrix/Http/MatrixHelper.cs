@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 ﻿using Microsoft.Extensions.Logging;
 using RSMatrix.Models;
 using System.Net.Http.Json;
@@ -158,47 +159,16 @@ public static class MatrixHelper
         await HttpClientHelper.SendAsync(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
-    internal static async Task<MessageResponse> PutReactionAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, string key)
+    internal static async Task<MessageResponse> PutRoomEventAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventType, JsonObject content)
     {
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
-        ArgumentException.ThrowIfNullOrEmpty(eventId, nameof(eventId));
-        ArgumentException.ThrowIfNullOrEmpty(key, nameof(key));
+        ArgumentException.ThrowIfNullOrEmpty(eventType, nameof(eventType));
+        ArgumentNullException.ThrowIfNull(content, nameof(content));
 
-        var txnIndex = Interlocked.Increment(ref httpClientParameters._txnId);
-        var txnId = $"{DateTimeOffset.Now.ToUnixTimeSeconds()}-{txnIndex}";
-
-        var request = new ReactionRequest
-        {
-            RelatesTo = new ReactionRelatesTo
-            {
-                RelType = "m.annotation",
-                EventId = eventId,
-                Key = key
-            }
-        };
-
-        var content = JsonContent.Create(
-            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-
-        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/send/m.reaction/{txnId}";
-        return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
-    }
-
-    internal static async Task<MessageResponse> PutMessageAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessageRequest message)
-    {
-        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
-        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
-        ArgumentNullException.ThrowIfNull(message, nameof(message));
-
-        var txnIndex = Interlocked.Increment(ref httpClientParameters._txnId);
-        var txnId = $"{DateTimeOffset.Now.ToUnixTimeSeconds()}-{txnIndex}";
-
-        var content = JsonContent.Create(
-            message, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-
-        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/send/m.room.message/{txnId}";
-        return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+        var txnId = httpClientParameters.NextTransactionId();
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/send/{Uri.EscapeDataString(eventType)}/{txnId}";
+        return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, JsonContent.Create(content)).ConfigureAwait(false);
     }
 
     internal static async Task<MessageResponse> PutRedactionAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, string? reason)
@@ -207,8 +177,7 @@ public static class MatrixHelper
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentException.ThrowIfNullOrEmpty(eventId, nameof(eventId));
 
-        var txnIndex = Interlocked.Increment(ref httpClientParameters._txnId);
-        var txnId = $"{DateTimeOffset.Now.ToUnixTimeSeconds()}-{txnIndex}";
+        var txnId = httpClientParameters.NextTransactionId();
 
         var request = new RedactionRequest { Reason = reason };
         var content = JsonContent.Create(
@@ -242,27 +211,5 @@ public static class MatrixHelper
             parameters.GetAsParameters());
 
         return await HttpClientHelper.SendAsync<MessagesResponse>(httpClientParameters, path).ConfigureAwait(false);
-    }
-
-    internal static async Task<QueryKeysResponse> PostQueryKeys(HttpClientParameters httpClientParameters, QueryKeysRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
-        ArgumentNullException.ThrowIfNull(request, nameof(request));
-
-        var content = JsonContent.Create(
-            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-
-        return await HttpClientHelper.SendAsync<QueryKeysResponse>(httpClientParameters, "/_matrix/client/v3/keys/query", HttpMethod.Post, content).ConfigureAwait(false);
-    }
-
-    internal static async Task<UploadKeysResponse> PostUploadKeys(HttpClientParameters httpClientParameters, UploadKeysRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
-        ArgumentNullException.ThrowIfNull(request, nameof(request));
-
-        var content = JsonContent.Create(
-            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-
-        return await HttpClientHelper.SendAsync<UploadKeysResponse>(httpClientParameters, "/_matrix/client/v3/keys/upload", HttpMethod.Post, content).ConfigureAwait(false);
     }
 }

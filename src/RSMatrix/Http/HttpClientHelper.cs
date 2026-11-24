@@ -23,6 +23,8 @@ public record HttpClientParameters
     // Used as txnId when sending events, incremented for each event sent.
     internal uint _txnId = 0;
 
+    internal string NextTransactionId() => $"{DateTimeOffset.Now.ToUnixTimeSeconds()}-{Interlocked.Increment(ref _txnId)}";
+
     public HttpClientParameters(IHttpClientFactory factory, string baseUri, string? bearerToken, ILogger logger, CancellationToken cancellationToken)
     {
         Factory = factory ?? throw new ArgumentNullException(nameof(factory));

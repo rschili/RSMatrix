@@ -46,7 +46,8 @@ internal static class MatrixRetry
         parameters.CancellationToken.ThrowIfCancellationRequested();
     }
 
-    internal static async Task<T> ExecuteAsync<T>(HttpClientParameters parameters, string operation, Func<Task<T>> action)
+    internal static async Task<T> ExecuteAsync<T>(HttpClientParameters parameters, string operation, Func<Task<T>> action,
+        Action<Exception>? onFirstTransientFailure = null)
     {
         var failureCount = 0;
         while (true)
@@ -58,6 +59,8 @@ internal static class MatrixRetry
             }
             catch (Exception ex) when (IsTransient(ex, parameters.CancellationToken))
             {
+                if (failureCount == 0)
+                    onFirstTransientFailure?.Invoke(ex);
                 var delay = GetDelay(failureCount, (ex as MatrixResponseException)?.RetryAfter);
                 failureCount = Math.Min(failureCount + 1, 6);
                 parameters.Logger.LogWarning(ex,

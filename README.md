@@ -11,7 +11,7 @@ The goal is to have a simple text client which can retrieve and send text messag
 
 I will try to make it conform to all requirements. It sends automatic receipts and read notifications.
 
-End-to-End Encryption is **NOT** supported. I looked into it a bit, but seemed too much work and I do not need it myself.
+End-to-end encryption is supported experimentally, see [below](#end-to-end-encryption).
 
 ## Example
 
@@ -36,6 +36,31 @@ await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
 ```
 
 Room and user information is cached and updated on the client object. Associated rooms and users are included in the message given to the handler.
+
+## Issues and health
+
+`client.Issues` reports problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, failed auto-joins and interrupted syncs. Reading it is optional. It keeps the latest 100 issues.
+
+```cs
+_ = Task.Run(async () =>
+{
+    await foreach (var issue in client.Issues.ReadAllAsync(cancellationToken))
+        logger.LogWarning("{Issue}", issue);
+});
+```
+
+## End-to-end encryption
+
+Pass a directory for encryption keys to enable encryption:
+
+```cs
+MatrixTextClient client = await MatrixTextClient.ConnectAsync(userid, password, device,
+    httpClientFactory, cancellationToken, logger,
+    encryptionStoreDirectory: "/var/lib/mybot/matrix-encryption");
+```
+
+> [!WARNING]
+> The encryption code was written by AI, from the Matrix specification. It has been tested locally against a synapse server, but I have not done any real-world testing yet.
 
 ## Testing
 

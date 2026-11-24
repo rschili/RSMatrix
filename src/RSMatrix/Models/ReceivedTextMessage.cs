@@ -23,9 +23,16 @@ public class ReceivedTextMessage
     /// </summary>
     public string MsgType { get; private set; }
 
+    /// <summary>
+    /// Whether the message arrived end-to-end encrypted. A message that is not encrypted
+    /// in a room where <see cref="Room.IsEncrypted"/> is true could be read by the server.
+    /// </summary>
+    public bool IsEncrypted { get; }
+
     //TODO: format and formatted_body
-    internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, string? threadId, string msgType, MatrixTextClient client)
+    internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, string? threadId, string msgType, MatrixTextClient client, bool isEncrypted = false)
     {
+        IsEncrypted = isEncrypted;
         Body = body;
         Room = room;
         Sender = sender;
@@ -123,6 +130,7 @@ public class ReceivedTextMessage
             $"EventId: {EventId}\n" +
             $"ThreadId: {ThreadId}\n" +
             $"Timestamp: {Timestamp}\n" +
+            $"IsEncrypted: {IsEncrypted}\n" +
             $"Mentions: {mentionsString}";
     }
 }

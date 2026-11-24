@@ -1,11 +1,14 @@
 using System.Collections.Immutable;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using RSMatrix.Http;
 
 namespace RSMatrix.Models;
 
 /// <summary>A room observed by the client.</summary>
-/// <remarks>Message, notice and edit sends throw <see cref="NotSupportedException"/>
-/// when encryption has been observed; this library cannot encrypt their content.</remarks>
+/// <remarks>Messages, notices, edits and reactions are encrypted automatically in encrypted rooms
+/// when the client was connected with an encryption store. Without one, they throw
+/// <see cref="NotSupportedException"/> once encryption has been observed.</remarks>
 public class Room
 {
     internal MatrixTextClient Client { get; }
@@ -81,7 +84,6 @@ public class Room
     internal async Task<string> SendMessageInternalAsync(string msgType, string body, (string Format, string FormattedBody)? formatted,
         string? inReplyTo, IList<MatrixId>? mentions, string? threadRootId, string? threadFallbackEventId)
     {
-        EnsurePlaintextAllowed();
         RoomMessageMention? roomMessageMention = null;
         if (mentions != null)
         {
@@ -112,8 +114,7 @@ public class Room
             messageRequest.Format = formatted.Value.Format;
             messageRequest.FormattedBody = formatted.Value.FormattedBody;
         }
-        var response = await MatrixHelper.PutMessageAsync(Client.HttpClientParameters, RoomId, messageRequest).ConfigureAwait(false);
-        return response.EventId ?? "";
+        return await SendRoomEventAsync("m.room.message", messageRequest).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -136,7 +137,6 @@ public class Room
     private async Task<string> EditMessageInternalAsync(string originalEventId, string msgType, string newBody,
         (string Format, string FormattedBody)? formatted, IList<MatrixId>? mentions)
     {
-        EnsurePlaintextAllowed();
         RoomMessageMention? roomMessageMention = null;
         if (mentions != null)
         {
@@ -169,8 +169,7 @@ public class Room
             messageRequest.FormattedBody = $"* {formatted.Value.FormattedBody}";
         }
 
-        var response = await MatrixHelper.PutMessageAsync(Client.HttpClientParameters, RoomId, messageRequest).ConfigureAwait(false);
-        return response.EventId ?? "";
+        return await SendRoomEventAsync("m.room.message", messageRequest).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -184,8 +183,13 @@ public class Room
     /// <returns>The event ID of the sent reaction</returns>
     public async Task<string> SendReactionAsync(string eventId, string key)
     {
-        var response = await MatrixHelper.PutReactionAsync(Client.HttpClientParameters, RoomId, eventId, key).ConfigureAwait(false);
-        return response.EventId ?? "";
+        ArgumentException.ThrowIfNullOrEmpty(eventId, nameof(eventId));
+        ArgumentException.ThrowIfNullOrEmpty(key, nameof(key));
+        var reaction = new ReactionRequest
+        {
+            RelatesTo = new ReactionRelatesTo { RelType = "m.annotation", EventId = eventId, Key = key }
+        };
+        return await SendRoomEventAsync("m.reaction", reaction).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -216,12 +220,16 @@ public class Room
         var messages = new List<ReceivedTextMessage>();
         if (response.Chunk != null)
         {
-            foreach (var e in response.Chunk)
+            foreach (var chunkEvent in response.Chunk)
             {
-                if (e.Type != "m.room.message" || e.Content == null)
+                ClientEventWithoutRoomID? e = chunkEvent;
+                var isEncrypted = e.Type == "m.room.encrypted";
+                if (isEncrypted)
+                    e = Client.DecryptRoomEvent(this, e);
+                if (e?.Type != "m.room.message" || e.Content == null)
                     continue;
 
-                var messageEvent = System.Text.Json.JsonSerializer.Deserialize<RoomMessageEvent>((System.Text.Json.JsonElement)e.Content);
+                var messageEvent = JsonSerializer.Deserialize<RoomMessageEvent>((JsonElement)e.Content);
                 if (messageEvent == null || (messageEvent.MsgType != "m.text" && messageEvent.MsgType != "m.notice"))
                     continue;
 
@@ -236,7 +244,7 @@ public class Room
                 if (messageEvent.RelatesTo?.EventId != null && messageEvent.RelatesTo.RelType == "m.thread")
                     threadId = messageEvent.RelatesTo.EventId;
 
-                var message = new ReceivedTextMessage(messageEvent.Body, this, roomUser, e.EventId, serverTs, threadId, messageEvent.MsgType, Client);
+                var message = new ReceivedTextMessage(messageEvent.Body, this, roomUser, e.EventId, serverTs, threadId, messageEvent.MsgType, Client, isEncrypted);
                 messages.Add(message);
             }
         }
@@ -244,12 +252,24 @@ public class Room
         return new MessageHistoryResult { Messages = messages, NextToken = response.End };
     }
 
-    private void EnsurePlaintextAllowed()
+    private static readonly JsonSerializerOptions SendOptions = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+
+    private async Task<string> SendRoomEventAsync(string eventType, object content)
     {
-        // A caller can construct another Room wrapper; do not let that bypass the
-        // encryption state already known by the client's canonical room cache.
-        if (IsEncrypted || Client.IsRoomEncrypted(RoomId))
-            throw new NotSupportedException($"Cannot send plaintext messages to encrypted room {RoomId.Full}: end-to-end encryption is not supported.");
+        var json = JsonSerializer.SerializeToNode(content, SendOptions)!.AsObject();
+        // A caller can construct another Room wrapper; use the client's canonical room
+        // so that observed encryption state cannot be bypassed.
+        var room = Client.IsRoomEncrypted(RoomId) ? Client.GetOrAddRoom(RoomId) : this;
+        if (IsEncrypted || room.IsEncrypted)
+        {
+            if (Client.Encryption == null)
+                throw new NotSupportedException($"Cannot send plaintext messages to encrypted room {RoomId.Full}: " +
+                    "connect with an encryption store directory to enable end-to-end encryption.");
+            json = await Client.Encryption.EncryptRoomEventAsync(room, eventType, json).ConfigureAwait(false);
+            eventType = "m.room.encrypted";
+        }
+        var response = await MatrixHelper.PutRoomEventAsync(Client.HttpClientParameters, RoomId, eventType, json).ConfigureAwait(false);
+        return response.EventId ?? "";
     }
 
     public override string ToString()

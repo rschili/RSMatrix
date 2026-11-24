@@ -25,7 +25,8 @@ internal sealed class MatrixTestContext : IDisposable
         });
         UserId.TryParse("@bot:example.org", out var user);
         Client = MatrixTextClient.CreateForTesting(new HttpClientParameters(
-            new Factory(_handler), "https://example.org", "token", logger ?? new RecordingLogger(Logs), Lifetime.Token), user!);
+            new Factory(_handler), "https://example.org", "token", logger ?? new RecordingLogger(Logs), Lifetime.Token)
+            { RetryDelayAsync = (_, _) => Task.CompletedTask }, user!);
     }
 
     public Room Room(string id = "!room:example.org")

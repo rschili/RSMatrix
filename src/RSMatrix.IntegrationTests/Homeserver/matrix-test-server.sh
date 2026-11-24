@@ -17,7 +17,7 @@ fail() { printf '%s\n' "$*" >&2; exit 1; }
 usage() {
     printf '%s\n' \
         "Usage: bash ${BASH_SOURCE[0]} {up|down|logs|status|test}" \
-        '  up      Start a fresh server and provision alice/bob; fail if it exists.' \
+        '  up      Start a fresh server and provision alice/bob/carol; fail if it exists.' \
         '  down    Remove this test container and all its data (idempotent).' \
         '  logs    Show server logs.' \
         '  status  Show container status.' \
@@ -100,14 +100,14 @@ up() {
     done
     [[ "$ready" == true ]] || fail "Synapse did not become ready at $URL."
 
-    for user in alice bob; do
+    for user in alice bob carol; do
         podman exec "$CREATED_ID" register_new_matrix_user \
             --config /data/homeserver.yaml \
             --user "$user" --password rsmatrix-test-password --no-admin \
             http://127.0.0.1:8008
     done
     printf '\nSynapse ready: %s\n' "$URL"
-    printf 'Users: @alice:localhost and @bob:localhost\nPassword: rsmatrix-test-password\n'
+    printf 'Users: @alice:localhost, @bob:localhost and @carol:localhost\nPassword: rsmatrix-test-password\n'
     printf 'Local test credentials only. Stop and erase: make matrix-down\n'
 }
 

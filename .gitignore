@@ -401,4 +401,7 @@ temp/
 
 # AI instructions
 AGENTS.md
-pi/*
+CLAUDE.md
+.pi/
+.claude/
+.ignore
