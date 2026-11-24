@@ -7,11 +7,10 @@ I tried several libraries and got none of them to work as they were all still in
 
 Implementing this using the [Client spec version 1.17](https://spec.matrix.org/v1.17/client-server-api/)
 
-The goal is to have a simple text client which can retrieve and send text messages for Chatbot development. It's not intended as a comprehensive library for building a client UI.
+The first goal was to have a simple text client which can retrieve and send text messages for Chatbot development.
+It is slowly getting more comprehensive and moving towards a full client implementation.
 
-I will try to make it conform to all requirements. It sends automatic receipts and read notifications.
-
-End-to-end encryption is supported experimentally, see [below](#end-to-end-encryption).
+I'm trying to keep it as simple as possible without sacrificing essential features.
 
 ## Example
 
