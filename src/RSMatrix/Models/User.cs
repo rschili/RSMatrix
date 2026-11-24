@@ -2,7 +2,7 @@ namespace RSMatrix.Models;
 
 public class User
 {
-    public User(MatrixId userId)
+    internal User(MatrixId userId)
     {
         UserId = userId;
     }

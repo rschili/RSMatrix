@@ -69,10 +69,11 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
 
     /// <summary>The lifetime token may end before the fixture's, to restart a client.</summary>
     internal async Task<MatrixTextClient> ConnectAsync(string user, string deviceId,
-        string? encryptionStoreDirectory, CancellationToken lifetime)
+        string? encryptionStoreDirectory, CancellationToken lifetime, string? sessionStoreDirectory = null)
     {
         var client = await MatrixTextClient.ConnectAsync($"@{user}:localhost", Password,
-            deviceId, this, lifetime, encryptionStoreDirectory: encryptionStoreDirectory);
+            deviceId, this, lifetime, encryptionStoreDirectory: encryptionStoreDirectory,
+            sessionStoreDirectory: sessionStoreDirectory);
         _clients.Add(client);
         return client;
     }

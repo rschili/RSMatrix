@@ -6,7 +6,7 @@ using System.Text.Json;
 using RSFlowControl;
 
 namespace RSMatrix.Http;
-public record HttpClientParameters
+internal record HttpClientParameters
 {
     public IHttpClientFactory Factory { get; init; }
     public string BaseUri { get; set; }
@@ -36,7 +36,7 @@ public record HttpClientParameters
 }
 
 
-public static class HttpClientHelper
+internal static class HttpClientHelper
 {
     public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
     {
@@ -185,7 +185,7 @@ public class MatrixResponseException : Exception
     }
 }
 
-public static class HttpParameterHelper
+internal static class HttpParameterHelper
 {
     public static string AppendParameters(string path, IEnumerable<KeyValuePair<string, string>> parameters)
     {

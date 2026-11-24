@@ -11,7 +11,7 @@ public class LoginTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task Connect_InitializesAndRecoversWithoutAnotherLogin(bool failInitialization)
+    public async Task Connect_RetriesWithinSession_AndLogsInAgainOnlyAfterSoftLogout(bool failInitialization)
     {
         using var handler = new LoginHandler(failInitialization);
         using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -24,16 +24,17 @@ public class LoginTests
                 return Task.CompletedTask;
             });
 
-        // The fake server ends sync with a terminal error. It must reach the channel,
-        // rather than silently triggering another login or leaving a background loop.
+        // The fake server keeps answering sync with a soft logout. The client logs in once more
+        // with the same device and sync position. A rejection right after that login is terminal
+        // and must reach the channel, rather than looping on logins or leaving a background loop.
         var error = await Assert.ThrowsAsync<MatrixResponseException>(() =>
             client.Messages.Completion.WaitAsync(lifetime.Token));
         await Assert.That(error!.ErrorCode).IsEqualTo("M_UNKNOWN_TOKEN");
-        await Assert.That(handler.LoginCount).IsEqualTo(1);
+        await Assert.That(handler.LoginCount).IsEqualTo(2);
         await Assert.That(handler.CapabilitiesCount).IsEqualTo(failInitialization ? 2 : 1);
         await Assert.That(handler.PresenceCount).IsEqualTo(failInitialization ? 2 : 1);
         await Assert.That(delays.Count).IsEqualTo(failInitialization ? 3 : 0);
-        await Assert.That(handler.SyncQueries.Count).IsEqualTo(failInitialization ? 3 : 2);
+        await Assert.That(handler.SyncQueries.Count).IsEqualTo(failInitialization ? 4 : 3);
         await Assert.That(handler.SyncQueries[0].Contains("since=")).IsFalse();
         await Assert.That(handler.SyncQueries.Skip(1).All(q => q.Contains("since=cursor%26one"))).IsTrue();
         await Assert.That(handler.AuthenticatedTokens.All(t => t == "session-token")).IsTrue();

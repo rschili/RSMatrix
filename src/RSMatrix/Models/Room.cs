@@ -12,7 +12,7 @@ namespace RSMatrix.Models;
 public class Room
 {
     internal MatrixTextClient Client { get; }
-    public Room(MatrixId roomId, MatrixTextClient client)
+    internal Room(MatrixId roomId, MatrixTextClient client)
     {
         RoomId = roomId ?? throw new ArgumentNullException(nameof(roomId));
         Client = client ?? throw new ArgumentNullException(nameof(client));
@@ -283,17 +283,17 @@ public class Room
 /// </summary>
 public class MessageHistoryResult
 {
-    public required List<ReceivedTextMessage> Messages { get; init; }
+    public List<ReceivedTextMessage> Messages { get; internal init; } = [];
     /// <summary>
     /// Token to pass as 'from' in the next FetchMessagesAsync call to continue paginating.
     /// Null when there are no more messages to fetch.
     /// </summary>
-    public string? NextToken { get; init; }
+    public string? NextToken { get; internal init; }
 }
 
 public class RoomUser
 {
-    public RoomUser(User user)
+    internal RoomUser(User user)
     {
         User = user;
     }

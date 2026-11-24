@@ -12,9 +12,9 @@ public class ReceivedTextMessage
 
     public List<RoomUser>? Mentions { get; internal set; }
 
-    public string EventId { get; set; }
+    public string EventId { get; }
 
-    public string? ThreadId { get; set; }
+    public string? ThreadId { get; }
 
     public DateTimeOffset Timestamp { get; internal set; }
 

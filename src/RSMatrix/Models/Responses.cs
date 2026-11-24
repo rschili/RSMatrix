@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace RSMatrix.Models;
-public class MatrixErrorResponse
+internal class MatrixErrorResponse
 {
     [JsonPropertyName("errcode")]
     public required string ErrorCode { get; set; }
@@ -18,7 +18,7 @@ public class MatrixErrorResponse
 }
 
 
-public class WellKnownUriResponse
+internal class WellKnownUriResponse
 {
     [JsonPropertyName("m.homeserver")]
     public required HomeServer HomeServer { get; set; }
@@ -27,18 +27,18 @@ public class WellKnownUriResponse
     public IdentityServer? IdentityServer { get; set; }
 }
 
-public class HomeServer
+internal class HomeServer
 {
     [JsonPropertyName("base_url")]
     public required string BaseUrl { get; set; }
 }
-public class IdentityServer
+internal class IdentityServer
 {
     [JsonPropertyName("base_url")]
     public required string BaseUrl { get; set; }
 }
 
-public class SpecVersionsResponse
+internal class SpecVersionsResponse
 {
     [JsonPropertyName("unstable_features")]
     public Dictionary<string, bool>? UnstableFeatures { get; set; }
@@ -47,7 +47,7 @@ public class SpecVersionsResponse
     public required List<string> Versions { get; set; }
 }
 
-public class AuthFlowsResponse
+internal class AuthFlowsResponse
 {
     [JsonPropertyName("flows")]
     public required List<AuthFlow> Flows { get; set; }
@@ -56,13 +56,13 @@ public class AuthFlowsResponse
     public string? Session { get; set; }
 }
 
-public class AuthFlow
+internal class AuthFlow
 {
     [JsonPropertyName("type")]
     public required string Type { get; set; }
 }
 
-public class LoginResponse
+internal class LoginResponse
 {
     [JsonPropertyName("user_id")]
     public required string UserId { get; set; }
@@ -72,13 +72,21 @@ public class LoginResponse
     public required string DeviceId { get; set; }
 }
 
-public class CapabilitiesResponse
+internal class WhoAmIResponse
+{
+    [JsonPropertyName("user_id")]
+    public required string UserId { get; set; }
+    [JsonPropertyName("device_id")]
+    public string? DeviceId { get; set; }
+}
+
+internal class CapabilitiesResponse
 {
     [JsonPropertyName("capabilities")]
     public required Capabilities Capabilities { get; set; }
 }
 
-public class Capabilities
+internal class Capabilities
 {
     [JsonPropertyName("m.change_password")]
     public BooleanCapability? ChangePassword { get; set; }
@@ -96,19 +104,19 @@ public class Capabilities
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
 
-public class RateLimit
+internal class RateLimit
 {
     [JsonPropertyName("max_requests_per_hour")]
     public required int MaxRequestsPerHour { get; set; }
 }
 
-public class BooleanCapability
+internal class BooleanCapability
 {
     [JsonPropertyName("enabled")]
     public required bool Enabled { get; set; }
 }
 
-public class RoomVersionsCapability
+internal class RoomVersionsCapability
 {
     [JsonPropertyName("available")]
     public required Dictionary<string, string> Available { get; set; }
@@ -120,13 +128,13 @@ public class RoomVersionsCapability
 /// <summary>
 /// This is the response after posting a new filter
 /// </summary>
-public class FilterResponse
+internal class FilterResponse
 {
     [JsonPropertyName("filter_id")]
     public required string FilterId { get; set; }
 }
 
-public class SyncResponse
+internal class SyncResponse
 {
     [JsonPropertyName("next_batch")]
     public required string NextBatch { get; set; }
@@ -172,7 +180,7 @@ public class SyncResponse
     public EventResponse? ToDevice { get; set; }
 }
 
-public class DeviceLists
+internal class DeviceLists
 {
     [JsonPropertyName("changed")]
     public List<string>? Changed { get; set; }
@@ -181,20 +189,20 @@ public class DeviceLists
     public List<string>? Left { get; set; }
 }
 
-public class EventResponse
+internal class EventResponse
 {
     [JsonPropertyName("events")]
     public List<MatrixEvent>? Events { get; set; }
 }
 
 
-public class ClientEventWithoutRoomIdResponse
+internal class ClientEventWithoutRoomIdResponse
 {
     [JsonPropertyName("events")]
     public List<ClientEventWithoutRoomID>? Events { get; set; }
 }
 
-public class TimelineEventResponse
+internal class TimelineEventResponse
 {
     [JsonPropertyName("events")]
     public List<ClientEventWithoutRoomID>? Events { get; set; }
@@ -206,7 +214,7 @@ public class TimelineEventResponse
     public string? PrevBatch { get; set; }
 }
 
-public class RoomEvents
+internal class RoomEvents
 {
     [JsonPropertyName("invite")]
     public Dictionary<string, InvitedRoomEvents>? Invites { get; set; }
@@ -221,19 +229,19 @@ public class RoomEvents
     public Dictionary<string, JsonElement>? Leaves { get; set; }
 }
 
-public class InvitedRoomEvents
+internal class InvitedRoomEvents
 {
     [JsonPropertyName("invite_state")]
     public InviteState? InviteState { get; set; }
 }
 
-public class InviteState
+internal class InviteState
 {
     [JsonPropertyName("events")]
     public List<StrippedStateEvent>? Events { get; set; }
 }
 
-public class StrippedStateEvent
+internal class StrippedStateEvent
 {
     [JsonPropertyName("type")]
     public required string Type { get; set; }
@@ -248,13 +256,13 @@ public class StrippedStateEvent
     public required string Sender { get; set; }
 }
 
-public class JoinRoomResponse
+internal class JoinRoomResponse
 {
     [JsonPropertyName("room_id")]
     public required string RoomId { get; set; }
 }
 
-public class MessagesResponse
+internal class MessagesResponse
 {
     [JsonPropertyName("start")]
     public required string Start { get; set; }
@@ -269,7 +277,7 @@ public class MessagesResponse
     public List<ClientEvent>? State { get; set; }
 }
 
-public class JoinedRoomEvents
+internal class JoinedRoomEvents
 {
     [JsonPropertyName("summary")]
     public RoomSummary? Summary { get; set; }
@@ -293,7 +301,7 @@ public class JoinedRoomEvents
     public UnreadNotifications? UnreadThreadNotifications { get; set; }
 }
 
-public class RoomSummary
+internal class RoomSummary
 {
     [JsonPropertyName("m.heroes")]
     public List<string>? Heroes { get; set; }
@@ -305,7 +313,7 @@ public class RoomSummary
     public int? JoinedMemberCount { get; set; }
 }
 
-public class UnreadNotifications
+internal class UnreadNotifications
 {
     [JsonPropertyName("highlight_count")]
     public int? HighlightCount { get; set; }
@@ -313,7 +321,7 @@ public class UnreadNotifications
     public int? NotificationCount { get; set; }
 }
 
-public class PresenceResponse
+internal class PresenceResponse
 {
     [JsonPropertyName("currently_active")]
     public bool? CurrentlyActive { get; set; }
@@ -329,7 +337,7 @@ public class PresenceResponse
     public string? StatusMessage { get; set; }
 }
 
-public class MessageResponse
+internal class MessageResponse
 {
     [JsonPropertyName("event_id")]
     public required string EventId { get; set; }

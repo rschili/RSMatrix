@@ -9,7 +9,7 @@ namespace RSMatrix.Http;
 /// <summary>
 /// Low level helper methods for Matrix operations
 /// </summary>
-public static class MatrixHelper
+internal static class MatrixHelper
 {
     /// <summary>
     /// Fetches the well-known URI from the server
@@ -54,6 +54,12 @@ public static class MatrixHelper
         };
         var content = JsonContent.Create(request);
         return await HttpClientHelper.SendAsync<LoginResponse>(parameters, "/_matrix/client/v3/login", HttpMethod.Post, content).ConfigureAwait(false);
+    }
+
+    internal static async Task<WhoAmIResponse> GetWhoAmIAsync(HttpClientParameters parameters)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return await HttpClientHelper.SendAsync<WhoAmIResponse>(parameters, "/_matrix/client/v3/account/whoami").ConfigureAwait(false);
     }
 
     public static async Task<CapabilitiesResponse> FetchCapabilitiesAsync(HttpClientParameters parameters)

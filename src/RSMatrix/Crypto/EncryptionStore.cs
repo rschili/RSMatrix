@@ -42,7 +42,6 @@ internal sealed class EncryptionStore : IDisposable
     private const string StoreFileName = "rsmatrix-encryption.json";
     private const string LockFileName = "rsmatrix-encryption.lock";
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
-    private const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
     private readonly string _path;
     private readonly FileStream _lock;
@@ -62,21 +61,9 @@ internal sealed class EncryptionStore : IDisposable
     /// <summary>Opens or creates the store. Throws if it belongs to another user or device, or is in use.</summary>
     public static EncryptionStore Open(string directory, string userId, string deviceId)
     {
-        if (OperatingSystem.IsWindows())
-            Directory.CreateDirectory(directory);
-        else
-            Directory.CreateDirectory(directory, OwnerOnly | UnixFileMode.UserExecute);
-
-        FileStream fileLock;
-        try
-        {
-            fileLock = new FileStream(Path.Combine(directory, LockFileName), FileMode.OpenOrCreate,
-                FileAccess.ReadWrite, FileShare.None);
-        }
-        catch (IOException ex)
-        {
-            throw new InvalidOperationException($"The encryption store in {directory} is already in use by another client.", ex);
-        }
+        PrivateFiles.CreateDirectory(directory);
+        var fileLock = PrivateFiles.Lock(Path.Combine(directory, LockFileName),
+            $"The encryption store in {directory} is already in use by another client.");
 
         try
         {
@@ -106,20 +93,7 @@ internal sealed class EncryptionStore : IDisposable
         }
     }
 
-    /// <summary>Writes a temporary file and renames it, so a crash leaves either the old or the new state.</summary>
-    public void Save()
-    {
-        var temporaryPath = _path + ".tmp";
-        var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write };
-        if (!OperatingSystem.IsWindows())
-            options.UnixCreateMode = OwnerOnly;
-        using (var stream = new FileStream(temporaryPath, options))
-        {
-            JsonSerializer.Serialize(stream, Data, JsonOptions);
-            stream.Flush(flushToDisk: true);
-        }
-        File.Move(temporaryPath, _path, overwrite: true);
-    }
+    public void Save() => PrivateFiles.WriteAtomically(_path, stream => JsonSerializer.Serialize(stream, Data, JsonOptions));
 
     public void Dispose() => _lock.Dispose();
 }

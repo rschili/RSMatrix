@@ -11,7 +11,7 @@ namespace RSMatrix.Models;
 /// Consolt spec for help https://spec.matrix.org/v1.12/client-server-api/#get_matrixclientv3useruseridfilterfilterid
 /// This class is used for both, requests and responses as they match in structure
 /// </summary>
-public class Filter
+internal class Filter
 {
     /// <summary>
     /// This is not part of the request or response, it is used to store the filter id
@@ -36,7 +36,7 @@ public class Filter
     public RoomFilter? Room { get; set; }
 }
 
-public class EventFilter
+internal class EventFilter
 {
     [JsonPropertyName("limit")]
     public int? Limit { get; set; }
@@ -54,7 +54,7 @@ public class EventFilter
     public List<string>? Types { get; set; }
 }
 
-public class RoomFilter
+internal class RoomFilter
 {
     [JsonPropertyName("account_data")]
     public RoomEventFilter? AccountData { get; set; }
@@ -78,7 +78,7 @@ public class RoomFilter
     public RoomEventFilter? Timeline { get; set; }
 }
 
-public class RoomEventFilter
+internal class RoomEventFilter
 {
     [JsonPropertyName("contains_url")]
     public bool? ContainsUrl { get; set; }
@@ -114,7 +114,7 @@ public class RoomEventFilter
     public bool? UnreadThreadNotifications { get; set; }
 }
 
-public class StateFilter
+internal class StateFilter
 {
     [JsonPropertyName("contains_url")]
     public bool? ContainsUrl { get; set; }

@@ -19,10 +19,10 @@ public enum IdKind
 /// </remarks>
 public sealed class MatrixId : IEquatable<MatrixId>
 {
-    public string Full { get; init; }
+    public string Full { get; }
 
-    public Range LocalpartRange { get; init; }
-    public Range DomainRange { get; init; }
+    public Range LocalpartRange { get; }
+    public Range DomainRange { get; }
 
     /// <summary>Gets the localpart without the sigil, for both domain-qualified and domainless identifiers.</summary>
     public ReadOnlySpan<char> Localpart => Full.AsSpan(LocalpartRange);
@@ -30,7 +30,7 @@ public sealed class MatrixId : IEquatable<MatrixId>
     /// <summary>Gets the server name, or an empty span for a domainless room ID.</summary>
     public ReadOnlySpan<char> Domain => Full.AsSpan(DomainRange);
 
-    public IdKind Kind { get; init; }
+    public IdKind Kind { get; }
 
     private static readonly SearchValues<char> s_allowedHostCharacters = SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-");
     private static readonly SearchValues<char> s_allowedIpv6Characters = SearchValues.Create("abcdefABCDEF0123456789:.");
@@ -210,7 +210,7 @@ public static class RoomAlias
 }
 
 
-public class SpecVersion : IComparable<SpecVersion>, IEquatable<SpecVersion>
+internal class SpecVersion : IComparable<SpecVersion>, IEquatable<SpecVersion>
 {
     public int X { get; private set; }
     public int Y { get; private set; }

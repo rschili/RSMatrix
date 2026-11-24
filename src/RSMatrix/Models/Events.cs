@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace RSMatrix.Models;
 
-public class MatrixEvent
+internal class MatrixEvent
 {
     [JsonPropertyName("content")]
     public JsonElement? Content { get; set; }
@@ -16,7 +16,7 @@ public class MatrixEvent
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
 
-public class ClientEventWithoutRoomID
+internal class ClientEventWithoutRoomID
 {
     [JsonPropertyName("content")]
     public required JsonElement? Content { get; set; }
@@ -46,13 +46,13 @@ public class ClientEventWithoutRoomID
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
 
-public class ClientEvent : ClientEventWithoutRoomID
+internal class ClientEvent : ClientEventWithoutRoomID
 {
     [JsonPropertyName("room_id")]
     public required string RoomId { get; set; }
 }
 
-public class CanonicalAliasEvent
+internal class CanonicalAliasEvent
 {
     [JsonPropertyName("alias")]
     public string? Alias { get; set; }
@@ -61,7 +61,7 @@ public class CanonicalAliasEvent
     public List<string>? AltAliases { get; set; }
 }
 
-public class RoomNameEvent
+internal class RoomNameEvent
 {
     [JsonPropertyName("name")]
     public required string Name { get; set; }
@@ -77,7 +77,7 @@ public enum Presence
     Unavailable
 }
 
-public class PresenceRequest
+internal class PresenceRequest
 {
     [JsonPropertyName("presence")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -87,7 +87,7 @@ public class PresenceRequest
     public string? StatusMsg { get; set; }
 }
 
-public class PresenceEvent
+internal class PresenceEvent
 {
     [JsonPropertyName("avatar_url")]
     public string? AvatarUrl { get; set; }
@@ -123,7 +123,7 @@ public enum Membership
     Ban
 }
 
-public class RoomMemberEvent
+internal class RoomMemberEvent
 {
     [JsonPropertyName("avatar_url")]
     public string? AvatarUrl { get; set; }
@@ -145,7 +145,7 @@ public class RoomMemberEvent
     public bool? IsDirect { get; set; }
 }
 
-public class UnsignedData
+internal class UnsignedData
 {
     /// <summary>
     /// The time in milliseconds that has elapsed since the event was sent.
@@ -186,7 +186,7 @@ public class UnsignedData
 
 
 
-public class RoomMessageEvent
+internal class RoomMessageEvent
 {
     [JsonPropertyName("body")]
     public required string Body { get; set; }
@@ -210,7 +210,7 @@ public class RoomMessageEvent
     public RoomMessageRelatesTo? RelatesTo { get; set; }
 }
 
-public class RoomMessageRelatesTo
+internal class RoomMessageRelatesTo
 {
     [JsonPropertyName("event_id")]
     public string? EventId { get; set; }
@@ -226,25 +226,25 @@ public class RoomMessageRelatesTo
     public bool? IsFallingBack { get; set; }
 }
 
-public class RoomMessageMention
+internal class RoomMessageMention
 {
     [JsonPropertyName("user_ids")]
     public List<string>? UserIds { get; set; }
 }
 
-public class RoomMessageInReplyTo
+internal class RoomMessageInReplyTo
 {
     [JsonPropertyName("event_id")]
     public required string EventId { get; set; }
 }
 
-public class RoomEncryptionEvent
+internal class RoomEncryptionEvent
 {
     [JsonPropertyName("algorithm")]
     public required string Algorithm { get; set; }
 }
 
-public class ReactionRelatesTo
+internal class ReactionRelatesTo
 {
     [JsonPropertyName("rel_type")]
     public required string RelType { get; set; }
@@ -270,7 +270,7 @@ internal class ReactionRequest
     public required ReactionRelatesTo RelatesTo { get; set; }
 }
 
-public class RoomEncryptedEvent
+internal class RoomEncryptedEvent
 {
     [JsonPropertyName("algorithm")]
     public required string Algorithm { get; set; }

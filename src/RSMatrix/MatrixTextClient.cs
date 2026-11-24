@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using RSMatrix.Models;
@@ -67,7 +68,7 @@ public sealed class MatrixTextClient
         ? DateTimeOffset.FromUnixTimeMilliseconds(value)
         : null;
 
-    public bool DebugMode = false;
+    internal bool DebugMode = false;
 
     /// <summary>
     /// When true, the client will automatically join rooms when invited.
@@ -76,6 +77,12 @@ public sealed class MatrixTextClient
     public bool AutoJoinOnInvite { get; set; } = false;
 
     public bool IsSyncing { get; private set;}
+
+    // Kept to log in again when the server ends the session (soft logout).
+    private string? _password;
+    private string? _deviceId;
+    private SessionStore? _sessionStore;
+    private string? _resumeSyncToken;
 
     private MatrixTextClient(HttpClientParameters parameters,
         MatrixId userId,
@@ -113,11 +120,12 @@ public sealed class MatrixTextClient
     /// Use <see cref="Messages" />  to retrieve messages.
     /// </summary>
     /// <remarks>
-    /// Rate-limited requests wait for the server's retry delay. Transient failures during
-    /// post-login initialization and sync are retried until cancellation, using the same
-    /// access token and sync position. No session information is written to disk.
-    /// Terminal sync errors fault the Messages channel. Only reauthenticate when needed,
-    /// for example after M_UNKNOWN_TOKEN with soft_logout=true; do not retry bad credentials.
+    /// Once logged in, or when resuming a stored session, transient failures (network errors,
+    /// unavailable server, rate limits) are retried until cancellation. Before the first login they
+    /// throw, since they more likely point to a wrong configuration. If the server ends the session but allows
+    /// logging in again (soft logout), the client logs in again with the same device and continues
+    /// where it stopped. Other errors, like a wrong password, end the connection: ConnectAsync throws,
+    /// or the Messages channel faults if the client was already running.
     /// </remarks>
     /// <param name="userId">User id e.g. @user:example.org</param>
     /// <param name="password">password for the user</param>
@@ -131,17 +139,25 @@ public sealed class MatrixTextClient
     /// Only one client at a time can use it. Without it, encrypted messages are ignored and sending
     /// to encrypted rooms throws <see cref="NotSupportedException"/>.
     /// </param>
-    /// <returns></returns>
+    /// <param name="sessionStoreDirectory">
+    /// Keeps the session (access token and sync position) in this directory, so the next connect with
+    /// the same user and device ID resumes instead of logging in and syncing from scratch. Messages sent
+    /// while the client was offline are delivered after resuming. The files contain the access token in
+    /// plain JSON; protect the directory accordingly. It can be the same as the encryption store directory.
+    /// Only one client at a time can use a session.
+    /// </param>
     /// <exception cref="ArgumentException">Provided arguments not valid</exception>
     /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
     public static Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory,
-        CancellationToken cancellationToken, ILogger? logger = null, string? encryptionStoreDirectory = null)
+        CancellationToken cancellationToken, ILogger? logger = null, string? encryptionStoreDirectory = null,
+        string? sessionStoreDirectory = null)
         => ConnectAsync(userId, password, deviceId, httpClientFactory, cancellationToken, logger,
-            (delay, token) => Task.Delay(delay, token), encryptionStoreDirectory);
+            (delay, token) => Task.Delay(delay, token), encryptionStoreDirectory, sessionStoreDirectory);
 
     internal static async Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId,
         IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger,
-        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, string? encryptionStoreDirectory = null)
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, string? encryptionStoreDirectory = null,
+        string? sessionStoreDirectory = null)
     {
         if (logger == null)
             logger = NullLogger<MatrixTextClient>.Instance;
@@ -171,62 +187,67 @@ public sealed class MatrixTextClient
         }
 
         // Fail on a wrong or busy store before creating a session on the server.
-        var encryptionStore = encryptionStoreDirectory == null
-            ? null
-            : EncryptionEngine.OpenStore(encryptionStoreDirectory, parsedUserId.Full, deviceId);
+        EncryptionStore? encryptionStore = null;
+        SessionStore? sessionStore = null;
         try
         {
+            if (encryptionStoreDirectory != null)
+                encryptionStore = EncryptionEngine.OpenStore(encryptionStoreDirectory, parsedUserId.Full, deviceId);
+            if (sessionStoreDirectory != null)
+                sessionStore = SessionStore.Open(sessionStoreDirectory, parsedUserId.Full, deviceId);
             return await ConnectAsync(parsedUserId, password, deviceId, httpClientFactory, cancellationToken, logger,
-                retryDelayAsync, encryptionStore).ConfigureAwait(false);
+                retryDelayAsync, encryptionStore, sessionStore).ConfigureAwait(false);
         }
         catch
         {
             encryptionStore?.Dispose();
+            sessionStore?.Dispose();
             throw;
         }
     }
 
-    private static async Task<MatrixTextClient> ConnectAsync(MatrixId parsedUserId, string password, string deviceId,
+    private static async Task<MatrixTextClient> ConnectAsync(MatrixId userId, string password, string deviceId,
         IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger logger,
-        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, EncryptionStore? encryptionStore)
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, EncryptionStore? encryptionStore, SessionStore? sessionStore)
     {
-        var userId = parsedUserId.Full;
-        var baseUri = $"https://{parsedUserId.Domain}";
-        if (!Uri.IsWellFormedUriString(baseUri, UriKind.Absolute))
-        {
-            logger.LogError("The server address '{Url}' seems invalid, it should look like : 'https://matrix.org'.", baseUri);
-            throw new ArgumentException("The server address seems invalid, it should be a well formed Uri.", nameof(userId));
-        }
-        logger.LogInformation("Connecting to {Url}", baseUri);
-        HttpClientParameters httpClientParameters = new(httpClientFactory, baseUri, null, logger, cancellationToken)
+        HttpClientParameters http = new(httpClientFactory, "", null, logger, cancellationToken)
         {
             RetryDelayAsync = retryDelayAsync
         };
-        var wkUri = await MatrixHelper.FetchWellKnownUriAsync(httpClientParameters).ConfigureAwait(false);
-        if (wkUri.HomeServer == null || string.IsNullOrEmpty(wkUri.HomeServer.BaseUrl))
-        {
-            logger.LogError("Failed to load home server uri from provided server.");
-            throw new InvalidOperationException("Failed to load home server uri from provided server.");
-        }
-        baseUri = wkUri.HomeServer.BaseUrl;
-        if (string.IsNullOrEmpty(baseUri))
-        {
-            logger.LogError("The 'base_url' returned by server property is empty.");
-            throw new InvalidOperationException("The 'base_url' property returned by the server is empty.");
-        }
-        if (baseUri.EndsWith('/')) // according to doc, it may end with a trailing slash
-            baseUri = baseUri.Substring(0, baseUri.Length - 1);
 
-        logger.LogInformation("Resolved Base URL: {BaseUrl}", baseUri);
-        httpClientParameters.BaseUri = baseUri;
-
-        if (!Uri.IsWellFormedUriString(baseUri, UriKind.Absolute))
+        string? syncToken = null;
+        if (sessionStore?.Session is { } stored)
         {
-            logger.LogError("The server address '{Url}' seems invalid, it should look like : 'https://matrix.org'.", baseUri);
-            throw new InvalidOperationException("The resolved base uri seems invalid, it should be a well formed Uri.");
+            logger.LogInformation("Resuming the stored session at {Url}", stored.Homeserver);
+            http.BaseUri = stored.Homeserver;
+            http.BearerToken = stored.AccessToken;
+            try
+            {
+                var whoAmI = await MatrixRetry.ExecuteAsync(http, "Checking the stored session",
+                    () => MatrixHelper.GetWhoAmIAsync(http)).ConfigureAwait(false);
+                if (whoAmI.UserId != userId.Full || (whoAmI.DeviceId != null && whoAmI.DeviceId != deviceId))
+                    throw new InvalidOperationException(
+                        $"The stored session belongs to {whoAmI.UserId} with device {whoAmI.DeviceId}, not {userId.Full} with device {deviceId}.");
+                syncToken = stored.SyncToken;
+            }
+            catch (MatrixResponseException ex) when (ex.ErrorCode == "M_UNKNOWN_TOKEN")
+            {
+                http.BearerToken = null;
+                syncToken = SyncTokenAfterLogout(ex, stored.SyncToken, encryptionStore != null, logger);
+                await LoginAsync(http, userId, password, deviceId, retry: true).ConfigureAwait(false);
+            }
         }
+        else
+        {
+            // Without a session that worked before, a failure here is more likely a wrong configuration
+            // than an outage, so it is reported right away instead of retried.
+            http.BaseUri = await DiscoverHomeserverAsync(http, userId).ConfigureAwait(false);
+            await LoginAsync(http, userId, password, deviceId, retry: false).ConfigureAwait(false);
+        }
+        sessionStore?.Save(CreateStoredSession(http, userId, deviceId, syncToken));
 
-        var versions = await MatrixHelper.FetchSupportedSpecVersionsAsync(httpClientParameters).ConfigureAwait(false);
+        var versions = await MatrixRetry.ExecuteAsync(http, "Fetching spec versions",
+            () => MatrixHelper.FetchSupportedSpecVersionsAsync(http)).ConfigureAwait(false);
         if (versions.Versions == null || versions.Versions.Count == 0)
         {
             logger.LogError("Failed to load supported spec versions from server.");
@@ -240,36 +261,112 @@ public sealed class MatrixTextClient
             logger.LogWarning("The server does not support the spec version which was used to implement this library ({ExpectedVersion}), so errors may occur. Supported versions by the server are: {SupportedVersions}",
                 CurrentSpecVersion.VersionString, string.Join(',', parsedVersions));
 
-        var authFlows = await MatrixHelper.FetchSupportedAuthFlowsAsync(httpClientParameters).ConfigureAwait(false);
+        var serverCapabilities = await MatrixRetry.ExecuteAsync(http, "Fetching capabilities",
+            () => MatrixHelper.FetchCapabilitiesAsync(http)).ConfigureAwait(false);
+        http.RateLimiter = new LeakyBucket(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
+        var client = new MatrixTextClient(http, userId, parsedVersions, serverCapabilities.Capabilities)
+        {
+            _password = password,
+            _deviceId = deviceId,
+            _sessionStore = sessionStore,
+            _resumeSyncToken = syncToken,
+        };
+        if (encryptionStore != null)
+            client.Encryption = await EncryptionEngine.StartAsync(encryptionStore, http).ConfigureAwait(false);
+        await MatrixRetry.ExecuteAsync(http, "Initializing Matrix", client.InitAsync).ConfigureAwait(false);
+        client.IsSyncing = true;
+        _ = client.SyncAsync();
+        return client;
+    }
+
+    private static async Task<string> DiscoverHomeserverAsync(HttpClientParameters http, MatrixId userId)
+    {
+        var logger = http.Logger;
+        var serverUri = $"https://{userId.Domain}";
+        if (!Uri.IsWellFormedUriString(serverUri, UriKind.Absolute))
+        {
+            logger.LogError("The server address '{Url}' seems invalid, it should look like : 'https://matrix.org'.", serverUri);
+            throw new ArgumentException("The server address seems invalid, it should be a well formed Uri.", nameof(userId));
+        }
+        logger.LogInformation("Connecting to {Url}", serverUri);
+        http.BaseUri = serverUri;
+        var wkUri = await MatrixHelper.FetchWellKnownUriAsync(http).ConfigureAwait(false);
+        if (wkUri.HomeServer == null || string.IsNullOrEmpty(wkUri.HomeServer.BaseUrl))
+        {
+            logger.LogError("Failed to load home server uri from provided server.");
+            throw new InvalidOperationException("Failed to load home server uri from provided server.");
+        }
+        var baseUri = wkUri.HomeServer.BaseUrl;
+        if (baseUri.EndsWith('/')) // according to doc, it may end with a trailing slash
+            baseUri = baseUri.Substring(0, baseUri.Length - 1);
+
+        logger.LogInformation("Resolved Base URL: {BaseUrl}", baseUri);
+        if (!Uri.IsWellFormedUriString(baseUri, UriKind.Absolute))
+        {
+            logger.LogError("The server address '{Url}' seems invalid, it should look like : 'https://matrix.org'.", baseUri);
+            throw new InvalidOperationException("The resolved base uri seems invalid, it should be a well formed Uri.");
+        }
+        return baseUri;
+    }
+
+    /// <summary>
+    /// Logs in with the password and sets the new access token. Transient failures are only retried
+    /// when <paramref name="retry"/> is set, i.e. when this server and these credentials worked before.
+    /// </summary>
+    private static async Task LoginAsync(HttpClientParameters http, MatrixId userId, string password, string deviceId, bool retry)
+    {
+        var logger = http.Logger;
+        Task<T> SendAsync<T>(string operation, Func<Task<T>> action)
+            => retry ? MatrixRetry.ExecuteAsync(http, operation, action) : action();
+
+        var authFlows = await SendAsync("Fetching login flows",
+            () => MatrixHelper.FetchSupportedAuthFlowsAsync(http)).ConfigureAwait(false);
         var authFlowsList = authFlows.Flows.Select(f => f.Type).ToList();
         if (!authFlowsList.Contains("m.login.password"))
         {
-            logger.LogError("The server does not support password based authentication. Supported types: {Types}", string.Join(", ", authFlows));
+            logger.LogError("The server does not support password based authentication. Supported types: {Types}", string.Join(", ", authFlowsList));
             throw new InvalidOperationException("The server does not support password based authentication.");
         }
 
-        var loginResponse = await MatrixHelper.PasswordLoginAsync(httpClientParameters, userId, password, deviceId).ConfigureAwait(false);
+        var loginResponse = await SendAsync("Logging in",
+            () => MatrixHelper.PasswordLoginAsync(http, userId.Full, password, deviceId)).ConfigureAwait(false);
         if (string.IsNullOrEmpty(loginResponse.AccessToken))
         {
             logger.LogError("Failed to login to server.");
             throw new InvalidOperationException("Failed to login to server.");
         }
-
-        httpClientParameters.BearerToken = loginResponse.AccessToken;
-
-        // A successful login must not be repeated just because initialization hit a
-        // network error or an unavailable server. Retain this session while retrying.
-        var serverCapabilities = await MatrixRetry.ExecuteAsync(httpClientParameters, "Fetching capabilities",
-            () => MatrixHelper.FetchCapabilitiesAsync(httpClientParameters)).ConfigureAwait(false);
-        httpClientParameters.RateLimiter = new LeakyBucket(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
-        var client = new MatrixTextClient(httpClientParameters, parsedUserId, parsedVersions, serverCapabilities.Capabilities);
-        if (encryptionStore != null)
-            client.Encryption = await EncryptionEngine.StartAsync(encryptionStore, httpClientParameters).ConfigureAwait(false);
-        await MatrixRetry.ExecuteAsync(httpClientParameters, "Initializing Matrix", client.InitAsync).ConfigureAwait(false);
-        client.IsSyncing = true;
-        _ = client.SyncAsync();
-        return client;
+        http.BearerToken = loginResponse.AccessToken;
+        logger.LogInformation("Logged in as {UserId} with device {DeviceId}", userId.Full, deviceId);
     }
+
+    /// <summary>
+    /// Decides how to continue after the server rejected our access token. Returns the sync token to continue from.
+    /// </summary>
+    private static string? SyncTokenAfterLogout(MatrixResponseException error, string? syncToken, bool isEncryptionEnabled, ILogger logger)
+    {
+        if (error.SoftLogout)
+        {
+            logger.LogWarning("The server ended the session but allows logging in again (soft logout). Logging in with the same device.");
+            return syncToken;
+        }
+
+        // Without soft_logout, the spec requires discarding all state kept for this device, including its keys.
+        if (isEncryptionEnabled)
+            throw new InvalidOperationException(
+                "The server logged out this device, so its encryption keys must not be used anymore. " +
+                "Use a new device ID and a new encryption store directory.", error);
+        logger.LogWarning("The server logged out this device. Logging in again and syncing from scratch.");
+        return null;
+    }
+
+    private static StoredSession CreateStoredSession(HttpClientParameters http, MatrixId userId, string deviceId, string? syncToken) => new()
+    {
+        UserId = userId.Full,
+        DeviceId = deviceId,
+        Homeserver = http.BaseUri,
+        AccessToken = http.BearerToken!,
+        SyncToken = syncToken,
+    };
 
     internal async Task<Filter> SetFilterAsync(Filter filter)
     {
@@ -330,11 +427,11 @@ public sealed class MatrixTextClient
 
     internal async Task SyncAsync()
     {
-        // Refresh-token support is not advertised by this client. A terminal token
-        // error is surfaced to the caller rather than silently reauthenticating.
+        // A resumed sync position needs the full room state once, since our room cache starts empty.
         var request = new SyncParameters
         {
-            FullState = false,
+            Since = _resumeSyncToken,
+            FullState = _resumeSyncToken != null,
             SetPresence = Presence.Online,
             Timeout = 60000,
             Filter = Filter?.FilterId
@@ -342,16 +439,42 @@ public sealed class MatrixTextClient
 
         Exception? failure = null;
         IsSyncing = true;
+        var loggedInSinceLastSync = false;
+        var isFirstResumedSync = _resumeSyncToken != null;
         try
         {
             while (!HttpClientParameters.CancellationToken.IsCancellationRequested)
             {
-                var response = await MatrixRetry.ExecuteAsync(HttpClientParameters, "Matrix sync",
-                    () => MatrixHelper.GetSyncAsync(HttpClientParameters, request),
-                    onFirstTransientFailure: ex => ReportIssue(ClientIssueKind.SyncInterrupted,
-                        $"Sync with the server failed, retrying until it works again: {ex.Message}", exception: ex)).ConfigureAwait(false);
+                SyncResponse response;
+                try
+                {
+                    response = await MatrixRetry.ExecuteAsync(HttpClientParameters, "Matrix sync",
+                        () => MatrixHelper.GetSyncAsync(HttpClientParameters, request),
+                        onFirstTransientFailure: ex => ReportIssue(ClientIssueKind.SyncInterrupted,
+                            $"Sync with the server failed, retrying until it works again: {ex.Message}", exception: ex)).ConfigureAwait(false);
+                }
+                // A token rejected right after logging in again won't get better with another login.
+                catch (MatrixResponseException ex) when (ex.ErrorCode == "M_UNKNOWN_TOKEN" && _password != null && !loggedInSinceLastSync)
+                {
+                    await LoginAgainAsync(ex, request).ConfigureAwait(false);
+                    loggedInSinceLastSync = true;
+                    continue;
+                }
+                // Synapse answers a sync token it can't parse with 400 M_UNKNOWN; the spec defines no specific error.
+                catch (MatrixResponseException ex) when (isFirstResumedSync && ex.StatusCode == HttpStatusCode.BadRequest)
+                {
+                    Logger.LogWarning(ex, "The server rejected the stored sync position. Syncing from scratch.");
+                    request.Since = null;
+                    request.FullState = false;
+                    isFirstResumedSync = false;
+                    continue;
+                }
+                loggedInSinceLastSync = false;
+                isFirstResumedSync = false;
                 await HandleSyncResponseAsync(response).ConfigureAwait(false);
                 request.Since = response.NextBatch;
+                request.FullState = false;
+                SaveSession(request.Since);
                 Interlocked.Exchange(ref _lastSyncAtUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             }
         }
@@ -368,10 +491,31 @@ public sealed class MatrixTextClient
         {
             IsSyncing = false;
             Encryption?.Dispose();
+            _sessionStore?.Dispose();
             if (!MessageChannel.Writer.TryComplete(failure))
                 Logger.LogError("Sync ended, but failed to complete message channel.");
             _issueChannel.Writer.TryComplete();
         }
+    }
+
+    private async Task LoginAgainAsync(MatrixResponseException error, SyncParameters request)
+    {
+        HttpClientParameters.BearerToken = null;
+        request.Since = SyncTokenAfterLogout(error, request.Since, Encryption != null, Logger);
+        if (request.Since == null)
+            request.FullState = false;
+        await LoginAsync(HttpClientParameters, CurrentUser, _password!, _deviceId!, retry: true).ConfigureAwait(false);
+        SaveSession(request.Since);
+    }
+
+    private void SaveSession(string? syncToken)
+    {
+        if (_sessionStore == null)
+            return;
+        var stored = _sessionStore.Session;
+        if (stored != null && stored.SyncToken == syncToken && stored.AccessToken == HttpClientParameters.BearerToken)
+            return;
+        _sessionStore.Save(CreateStoredSession(HttpClientParameters, CurrentUser, _deviceId!, syncToken));
     }
 
     private async Task WriteSyncResponseToFileAsync(SyncResponse response)

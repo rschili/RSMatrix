@@ -37,6 +37,21 @@ await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
 
 Room and user information is cached and updated on the client object. Associated rooms and users are included in the message given to the handler.
 
+## Reconnecting and resuming
+
+Once the client has logged in, it retries network errors, unavailable servers and rate limits until the cancellation token is cancelled. Before the first login, `ConnectAsync` throws on these errors instead, because they more likely point to a wrong configuration.
+
+Pass a directory for sessions to resume after a restart instead of logging in and syncing from scratch:
+
+```cs
+MatrixTextClient client = await MatrixTextClient.ConnectAsync(userid, password, device,
+    httpClientFactory, cancellationToken, logger,
+    sessionStoreDirectory: "/var/lib/mybot/matrix-session");
+```
+
+The directory keeps one session per user and device ID, with the access token and the sync position.
+The files contain the access token unencrypted, so protect the directory as necessary. It can be the same directory as the encryption store.
+
 ## Issues and health
 
 `client.Issues` reports problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, failed auto-joins and interrupted syncs. Reading it is optional. It keeps the latest 100 issues.

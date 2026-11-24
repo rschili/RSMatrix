@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace RSMatrix.Models;
 
-public class Identifier
+internal class Identifier
 {
     [JsonPropertyName("type")]
     public required string Type { get; set; }
@@ -12,7 +12,7 @@ public class Identifier
     public string? User { get; set; }
 }
 
-public class LoginRequest
+internal class LoginRequest
 {
     [JsonPropertyName("identifier")]
     public required Identifier Identifier { get; set; }
@@ -30,7 +30,7 @@ public class LoginRequest
     public required string Type { get; set; }
 }
 
-public class SyncParameters
+internal class SyncParameters
 {
     [JsonPropertyName("filter")]
     public string? Filter { get; set; }
@@ -65,13 +65,13 @@ public class SyncParameters
     }
 }
 
-public class ReceiptRequest
+internal class ReceiptRequest
 {
     [JsonPropertyName("thread_id")]
     public string? ThreadId { get; set; }
 }
 
-public class ReadMarkerRequest
+internal class ReadMarkerRequest
 {
     [JsonPropertyName("m.read")]
     public string? Read { get; set; }
@@ -146,7 +146,7 @@ internal class JoinRoomRequest
     public string? Reason { get; set; }
 }
 
-public class MessagesParameters
+internal class MessagesParameters
 {
     public string? From { get; set; }
     public string? To { get; set; }
