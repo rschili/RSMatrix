@@ -25,6 +25,9 @@
       <SolidColorBrush x:Key="WarningBrush" Color="#B7791F" />
       <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#FDF6E7" />
       <SolidColorBrush x:Key="ErrorBrush" Color="#C53030" />
+      <SolidColorBrush x:Key="ReactionBackgroundBrush" Color="#F0F2F5" />
+      <SolidColorBrush x:Key="ReactionMineBackgroundBrush" Color="#E3EBFA" />
+      <SolidColorBrush x:Key="ReactionMineBorderBrush" Color="#8FAAE3" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="Dark">
       <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#17191C" />
@@ -50,6 +53,9 @@
       <SolidColorBrush x:Key="WarningBrush" Color="#E0B252" />
       <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#2B261A" />
       <SolidColorBrush x:Key="ErrorBrush" Color="#F07070" />
+      <SolidColorBrush x:Key="ReactionBackgroundBrush" Color="#24272C" />
+      <SolidColorBrush x:Key="ReactionMineBackgroundBrush" Color="#25324A" />
+      <SolidColorBrush x:Key="ReactionMineBorderBrush" Color="#4F6FA8" />
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>

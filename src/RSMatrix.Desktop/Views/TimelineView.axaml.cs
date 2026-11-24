@@ -1,7 +1,12 @@
 using System.Collections.Specialized;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using RSMatrix.Desktop.ViewModels;
 
 namespace RSMatrix.Desktop.Views;
@@ -15,7 +20,7 @@ public partial class TimelineView : UserControl
     private const double BottomTolerance = 40;
     private const double LoadOlderThreshold = 400;
 
-    private RoomViewModel? _room;
+    private ConversationViewModel? _conversation;
     private bool _isAtBottom = true;
     private bool _isRestorePending;
     // The first visible message and its distance from the top of the viewport, as of the last scroll.
@@ -30,12 +35,12 @@ public partial class TimelineView : UserControl
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);
-        if (_room != null)
-            _room.Timeline.Items.CollectionChanged -= OnItemsChanged;
-        _room = DataContext as RoomViewModel;
-        if (_room == null)
+        if (_conversation != null)
+            _conversation.Timeline.Items.CollectionChanged -= OnItemsChanged;
+        _conversation = DataContext as ConversationViewModel;
+        if (_conversation == null)
             return;
-        _room.Timeline.Items.CollectionChanged += OnItemsChanged;
+        _conversation.Timeline.Items.CollectionChanged += OnItemsChanged;
         _isAtBottom = true;
         _anchor = null;
         ScrollToEndAfterLayout();
@@ -43,7 +48,7 @@ public partial class TimelineView : UserControl
 
     private void OnItemsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        var count = _room?.Timeline.Items.Count ?? 0;
+        var count = _conversation?.Timeline.Items.Count ?? 0;
         var isAppend = e.Action == NotifyCollectionChangedAction.Add && e.NewStartingIndex >= count - e.NewItems!.Count;
         if (isAppend)
         {
@@ -102,8 +107,77 @@ public partial class TimelineView : UserControl
         _isAtBottom = offset >= extent - viewport - BottomTolerance;
         _anchor = FindFirstVisibleMessage();
 
-        if (offset < LoadOlderThreshold && _room is { HasMoreHistory: true } room && room.LoadOlderMessagesCommand.CanExecute(null))
-            room.LoadOlderMessagesCommand.Execute(null);
+        if (offset < LoadOlderThreshold && _conversation is { HasMoreHistory: true } conversation && conversation.LoadOlderMessagesCommand.CanExecute(null))
+            conversation.LoadOlderMessagesCommand.Execute(null);
+    }
+
+    private void OnAddReactionClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: MessageViewModel message } button)
+            return;
+        var picker = new ReactionPicker();
+        var flyout = new Flyout { Content = picker, Placement = PlacementMode.BottomEdgeAlignedRight };
+        picker.Picked += key =>
+        {
+            flyout.Hide();
+            message.ToggleReactionCommand.Execute(key);
+        };
+        ShowPinned(flyout, button);
+    }
+
+    private void OnMessageMenuClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: MessageViewModel message } button)
+            return;
+        var menu = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight };
+        menu.Items.Add(CreateMenuItem("Copy text", "CopyIcon", () => CopyAsync(message.Body)));
+        menu.Items.Add(CreateMenuItem("Copy message ID", "IdIcon", () => CopyAsync(message.EventId)));
+        menu.Items.Add(new Separator());
+        var viewSource = CreateMenuItem("View source", "CodeIcon", () => ShowSource(message));
+        viewSource.IsEnabled = message.Source != null;
+        menu.Items.Add(viewSource);
+        ShowPinned(menu, button);
+    }
+
+    private MenuItem CreateMenuItem(string header, string iconKey, Action onClick)
+    {
+        var icon = new Avalonia.Controls.Shapes.Path { Data = (Geometry)this.FindResource(iconKey)! };
+        icon.Classes.Add("icon");
+        var item = new MenuItem { Header = header, Icon = icon };
+        item.Click += (_, _) => onClick();
+        return item;
+    }
+
+    private async void CopyAsync(string text)
+    {
+        if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+            await clipboard.SetTextAsync(text);
+    }
+
+    private void ShowSource(MessageViewModel message)
+    {
+        var text = new SelectableTextBlock { Text = message.Source, Margin = new Thickness(16), TextWrapping = TextWrapping.Wrap };
+        text.Bind(TextBlock.FontFamilyProperty, this.GetResourceObservable("MonospaceFont"));
+        var window = new Window
+        {
+            Title = $"Event source: {message.EventId}",
+            Width = 640,
+            Height = 520,
+            Content = new ScrollViewer { Content = text },
+        };
+        if (TopLevel.GetTopLevel(this) is Window owner)
+            window.Show(owner);
+        else
+            window.Show();
+    }
+
+    // Keeps the hover actions of the message visible while the flyout is open.
+    private static void ShowPinned(FlyoutBase flyout, Control target)
+    {
+        var message = target.GetVisualAncestors().OfType<Border>().FirstOrDefault(b => b.Classes.Contains("message"));
+        message?.Classes.Set("pinned", true);
+        flyout.Closed += (_, _) => message?.Classes.Set("pinned", false);
+        flyout.ShowAt(target);
     }
 
     // Day separators make poor anchors, because loading history can remove them.

@@ -7,6 +7,7 @@ namespace RSMatrix.Desktop.ViewModels;
 
 public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 {
+    private const int ThreadsShownPerRoom = 3;
     private readonly IChatSession _session;
     private readonly Action<string?> _onSessionEnded;
     private readonly Func<DateTimeOffset> _getNow;
@@ -25,6 +26,19 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     public ChatUser CurrentUser => _session.CurrentUser;
 
+    internal IChatSession Session => _session;
+
+    internal DateOnly GetToday() => DateOnly.FromDateTime(_getNow().LocalDateTime);
+
+    public RecentReactions RecentReactions { get; } = new();
+
+    /// <summary>Asks the view to put the keyboard focus into the composer.</summary>
+    public event Action? ComposerFocusRequested;
+
+    internal void RequestComposerFocus() => ComposerFocusRequested?.Invoke();
+
+    internal void ReportIssue(string message) => Issue = message;
+
     public string ServerName => _session.ServerName;
 
     public MediaLoader Media { get; }
@@ -32,8 +46,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Most recent activity first.</summary>
     public ObservableCollection<RoomViewModel> Rooms { get; } = [];
 
+    /// <summary>
+    /// The rooms, each followed by its most recently active threads and, when there are more,
+    /// a <see cref="MoreThreadsViewModel"/>. The selected thread is always listed.
+    /// </summary>
+    public ObservableCollection<object> SidebarEntries { get; } = [];
+
+    /// <summary>The room or thread shown on the right.</summary>
     [ObservableProperty]
-    public partial RoomViewModel? SelectedRoom { get; set; }
+    public partial ConversationViewModel? SelectedConversation { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ConnectionText), nameof(IsOnline), nameof(IsStopped))]
@@ -87,8 +108,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 if (changed.State == ConnectionState.Online && !_isInitialSyncDone)
                 {
                     _isInitialSyncDone = true;
-                    SelectedRoom ??= Rooms.FirstOrDefault();
+                    SelectedConversation ??= Rooms.FirstOrDefault();
                 }
+                break;
+            case ReactionReceived reaction when _roomsById.TryGetValue(reaction.RoomId, out var room):
+                room.Timeline.Messages.AddReaction(reaction.TargetEventId, reaction.Key, reaction.Sender);
+                break;
+            case ReactionRemoved reaction when _roomsById.TryGetValue(reaction.RoomId, out var room):
+                room.Timeline.Messages.RemoveReaction(reaction.TargetEventId, reaction.Key, reaction.Sender);
+                break;
+            case ReceiptReceived receipt when _roomsById.TryGetValue(receipt.RoomId, out var room):
+                room.Timeline.Messages.ApplyReceipt(receipt.EventId, receipt.User);
                 break;
             case IssueReported issue:
                 Issue = issue.Message;
@@ -96,14 +126,34 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    partial void OnSelectedRoomChanged(RoomViewModel? value)
+    partial void OnSelectedConversationChanged(ConversationViewModel? value)
     {
+        RefreshSidebar();
         if (value == null)
             return;
         value.UnreadCount = 0;
         // Fill the view with some history if the sync delivered only a few messages.
         if (value.Timeline.MessageCount < 20 && value.HasMoreHistory && value.LoadOlderMessagesCommand.CanExecute(null))
             value.LoadOlderMessagesCommand.Execute(null);
+        RequestComposerFocus();
+    }
+
+    internal void RefreshSidebar()
+    {
+        var entries = new List<object>();
+        foreach (var room in Rooms)
+        {
+            entries.Add(room);
+            var active = room.ActiveThreads.ToList();
+            var shown = active.Take(ThreadsShownPerRoom).ToList();
+            if (SelectedConversation is ThreadViewModel selected && selected.Room == room && !shown.Contains(selected))
+                shown.Add(selected);
+            entries.AddRange(shown);
+            room.MoreThreads.Threads = active.Except(shown).ToList();
+            if (room.MoreThreads.Threads.Count > 0)
+                entries.Add(room.MoreThreads);
+        }
+        CollectionSync.Apply(SidebarEntries, entries);
     }
 
     [RelayCommand]
@@ -136,7 +186,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         if (!_roomsById.TryGetValue(info.RoomId, out var room))
         {
-            room = new RoomViewModel(info, _session, () => DateOnly.FromDateTime(_getNow().LocalDateTime));
+            room = new RoomViewModel(info, this);
             _roomsById.Add(info.RoomId, room);
             Rooms.Add(room);
         }
@@ -145,12 +195,14 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             room.Update(info);
         }
 
-        if (!room.AddLiveMessage(message))
+        if (!room.AddReceivedMessage(message))
             return;
+        ConversationViewModel conversation = message.ThreadRootId is { } rootId ? room.GetOrCreateThread(rootId) : room;
         // Without read markers from RSMatrix, only messages that arrive after the initial sync count as unread.
-        if (_isInitialSyncDone && room != SelectedRoom && message.Sender.UserId != CurrentUser.UserId)
-            room.UnreadCount++;
+        if (_isInitialSyncDone && conversation != SelectedConversation && message.Sender.UserId != CurrentUser.UserId)
+            conversation.UnreadCount++;
         MoveToSortedPosition(room);
+        RefreshSidebar();
     }
 
     private void MoveToSortedPosition(RoomViewModel room)

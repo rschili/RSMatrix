@@ -21,25 +21,41 @@ public partial class ChatView : UserControl
     {
         base.OnDataContextChanged(e);
         if (_viewModel != null)
-            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _viewModel.ComposerFocusRequested -= OnComposerFocusRequested;
         _viewModel = DataContext as ChatViewModel;
         if (_viewModel != null)
-            _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            _viewModel.ComposerFocusRequested += OnComposerFocusRequested;
     }
 
-    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(ChatViewModel.SelectedRoom))
-            Composer.Focus();
-    }
+    private void OnComposerFocusRequested() => Composer.Focus();
 
     private void OnComposerKeyDown(object? sender, KeyEventArgs e)
     {
+        var conversation = _viewModel?.SelectedConversation;
+        if (e.Key == Key.Escape && conversation is { IsReplying: true })
+        {
+            e.Handled = true;
+            conversation.CancelReplyCommand.Execute(null);
+            return;
+        }
         if (e.Key != Key.Enter || e.KeyModifiers != KeyModifiers.None)
             return;
         e.Handled = true;
-        var send = _viewModel?.SelectedRoom?.SendCommand;
-        if (send?.CanExecute(null) == true)
-            send.Execute(null);
+        if (conversation?.SendCommand.CanExecute(null) == true)
+            conversation.SendCommand.Execute(null);
+    }
+
+    private void OnMoreThreadsClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: MoreThreadsViewModel more } button || _viewModel is not { } chat)
+            return;
+        var menu = new MenuFlyout { Placement = PlacementMode.RightEdgeAlignedTop };
+        foreach (var thread in more.Threads)
+        {
+            var item = new MenuItem { Header = thread.Title };
+            item.Click += (_, _) => chat.SelectedConversation = thread;
+            menu.Items.Add(item);
+        }
+        menu.ShowAt(button);
     }
 }

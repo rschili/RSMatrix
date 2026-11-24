@@ -1,29 +1,36 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using RSMatrix.Desktop.Chat;
 using RSMatrix.Desktop.Content;
 
 namespace RSMatrix.Desktop.ViewModels;
 
-public sealed partial class RoomViewModel : ObservableObject
+public sealed partial class RoomViewModel : ConversationViewModel
 {
     private const int HistoryPageSize = 30;
-    private readonly IChatSession _session;
+    private readonly Dictionary<string, ThreadViewModel> _threadsByRootId = new(StringComparer.Ordinal);
     private string? _historyToken;
 
-    public RoomViewModel(ChatRoomInfo info, IChatSession session, Func<DateOnly> getToday)
+    public RoomViewModel(ChatRoomInfo info, ChatViewModel chat)
+        : base(chat, new RoomMessages(chat.CurrentUser.UserId))
     {
-        _session = session;
         RoomId = info.RoomId;
-        Timeline = new RoomTimeline(getToday);
+        HasMoreHistory = true;
+        MoreThreads = new MoreThreadsViewModel(this);
         Update(info);
     }
 
     public string RoomId { get; }
 
-    public RoomTimeline Timeline { get; }
+    public override RoomViewModel Room => this;
+
+    public override string? ThreadRootId => null;
+
+    public override string Title => Name;
+
+    public override string ComposerPlaceholder => IsDirect ? $"Message {Name}" : $"Message #{Name}";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Title))]
     public partial string Name { get; private set; } = "";
 
     [ObservableProperty]
@@ -41,21 +48,12 @@ public sealed partial class RoomViewModel : ObservableObject
 
     public string LastActivityText => FormatActivity(LastActivity, DateTimeOffset.Now);
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasUnread))]
-    public partial int UnreadCount { get; set; }
+    /// <summary>Threads with at least one reply, most recently active first.</summary>
+    public IEnumerable<ThreadViewModel> ActiveThreads
+        => _threadsByRootId.Values.Where(t => t.HasReplies).OrderByDescending(t => t.LastActivity);
 
-    public bool HasUnread => UnreadCount > 0;
-
-    /// <summary>Text in the composer, kept per room while switching.</summary>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(SendCommand))]
-    public partial string Draft { get; set; } = "";
-
-    [ObservableProperty]
-    public partial bool HasMoreHistory { get; private set; } = true;
-
-    public string ComposerPlaceholder => IsDirect ? $"Message {Name}" : $"Message #{Name}";
+    /// <summary>The sidebar entry for threads that don't fit below the room.</summary>
+    public MoreThreadsViewModel MoreThreads { get; }
 
     public void Update(ChatRoomInfo info)
     {
@@ -65,111 +63,73 @@ public sealed partial class RoomViewModel : ObservableObject
         OnPropertyChanged(nameof(ComposerPlaceholder));
     }
 
-    /// <summary>Adds a message from the live sync. Returns false for duplicates.</summary>
-    public bool AddLiveMessage(ChatMessage message)
+    public ThreadViewModel GetOrCreateThread(string rootEventId)
     {
-        var viewModel = CreateMessageViewModel(message);
-        if (!Timeline.Append(viewModel))
-            return false;
-        UpdateLastActivity(message);
-        return true;
+        if (_threadsByRootId.TryGetValue(rootEventId, out var thread))
+            return thread;
+        thread = new ThreadViewModel(this, rootEventId, Chat);
+        _threadsByRootId.Add(rootEventId, thread);
+        if (Timeline.Messages.Find(rootEventId) is { } root)
+            LinkThread(root, thread);
+        return thread;
     }
 
-    public void RefreshTimes() => OnPropertyChanged(nameof(LastActivityText));
+    /// <summary>Adds a message to the main timeline or its thread. Returns false for duplicates.</summary>
+    internal bool AddReceivedMessage(ChatMessage message)
+        => message.ThreadRootId is { } rootId
+            ? GetOrCreateThread(rootId).AddLiveMessage(message)
+            : AddLiveMessage(message);
 
-    [RelayCommand(CanExecute = nameof(CanSend))]
-    private async Task SendAsync()
+    public void RefreshTimes()
     {
-        var text = NormalizeOutgoingText(Draft);
-        if (text.Length == 0)
-            return;
-        Draft = "";
-        var message = new ChatMessage(RoomId, "", _session.CurrentUser, DateTimeOffset.Now, ChatMessageKind.Text,
-            text, PlainTextParser.Parse(text), IsEncrypted);
-        var pending = CreateMessageViewModel(message);
-        pending.IsPending = true;
-        Timeline.Append(pending);
-        UpdateLastActivity(message);
-        await DeliverAsync(pending);
+        OnPropertyChanged(nameof(LastActivityText));
+        foreach (var thread in _threadsByRootId.Values)
+            thread.RefreshTimes();
     }
 
-    private bool CanSend() => !string.IsNullOrWhiteSpace(Draft);
-
-    [RelayCommand]
-    private Task RetryAsync(MessageViewModel? message)
-        => message is { SendError: not null } ? DeliverAsync(message) : Task.CompletedTask;
-
-    private async Task DeliverAsync(MessageViewModel pending)
+    protected override async Task LoadOlderAsync(CancellationToken cancellationToken)
     {
-        pending.SendError = null;
-        pending.IsPending = true;
-        try
+        // Pages can come back without text messages for the main timeline, so keep going until something new shows up.
+        var added = 0;
+        while (added == 0 && HasMoreHistory)
         {
-            var eventId = await _session.SendTextAsync(RoomId, pending.Body, CancellationToken.None);
-            Timeline.ConfirmSent(pending, eventId);
+            var page = await Chat.Session.LoadHistoryAsync(RoomId, _historyToken, HistoryPageSize, cancellationToken);
+            _historyToken = page.NextToken;
+            HasMoreHistory = page.NextToken != null;
+
+            var mainMessages = page.Messages.Where(m => m.ThreadRootId == null).ToList();
+            var mainViewModels = mainMessages.Select(CreateMessageViewModel).ToList();
+            added = Timeline.Prepend(mainViewModels);
+            foreach (var message in mainViewModels)
+                OnMessageShown(message);
+            if (mainMessages.Count > 0)
+                OnMessageAdded(mainMessages[^1]);
+
+            foreach (var threadMessages in page.Messages.Where(m => m.ThreadRootId != null).GroupBy(m => m.ThreadRootId!))
+                GetOrCreateThread(threadMessages.Key).AddOlderMessages(threadMessages.ToList());
         }
-        catch (Exception ex)
-        {
-            pending.IsPending = false;
-            pending.SendError = ex.Message;
-        }
+        Chat.RefreshSidebar();
     }
 
-    [RelayCommand(AllowConcurrentExecutions = false)]
-    private async Task LoadOlderMessagesAsync(CancellationToken cancellationToken)
-    {
-        if (!HasMoreHistory)
-            return;
-        try
-        {
-            // Pages can come back without text messages, so keep going until something new shows up.
-            var added = 0;
-            while (added == 0 && HasMoreHistory)
-            {
-                var page = await _session.LoadHistoryAsync(RoomId, _historyToken, HistoryPageSize, cancellationToken);
-                _historyToken = page.NextToken;
-                HasMoreHistory = page.NextToken != null;
-                added = Timeline.Prepend(page.Messages.Select(CreateMessageViewModel).ToList());
-                if (Timeline.LastMessage == null && page.Messages.Count > 0)
-                    UpdateLastActivity(page.Messages[^1]);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            HistoryError = ex.Message;
-        }
-    }
-
-    [ObservableProperty]
-    public partial string? HistoryError { get; private set; }
-
-    private MessageViewModel CreateMessageViewModel(ChatMessage message)
-        => new(message, message.Sender.UserId == _session.CurrentUser.UserId, RetryCommand);
-
-    private void UpdateLastActivity(ChatMessage message)
+    protected override void OnMessageAdded(ChatMessage message)
     {
         if (message.Timestamp < LastActivity)
             return;
         LastActivity = message.Timestamp;
         var preview = message.Kind == ChatMessageKind.Image ? "Image" : PlainTextParser.ToPreview(message.Body);
-        LastMessagePreview = IsDirect && message.Sender.UserId != _session.CurrentUser.UserId
-            ? preview
-            : $"{(message.Sender.UserId == _session.CurrentUser.UserId ? "You" : message.Sender.DisplayName)}: {preview}";
+        var isMine = message.Sender.UserId == Chat.CurrentUser.UserId;
+        LastMessagePreview = IsDirect && !isMine ? preview : $"{(isMine ? "You" : message.Sender.DisplayName)}: {preview}";
     }
 
-    internal static string NormalizeOutgoingText(string text)
-        => text.ReplaceLineEndings("\n").Trim();
-
-    internal static string FormatActivity(DateTimeOffset timestamp, DateTimeOffset now)
+    protected override void OnMessageShown(MessageViewModel message)
     {
-        if (timestamp == default)
-            return "";
-        var local = timestamp.ToLocalTime();
-        var localNow = now.ToLocalTime();
-        if (local.Date == localNow.Date)
-            return local.ToString("t");
-        if (local.Date > localNow.Date.AddDays(-7))
-            return local.ToString("ddd");
-        return local.ToString("d");
+        if (_threadsByRootId.TryGetValue(message.EventId, out var thread))
+            LinkThread(message, thread);
+    }
+
+    private static void LinkThread(MessageViewModel root, ThreadViewModel thread)
+    {
+        root.Thread = thread;
+        thread.Root = root;
     }
 }

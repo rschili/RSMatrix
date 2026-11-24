@@ -16,7 +16,16 @@ public interface IChatSession : IAsyncDisposable
     IAsyncEnumerable<ChatEvent> ReadEventsAsync(CancellationToken cancellationToken);
 
     /// <summary>Returns the event ID of the sent message.</summary>
-    Task<string> SendTextAsync(string roomId, string text, CancellationToken cancellationToken);
+    /// <param name="replyToEventId">The message this one replies to, or null.</param>
+    /// <param name="threadRootId">The thread to send to, or null for the room's main timeline.</param>
+    Task<string> SendTextAsync(string roomId, string text, string? replyToEventId, string? threadRootId,
+        CancellationToken cancellationToken);
+
+    /// <summary>Reacts to a message. The reaction comes back as a <see cref="ReactionReceived"/> event.</summary>
+    Task SendReactionAsync(string roomId, string targetEventId, string key, CancellationToken cancellationToken);
+
+    /// <summary>Takes back the current user's reaction. Comes back as a <see cref="ReactionRemoved"/> event.</summary>
+    Task RemoveReactionAsync(string roomId, string targetEventId, string key, CancellationToken cancellationToken);
 
     /// <param name="from">Token from the previous page, or null to start at the newest message.</param>
     Task<HistoryPage> LoadHistoryAsync(string roomId, string? from, int limit, CancellationToken cancellationToken);
@@ -38,6 +47,9 @@ public enum ChatMessageKind
 }
 
 /// <param name="Body">Plain text, used for previews and copying.</param>
+/// <param name="ThreadRootId">Event ID of the thread's first message when this is a reply in a thread.</param>
+/// <param name="ReplyToEventId">The message this one replies to.</param>
+/// <param name="Source">The event as JSON, when the session has it.</param>
 public sealed record ChatMessage(
     string RoomId,
     string EventId,
@@ -46,7 +58,10 @@ public sealed record ChatMessage(
     ChatMessageKind Kind,
     string Body,
     MessageDocument Content,
-    bool IsEncrypted);
+    bool IsEncrypted,
+    string? ThreadRootId = null,
+    string? ReplyToEventId = null,
+    string? Source = null);
 
 /// <param name="Messages">Oldest first.</param>
 /// <param name="NextToken">Null when there is no older history.</param>
@@ -63,6 +78,14 @@ public enum ConnectionState
 public abstract record ChatEvent;
 
 public sealed record MessageReceived(ChatRoomInfo Room, ChatMessage Message) : ChatEvent;
+
+/// <param name="Key">Usually an emoji. A user reacts at most once with the same key.</param>
+public sealed record ReactionReceived(string RoomId, string TargetEventId, string Key, ChatUser Sender) : ChatEvent;
+
+public sealed record ReactionRemoved(string RoomId, string TargetEventId, string Key, ChatUser Sender) : ChatEvent;
+
+/// <summary>The user has read the room up to this event. Replaces the user's earlier receipt in the room.</summary>
+public sealed record ReceiptReceived(string RoomId, string EventId, ChatUser User) : ChatEvent;
 
 public sealed record ConnectionChanged(ConnectionState State, string? Detail) : ChatEvent;
 

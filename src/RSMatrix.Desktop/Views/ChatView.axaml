@@ -34,8 +34,8 @@
         </Border>
 
         <Panel>
-          <ListBox Classes="rooms" ItemsSource="{Binding Rooms}" SelectedItem="{Binding SelectedRoom}">
-            <ListBox.ItemTemplate>
+          <ListBox Classes="rooms" ItemsSource="{Binding SidebarEntries}" SelectedItem="{Binding SelectedConversation}">
+            <ListBox.DataTemplates>
               <DataTemplate DataType="vm:RoomViewModel">
                 <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
                   <controls:AvatarView Width="36" Height="36" IsSquare="{Binding !IsDirect}"
@@ -52,7 +52,22 @@
                   </StackPanel>
                 </Grid>
               </DataTemplate>
-            </ListBox.ItemTemplate>
+              <DataTemplate DataType="vm:ThreadViewModel">
+                <Grid ColumnDefinitions="36,*,Auto" ColumnSpacing="6">
+                  <Path Classes="threadConnector" />
+                  <TextBlock Grid.Column="1" Classes="caption threadTitle" Classes.unread="{Binding HasUnread}" Text="{Binding Title}"
+                             TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding Title}" />
+                  <Border Grid.Column="2" Classes="badge" IsVisible="{Binding HasUnread}">
+                    <TextBlock Text="{Binding UnreadCount}" />
+                  </Border>
+                </Grid>
+              </DataTemplate>
+              <DataTemplate DataType="vm:MoreThreadsViewModel">
+                <Grid ColumnDefinitions="36,*" ColumnSpacing="6">
+                  <Button Grid.Column="1" Classes="moreThreads" Content="{Binding Text}" Click="OnMoreThreadsClick" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.DataTemplates>
           </ListBox>
           <TextBlock Classes="secondary" Margin="24,8" TextWrapping="Wrap" IsVisible="{Binding !Rooms.Count}"
                      Text="Rooms show up here once they have messages." />
@@ -63,12 +78,17 @@
     <!-- Selected room -->
     <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto">
       <Border Height="56" Padding="24,0" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1"
-              IsVisible="{Binding SelectedRoom, Converter={x:Static ObjectConverters.IsNotNull}}">
-        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-          <TextBlock Classes="title" Text="{Binding SelectedRoom.Name}" />
-          <Path Classes="icon" Width="13" Height="13" Data="{StaticResource LockIcon}"
-                IsVisible="{Binding SelectedRoom.IsEncrypted}" ToolTip.Tip="End-to-end encrypted" VerticalAlignment="Center" />
-        </StackPanel>
+              IsVisible="{Binding SelectedConversation, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <Grid ColumnDefinitions="Auto,Auto,Auto" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,8,0" IsVisible="{Binding SelectedConversation.IsThread}">
+            <Button Classes="link headerRoom" Content="{Binding SelectedConversation.Room.Name}"
+                    Command="{Binding SelectedConversation.ShowRoomCommand}" ToolTip.Tip="Back to the room" />
+            <TextBlock Classes="title tertiary" Text="›" />
+          </StackPanel>
+          <TextBlock Grid.Column="1" Classes="title" Text="{Binding SelectedConversation.Title}" TextTrimming="CharacterEllipsis" MaxWidth="560" />
+          <Path Grid.Column="2" Classes="icon" Width="13" Height="13" Margin="8,0,0,0" Data="{StaticResource LockIcon}"
+                IsVisible="{Binding SelectedConversation.Room.IsEncrypted}" ToolTip.Tip="End-to-end encrypted" VerticalAlignment="Center" />
+        </Grid>
       </Border>
 
       <StackPanel Grid.Row="1">
@@ -90,22 +110,36 @@
         </Border>
       </StackPanel>
 
-      <Panel Grid.Row="2" IsVisible="{Binding SelectedRoom, Converter={x:Static ObjectConverters.IsNotNull}}">
-        <views:TimelineView DataContext="{Binding SelectedRoom}" />
+      <Panel Grid.Row="2" IsVisible="{Binding SelectedConversation, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <views:TimelineView DataContext="{Binding SelectedConversation}" />
       </Panel>
       <TextBlock Grid.Row="2" Classes="secondary" HorizontalAlignment="Center" VerticalAlignment="Center"
-                 Text="Select a room" IsVisible="{Binding SelectedRoom, Converter={x:Static ObjectConverters.IsNull}}" />
+                 Text="Select a room" IsVisible="{Binding SelectedConversation, Converter={x:Static ObjectConverters.IsNull}}" />
 
       <Border Grid.Row="3" Classes="composer" Margin="20,6,20,18" Padding="14,3,5,3"
-              IsVisible="{Binding SelectedRoom, Converter={x:Static ObjectConverters.IsNotNull}}">
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-          <TextBox x:Name="Composer" Classes="composer" MaxHeight="220"
-                   Text="{Binding SelectedRoom.Draft}" PlaceholderText="{Binding SelectedRoom.ComposerPlaceholder}" />
-          <Button Grid.Column="1" Classes="icon" VerticalAlignment="Bottom" Command="{Binding SelectedRoom.SendCommand}"
-                  ToolTip.Tip="Send (Enter). Shift+Enter starts a new line.">
-            <Path Classes="icon" Data="{StaticResource SendIcon}" />
-          </Button>
-        </Grid>
+              IsVisible="{Binding SelectedConversation, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <StackPanel>
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="0,4,0,2" IsVisible="{Binding SelectedConversation.IsReplying}">
+            <Path Classes="icon" Width="13" Height="13" Data="{StaticResource ReplyIcon}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Classes="caption secondary" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+              <Run Text="Replying to" />
+              <Run FontWeight="SemiBold" Text="{Binding SelectedConversation.ReplyingTo.Sender.DisplayName}" />
+              <Run Text="{Binding SelectedConversation.ReplyingTo.PreviewText}" />
+            </TextBlock>
+            <Button Grid.Column="2" Classes="icon" Padding="4" Command="{Binding SelectedConversation.CancelReplyCommand}"
+                    ToolTip.Tip="Cancel reply (Esc)">
+              <Path Classes="icon" Width="10" Height="10" Data="{StaticResource CloseIcon}" />
+            </Button>
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+            <TextBox x:Name="Composer" Classes="composer" MaxHeight="220"
+                     Text="{Binding SelectedConversation.Draft}" PlaceholderText="{Binding SelectedConversation.ComposerPlaceholder}" />
+            <Button Grid.Column="1" Classes="icon" VerticalAlignment="Bottom" Command="{Binding SelectedConversation.SendCommand}"
+                    ToolTip.Tip="Send (Enter). Shift+Enter starts a new line.">
+              <Path Classes="icon" Data="{StaticResource SendIcon}" />
+            </Button>
+          </Grid>
+        </StackPanel>
       </Border>
     </Grid>
   </Grid>

@@ -19,7 +19,7 @@ Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`
 
 ## Looking at it without a display
 
-`make desktop-snapshots` renders the app headless with sample data and writes PNG files to `temp/snapshots`: the login, each sample room in light and dark, scrolling back, the composer and a narrow window. With `--live USER_ID PASSWORD HOMESERVER` it signs in to a server instead and renders every room.
+`make desktop-snapshots` renders the app headless with sample data and writes PNG files to `temp/snapshots`: the login, each sample room in light and dark, the message actions, a thread, scrolling back, the composer and a narrow window. With `--live USER_ID PASSWORD HOMESERVER` it signs in to a server instead and renders every room.
 
 ## How it is built
 
@@ -28,7 +28,7 @@ Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`
 - `Sample/SampleChatSession` implements it with built-in data, including formatting and images that RSMatrix doesn't deliver yet.
 - `Content/` turns message bodies into a `MessageDocument`. The HTML parser interprets only the tags and attributes the spec suggests. Links must be absolute with an allowed scheme, and images load only from `mxc://` URIs. Nothing is rendered by a browser engine.
 - `Controls/` renders documents as native Avalonia controls: selectable text with clickable links and spoilers, code blocks, quotes, lists, tables and images.
-- `ViewModels/` uses CommunityToolkit.Mvvm. `RoomTimeline` keeps day separators, sender grouping and duplicate handling out of the views.
+- `ViewModels/` uses CommunityToolkit.Mvvm. A room and each of its threads are a `ConversationViewModel` with their own `RoomTimeline`, which keeps day separators, sender grouping and duplicate handling out of the views. They share one `RoomMessages`, which attaches reactions, read receipts and reply targets to their message.
 - `Views/TimelineView` keeps the reader at the newest message, and keeps the visible messages in place while older ones load above.
 
 ## What RSMatrix doesn't offer yet
@@ -44,5 +44,9 @@ The app works around these, and each would make it simpler or better:
 - **Sign out**: there is no logout, so disconnecting leaves the device signed in.
 - **Connection state**: `IsSyncing` and `LastSyncAt` have no change notifications, so they are polled.
 - **Read state**: no unread counts or read markers from the server. Only messages after the initial sync count as unread.
+- **Reactions and read receipts**: not delivered. Your own reactions are sent and removed, but only the ones sent in this session can be removed, and other people's reactions only show in the sample.
+- **Replies**: received messages don't say what they reply to. Sending replies works.
+- **Threads**: received messages carry their thread. Sending to a thread needs the received message object, so replying in threads only works in the sample.
+- **Event source**: no raw event JSON, so "View source" only works in the sample.
 - **Rate limit**: all requests except sync share one local bucket of 10 requests, refilled at 600 per hour. History pages and quick replies wait several seconds once it is empty.
 - **Cancellation**: sending and loading history only stop with the whole client.

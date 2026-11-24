@@ -30,8 +30,14 @@ public sealed class DaySeparatorViewModel(DateOnly date, DateOnly today) : Timel
 
 public sealed partial class MessageViewModel : TimelineItemViewModel
 {
-    public MessageViewModel(ChatMessage message, bool isOwn, IAsyncRelayCommand<MessageViewModel?>? retryCommand = null)
+    private const int MaxReaderAvatars = 3;
+    private readonly Func<MessageViewModel, string, Task>? _toggleReaction;
+
+    /// <param name="toggleReaction">Adds or takes back the current user's reaction with the given key.</param>
+    public MessageViewModel(ChatMessage message, bool isOwn, IAsyncRelayCommand<MessageViewModel?>? retryCommand = null,
+        Func<MessageViewModel, string, Task>? toggleReaction = null)
     {
+        _toggleReaction = toggleReaction;
         EventId = message.EventId;
         Sender = message.Sender;
         Timestamp = message.Timestamp;
@@ -39,12 +45,17 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
         Body = message.Body;
         Content = message.Kind == ChatMessageKind.Emote ? PrefixEmote(message.Sender, message.Content) : message.Content;
         IsEncrypted = message.IsEncrypted;
+        ThreadRootId = message.ThreadRootId;
+        ReplyToEventId = message.ReplyToEventId;
+        Source = message.Source;
         IsOwn = isOwn;
         RetryCommand = retryCommand;
     }
 
     /// <summary>Empty while a sent message waits for the server.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSent))]
+    [NotifyCanExecuteChangedFor(nameof(ToggleReactionCommand))]
     public partial string EventId { get; set; }
 
     public ChatUser Sender { get; }
@@ -59,17 +70,30 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
 
     public bool IsEncrypted { get; }
 
+    public string? ThreadRootId { get; }
+
+    public string? ReplyToEventId { get; }
+
+    /// <summary>The event as JSON, when the session has it.</summary>
+    public string? Source { get; }
+
     public bool IsOwn { get; }
+
+    public bool IsSent => EventId.Length > 0;
 
     public bool IsNotice => Kind == ChatMessageKind.Notice;
 
     public bool IsEmote => Kind == ChatMessageKind.Emote;
+
+    public bool IsReply => ReplyToEventId != null;
 
     public DateOnly LocalDate => DateOnly.FromDateTime(Timestamp.LocalDateTime);
 
     public string TimeText => Timestamp.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
 
     public string FullTimeText => Timestamp.ToLocalTime().ToString("f", CultureInfo.CurrentCulture);
+
+    public string PreviewText => Kind == ChatMessageKind.Image ? "Image" : PlainTextParser.ToPreview(Body);
 
     /// <summary>First message of a run from the same sender. Only these show the sender's name and avatar.</summary>
     [ObservableProperty]
@@ -87,6 +111,91 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
 
     public IAsyncRelayCommand<MessageViewModel?>? RetryCommand { get; }
 
+    /// <summary>The message this one replies to, once it is loaded.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReplyToName), nameof(ReplyToPreview))]
+    public partial MessageViewModel? ReplyTo { get; internal set; }
+
+    public string ReplyToName => ReplyTo?.Sender.DisplayName ?? "";
+
+    public string ReplyToPreview => ReplyTo?.PreviewText ?? "Original message isn't loaded";
+
+    /// <summary>The thread started at this message, if any.</summary>
+    [ObservableProperty]
+    public partial ThreadViewModel? Thread { get; internal set; }
+
+    /// <summary>In the order they were first used.</summary>
+    public ObservableCollection<ReactionViewModel> Reactions { get; } = [];
+
+    /// <summary>Other users whose read receipt is at this message.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasReaders), nameof(ReaderAvatars), nameof(ReaderOverflowText), nameof(ReadersToolTip))]
+    public partial IReadOnlyList<ChatUser> ReadBy { get; private set; } = [];
+
+    public bool HasReaders => ReadBy.Count > 0;
+
+    public IReadOnlyList<ChatUser> ReaderAvatars => ReadBy.Take(MaxReaderAvatars).ToList();
+
+    public string? ReaderOverflowText => ReadBy.Count > MaxReaderAvatars ? $"+{ReadBy.Count - MaxReaderAvatars}" : null;
+
+    public string ReadersToolTip => ReadBy.Count == 1
+        ? $"Seen by {ReadBy[0].DisplayName}"
+        : $"Seen by {ReadBy.Count} people\n{JoinNames(ReadBy)}";
+
+    public bool HasReacted(string key) => Reactions.Any(r => r.Key == key && r.IncludesMe);
+
+    [RelayCommand(CanExecute = nameof(CanToggleReaction))]
+    private Task ToggleReactionAsync(string? key)
+        => key == null || _toggleReaction == null ? Task.CompletedTask : _toggleReaction(this, key);
+
+    private bool CanToggleReaction() => _toggleReaction != null && IsSent;
+
+    internal void AddReaction(string key, ChatUser sender, string currentUserId)
+    {
+        var index = IndexOfReaction(key);
+        if (index < 0)
+        {
+            Reactions.Add(new ReactionViewModel(key, [sender], currentUserId));
+            return;
+        }
+        var existing = Reactions[index];
+        if (existing.Senders.Any(s => s.UserId == sender.UserId))
+            return;
+        Reactions[index] = new ReactionViewModel(key, [.. existing.Senders, sender], currentUserId);
+    }
+
+    internal void RemoveReaction(string key, string senderId, string currentUserId)
+    {
+        var index = IndexOfReaction(key);
+        if (index < 0)
+            return;
+        var senders = Reactions[index].Senders.Where(s => s.UserId != senderId).ToList();
+        if (senders.Count == 0)
+            Reactions.RemoveAt(index);
+        else
+            Reactions[index] = new ReactionViewModel(key, senders, currentUserId);
+    }
+
+    internal void AddReader(ChatUser user) => ReadBy = [.. ReadBy.Where(u => u.UserId != user.UserId), user];
+
+    internal void RemoveReader(string userId) => ReadBy = ReadBy.Where(u => u.UserId != userId).ToList();
+
+    /// <summary>"Alice", "Alice and Bob", "Alice, Bob and Carol".</summary>
+    internal static string JoinNames(IReadOnlyList<ChatUser> users)
+        => users.Count == 1
+            ? users[0].DisplayName
+            : $"{string.Join(", ", users.Take(users.Count - 1).Select(u => u.DisplayName))} and {users[^1].DisplayName}";
+
+    private int IndexOfReaction(string key)
+    {
+        for (var i = 0; i < Reactions.Count; i++)
+        {
+            if (Reactions[i].Key == key)
+                return i;
+        }
+        return -1;
+    }
+
     /// <summary>Emotes read as "* Bob waves".</summary>
     private static MessageDocument PrefixEmote(ChatUser sender, MessageDocument content)
     {
@@ -97,14 +206,148 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
     }
 }
 
+/// <summary>All users who reacted to a message with the same key.</summary>
+public sealed class ReactionViewModel(string key, IReadOnlyList<ChatUser> senders, string currentUserId)
+{
+    public string Key { get; } = key;
+
+    public IReadOnlyList<ChatUser> Senders { get; } = senders;
+
+    public int Count => Senders.Count;
+
+    public bool IncludesMe { get; } = senders.Any(s => s.UserId == currentUserId);
+
+    public string ToolTipText => $"{MessageViewModel.JoinNames(Senders)} reacted with {Key}";
+}
+
+/// <summary>Reactions offered in the picker. Matrix allows any text as a key.</summary>
+public static class ReactionChoices
+{
+    public static IReadOnlyList<string> All { get; } =
+    [
+        "👍", "👎", "❤️", "😂", "😮", "😢", "😡", "🎉",
+        "🙏", "👀", "🔥", "✅", "❌", "💯", "🚀", "🤔",
+        "😅", "😍", "🥳", "👏", "🍪", "☕", "🍕", "🐛",
+    ];
+}
+
+/// <summary>The reactions offered when hovering a message: the last three used, starting with common ones.</summary>
+public sealed class RecentReactions
+{
+    public ObservableCollection<string> Keys { get; } = ["👍", "❤️", "😂"];
+
+    public void Use(string key)
+    {
+        var index = Keys.IndexOf(key);
+        if (index > 0)
+        {
+            Keys.Move(index, 0);
+        }
+        else if (index < 0)
+        {
+            Keys.Insert(0, key);
+            Keys.RemoveAt(Keys.Count - 1);
+        }
+    }
+}
+
 /// <summary>
-/// The messages of one room in display order, with day separators and sender grouping.
+/// The messages of one room by event ID, from its main timeline and its threads. Reactions, read receipts
+/// and reply targets are attached to their message here, and wait for it when it isn't loaded yet.
+/// </summary>
+public sealed class RoomMessages(string currentUserId)
+{
+    private readonly Dictionary<string, MessageViewModel> _messagesByEventId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<(string Key, ChatUser Sender)>> _waitingReactionsByEventId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<MessageViewModel>> _waitingRepliesByEventId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (string EventId, ChatUser User)> _receiptsByUserId = new(StringComparer.Ordinal);
+
+    public bool Contains(string eventId) => _messagesByEventId.ContainsKey(eventId);
+
+    public MessageViewModel? Find(string eventId) => _messagesByEventId.GetValueOrDefault(eventId);
+
+    public void AddReaction(string targetEventId, string key, ChatUser sender)
+    {
+        if (_messagesByEventId.TryGetValue(targetEventId, out var message))
+        {
+            message.AddReaction(key, sender, currentUserId);
+            return;
+        }
+        if (!_waitingReactionsByEventId.TryGetValue(targetEventId, out var waiting))
+            _waitingReactionsByEventId[targetEventId] = waiting = [];
+        if (!waiting.Any(r => r.Key == key && r.Sender.UserId == sender.UserId))
+            waiting.Add((key, sender));
+    }
+
+    public void RemoveReaction(string targetEventId, string key, ChatUser sender)
+    {
+        if (_messagesByEventId.TryGetValue(targetEventId, out var message))
+            message.RemoveReaction(key, sender.UserId, currentUserId);
+        else if (_waitingReactionsByEventId.TryGetValue(targetEventId, out var waiting))
+            waiting.RemoveAll(r => r.Key == key && r.Sender.UserId == sender.UserId);
+    }
+
+    /// <summary>Moves the user's avatar to the message they read last. The current user's receipts are not shown.</summary>
+    public void ApplyReceipt(string eventId, ChatUser user)
+    {
+        if (user.UserId == currentUserId)
+            return;
+        if (_receiptsByUserId.TryGetValue(user.UserId, out var previous) &&
+            _messagesByEventId.TryGetValue(previous.EventId, out var previousMessage))
+            previousMessage.RemoveReader(user.UserId);
+        _receiptsByUserId[user.UserId] = (eventId, user);
+        if (_messagesByEventId.TryGetValue(eventId, out var message))
+            message.AddReader(user);
+    }
+
+    /// <summary>Links a reply to its target, now or once the target is added.</summary>
+    internal void ResolveReply(MessageViewModel message)
+    {
+        if (message.ReplyToEventId is not { } targetId || message.ReplyTo != null)
+            return;
+        if (_messagesByEventId.TryGetValue(targetId, out var target))
+        {
+            message.ReplyTo = target;
+            return;
+        }
+        if (!_waitingRepliesByEventId.TryGetValue(targetId, out var waiting))
+            _waitingRepliesByEventId[targetId] = waiting = [];
+        waiting.Add(message);
+    }
+
+    /// <summary>Returns false when a message with the same event ID is already there.</summary>
+    internal bool TryAdd(MessageViewModel message)
+    {
+        if (!_messagesByEventId.TryAdd(message.EventId, message))
+            return false;
+        if (_waitingReactionsByEventId.Remove(message.EventId, out var reactions))
+        {
+            foreach (var (key, sender) in reactions)
+                message.AddReaction(key, sender, currentUserId);
+        }
+        if (_waitingRepliesByEventId.Remove(message.EventId, out var replies))
+        {
+            foreach (var reply in replies)
+                reply.ReplyTo = message;
+        }
+        foreach (var (eventId, user) in _receiptsByUserId.Values)
+        {
+            if (eventId == message.EventId)
+                message.AddReader(user);
+        }
+        return true;
+    }
+}
+
+/// <summary>
+/// The messages of a room or thread in display order, with day separators and sender grouping.
 /// Live messages are appended, history is prepended, and duplicates by event ID are dropped.
 /// </summary>
-public sealed class RoomTimeline(Func<DateOnly> getToday)
+public sealed class RoomTimeline(RoomMessages messages, Func<DateOnly> getToday)
 {
     private static readonly TimeSpan GroupingWindow = TimeSpan.FromMinutes(5);
-    private readonly Dictionary<string, MessageViewModel> _messagesByEventId = new(StringComparer.Ordinal);
+
+    public RoomMessages Messages { get; } = messages;
 
     public ObservableCollection<TimelineItemViewModel> Items { get; } = [];
 
@@ -159,26 +402,21 @@ public sealed class RoomTimeline(Func<DateOnly> getToday)
     public void ConfirmSent(MessageViewModel pending, string eventId)
     {
         pending.IsPending = false;
-        if (_messagesByEventId.ContainsKey(eventId))
+        if (Messages.Contains(eventId))
         {
             Remove(pending);
             return;
         }
         pending.EventId = eventId;
-        _messagesByEventId[eventId] = pending;
+        Messages.TryAdd(pending);
     }
-
-    public bool Contains(string eventId) => _messagesByEventId.ContainsKey(eventId);
 
     private bool Register(MessageViewModel message)
     {
-        if (message.EventId.Length == 0)
-        {
-            MessageCount++;
-            return true; // Pending messages get their ID later.
-        }
-        if (!_messagesByEventId.TryAdd(message.EventId, message))
+        // Pending messages get their ID later.
+        if (message.EventId.Length > 0 && !Messages.TryAdd(message))
             return false;
+        Messages.ResolveReply(message);
         MessageCount++;
         return true;
     }
@@ -212,5 +450,6 @@ public sealed class RoomTimeline(Func<DateOnly> getToday)
            previous.Sender.UserId != message.Sender.UserId ||
            previous.LocalDate != message.LocalDate ||
            message.Timestamp - previous.Timestamp > GroupingWindow ||
-           previous.IsNotice != message.IsNotice;
+           previous.IsNotice != message.IsNotice ||
+           message.IsReply;
 }

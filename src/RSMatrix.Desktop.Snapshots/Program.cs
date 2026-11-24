@@ -62,15 +62,17 @@ void RenderSample()
         var suffix = theme == ThemeVariant.Dark ? "-dark" : "";
         foreach (var room in new[] { "General", "Design", "Builds", "Alice" })
         {
-            chat.SelectedRoom = chat.Rooms.First(r => r.Name == room);
+            chat.SelectedConversation = chat.Rooms.First(r => r.Name == room);
             Pump(TimeSpan.FromMilliseconds(500));
             Save($"room-{room.ToLowerInvariant()}{suffix}");
         }
     }
 
     Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
+    RenderMessageActions(chat);
+
     var lounge = chat.Rooms.First(r => r.Name == "Lounge");
-    chat.SelectedRoom = lounge;
+    chat.SelectedConversation = lounge;
     Pump(TimeSpan.FromSeconds(3));
     Save("room-lounge-history");
 
@@ -105,7 +107,7 @@ async Task RenderLiveAsync(string userId, string password, string homeserver)
     Console.WriteLine($"Connection: {chat.ConnectionText}. Rooms: {string.Join(", ", chat.Rooms.Select(r => r.Name))}");
     foreach (var room in chat.Rooms.ToList())
     {
-        chat.SelectedRoom = room;
+        chat.SelectedConversation = room;
         Pump(TimeSpan.FromSeconds(2));
         Save($"live-{string.Concat(room.Name.Where(char.IsAsciiLetterOrDigit)).ToLowerInvariant()}");
     }
@@ -113,7 +115,7 @@ async Task RenderLiveAsync(string userId, string password, string homeserver)
     // Scroll back through the room with the longest history. Each step should load older messages
     // while the messages on screen stay where they are.
     var longest = chat.Rooms.MaxBy(r => r.Timeline.MessageCount)!;
-    chat.SelectedRoom = longest;
+    chat.SelectedConversation = longest;
     Pump(TimeSpan.FromSeconds(2));
     var scroller = window.GetVisualDescendants().OfType<ScrollViewer>().First(s => s.Name == "Scroller");
     for (var step = 1; step <= 3; step++)
@@ -126,6 +128,92 @@ async Task RenderLiveAsync(string userId, string password, string homeserver)
         Save($"live-scrollback-{step}b");
     }
     await main.CloseAsync();
+}
+
+// Hovers a message, reacts through the picker, takes the reaction back, opens the menu, replies and opens a thread.
+void RenderMessageActions(ChatViewModel chat)
+{
+    chat.SelectedConversation = chat.Rooms.First(r => r.Name == "General");
+    Pump(TimeSpan.FromMilliseconds(500));
+    Border FindMessage() => window.GetVisualDescendants().OfType<Border>()
+        .First(b => b.Classes.Contains("message") && b.DataContext is MessageViewModel { Body: "All of them. Lists too." });
+    var viewModel = (MessageViewModel)FindMessage().DataContext!;
+    window.MouseMove(Center(FindMessage()));
+    Pump(TimeSpan.FromMilliseconds(200));
+    Save("actions-hover");
+
+    Click(FindButton(FindMessage(), "Add reaction"));
+    Pump(TimeSpan.FromMilliseconds(300));
+    Save("actions-picker");
+    window.MouseMove(new Point(1, 1));
+    Pump(TimeSpan.FromMilliseconds(100));
+
+    // Popups are separate top levels here, so the picker is checked on its own.
+    var picker = new ReactionPicker();
+    var pickerHost = new Window { Content = picker, Width = 400, Height = 200 };
+    pickerHost.Show();
+    Pump(TimeSpan.FromMilliseconds(100));
+    string? picked = null;
+    picker.Picked += key => picked = key;
+    Invoke(picker.GetVisualDescendants().OfType<Button>().First(b => b.Content is "🎉"));
+    pickerHost.Close();
+    viewModel.ToggleReactionCommand.Execute(picked);
+    Pump(TimeSpan.FromMilliseconds(400));
+    Console.WriteLine($"Picked: {picked}. Reactions: {string.Join(" ", viewModel.Reactions.Select(r => $"{r.Key}{r.Count}"))}. Recent: {string.Join(" ", chat.RecentReactions.Keys)}");
+    window.MouseMove(Center(FindMessage()));
+    Pump(TimeSpan.FromMilliseconds(200));
+    Save("actions-reacted");
+
+    Click(window.GetVisualDescendants().OfType<Button>().First(b => b.DataContext is ReactionViewModel { Key: "🎉" }));
+    Pump(TimeSpan.FromMilliseconds(400));
+    Console.WriteLine($"After clicking 🎉: {viewModel.Reactions.Count} reactions");
+
+    window.MouseMove(Center(FindMessage()));
+    Pump(TimeSpan.FromMilliseconds(100));
+    Click(FindButton(FindMessage(), "More"));
+    Pump(TimeSpan.FromMilliseconds(300));
+    Save("actions-menu");
+    window.KeyPress(Avalonia.Input.Key.Escape, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Escape, null);
+    window.MouseMove(new Point(1, 1));
+    Pump(TimeSpan.FromMilliseconds(100));
+
+    window.MouseMove(Center(FindMessage()));
+    Pump(TimeSpan.FromMilliseconds(100));
+    Click(FindButton(FindMessage(), "Reply"));
+    Pump(TimeSpan.FromMilliseconds(300));
+    Save("actions-reply");
+    chat.SelectedConversation!.CancelReplyCommand.Execute(null);
+
+    window.MouseMove(new Point(1, 1));
+    var summary = window.GetVisualDescendants().OfType<Button>()
+        .First(b => b.Classes.Contains("threadSummary") && b.DataContext is MessageViewModel { Body: "All of them. Lists too." });
+    Click(summary);
+    Pump(TimeSpan.FromMilliseconds(500));
+    Save("thread");
+    window.MouseMove(new Point(1, 1));
+    Pump(TimeSpan.FromMilliseconds(200));
+}
+
+Button FindButton(Control parent, string toolTip)
+    => parent.GetVisualDescendants().OfType<Button>().First(b => ToolTip.GetTip(b) as string == toolTip);
+
+// Goes through the control's own click handling, like a user would.
+void Invoke(Control control)
+{
+    var peer = Avalonia.Automation.Peers.ControlAutomationPeer.CreatePeerForElement(control);
+    ((Avalonia.Automation.Provider.IInvokeProvider)peer).Invoke();
+}
+
+Point Center(Control control)
+    => control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), window)
+       ?? throw new InvalidOperationException("Not on screen.");
+
+void Click(Control control)
+{
+    var point = Center(control);
+    window.MouseMove(point);
+    window.MouseDown(point, Avalonia.Input.MouseButton.Left);
+    window.MouseUp(point, Avalonia.Input.MouseButton.Left);
 }
 
 void Pump(TimeSpan duration)

@@ -1,0 +1,17 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:RSMatrix.Desktop.ViewModels"
+             x:Class="RSMatrix.Desktop.Views.ReactionPicker">
+  <ItemsControl ItemsSource="{x:Static vm:ReactionChoices.All}">
+    <ItemsControl.ItemsPanel>
+      <ItemsPanelTemplate>
+        <UniformGrid Columns="8" />
+      </ItemsPanelTemplate>
+    </ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate>
+      <DataTemplate x:DataType="x:String">
+        <Button Classes="emoji" Content="{Binding}" ToolTip.Tip="{Binding}" Click="OnEmojiClick" />
+      </DataTemplate>
+    </ItemsControl.ItemTemplate>
+  </ItemsControl>
+</UserControl>

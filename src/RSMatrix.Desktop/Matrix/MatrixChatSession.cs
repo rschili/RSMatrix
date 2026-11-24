@@ -31,6 +31,8 @@ public sealed class MatrixChatSession : IChatSession
     // RSMatrix has no public room list yet, so rooms are learned from the messages they deliver.
     // Joined rooms without a text message in the initial sync don't show up until someone writes.
     private readonly ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
+    // RSMatrix doesn't deliver reactions, so only the ones sent here are known, and only they can be taken back.
+    private readonly ConcurrentDictionary<(string RoomId, string TargetEventId, string Key), string> _sentReactionIds = new();
     private long _syncInterruptedAtUnixMilliseconds;
 
     private MatrixChatSession(MatrixTextClient client, CancellationTokenSource lifetime,
@@ -80,14 +82,34 @@ public sealed class MatrixChatSession : IChatSession
     public IAsyncEnumerable<ChatEvent> ReadEventsAsync(CancellationToken cancellationToken)
         => _events.Reader.ReadAllAsync(cancellationToken);
 
-    public Task<string> SendTextAsync(string roomId, string text, CancellationToken cancellationToken)
-        => GetRoom(roomId).SendTextMessageAsync(text, inReplyTo: null, mentions: null).WaitAsync(cancellationToken);
+    // RSMatrix sends to a thread only as a response to a received message object, which this session doesn't keep.
+    public Task<string> SendTextAsync(string roomId, string text, string? replyToEventId, string? threadRootId,
+        CancellationToken cancellationToken)
+        => threadRootId != null
+            ? throw new NotSupportedException("RSMatrix can't send to threads yet.")
+            : GetRoom(roomId).SendTextMessageAsync(text, replyToEventId, mentions: null).WaitAsync(cancellationToken);
 
     public async Task<HistoryPage> LoadHistoryAsync(string roomId, string? from, int limit, CancellationToken cancellationToken)
     {
         var result = await GetRoom(roomId).FetchMessagesAsync(limit, from).WaitAsync(cancellationToken).ConfigureAwait(false);
         var messages = result.Messages.Select(ToChatMessage).Reverse().ToList();
         return new HistoryPage(messages, result.NextToken);
+    }
+
+    public async Task SendReactionAsync(string roomId, string targetEventId, string key, CancellationToken cancellationToken)
+    {
+        var reactionId = await GetRoom(roomId).SendReactionAsync(targetEventId, key).WaitAsync(cancellationToken).ConfigureAwait(false);
+        _sentReactionIds[(roomId, targetEventId, key)] = reactionId;
+        _events.Writer.TryWrite(new ReactionReceived(roomId, targetEventId, key, CurrentUser));
+    }
+
+    public async Task RemoveReactionAsync(string roomId, string targetEventId, string key, CancellationToken cancellationToken)
+    {
+        if (!_sentReactionIds.TryGetValue((roomId, targetEventId, key), out var reactionId))
+            throw new InvalidOperationException("Only reactions sent in this session can be removed.");
+        await GetRoom(roomId).RedactEventAsync(reactionId).WaitAsync(cancellationToken).ConfigureAwait(false);
+        _sentReactionIds.TryRemove((roomId, targetEventId, key), out _);
+        _events.Writer.TryWrite(new ReactionRemoved(roomId, targetEventId, key, CurrentUser));
     }
 
     // RSMatrix can't download media yet.
@@ -225,6 +247,6 @@ public sealed class MatrixChatSession : IChatSession
         var kind = message.MsgType == "m.notice" ? ChatMessageKind.Notice : ChatMessageKind.Text;
         var sender = new ChatUser(message.Sender.User.UserId.Full, message.Sender.GetDisplayName());
         return new ChatMessage(message.Room.RoomId.Full, message.EventId, sender, message.Timestamp, kind,
-            message.Body ?? "", PlainTextParser.Parse(message.Body), message.IsEncrypted);
+            message.Body ?? "", PlainTextParser.Parse(message.Body), message.IsEncrypted, message.ThreadId);
     }
 }

@@ -166,6 +166,155 @@
   <Style Selector="Border.message.pending">
     <Setter Property="Opacity" Value="0.55" />
   </Style>
+  <Style Selector="Border.message.pinned">
+    <Setter Property="Background" Value="{DynamicResource MessageHoverBrush}" />
+  </Style>
+
+  <!-- Reactions below a message -->
+  <Style Selector="Button.reaction">
+    <Setter Property="Background" Value="{DynamicResource ReactionBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="7,1" />
+    <Setter Property="MinHeight" Value="0" />
+  </Style>
+  <Style Selector="Button.reaction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ReactionBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TextTertiaryBrush}" />
+  </Style>
+  <Style Selector="Button.reaction.mine">
+    <Setter Property="Background" Value="{DynamicResource ReactionMineBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ReactionMineBorderBrush}" />
+  </Style>
+  <Style Selector="Button.reaction.mine:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ReactionMineBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ReactionMineBorderBrush}" />
+  </Style>
+  <Style Selector="Button.reaction TextBlock.count">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+  </Style>
+  <Style Selector="Button.reaction.mine TextBlock.count">
+    <Setter Property="Foreground" Value="{DynamicResource MentionForegroundBrush}" />
+  </Style>
+
+  <Style Selector="ItemsControl.reactions">
+    <Setter Property="Margin" Value="0,3,0,1" />
+    <Setter Property="ItemsPanel">
+      <ItemsPanelTemplate>
+        <WrapPanel ItemSpacing="4" LineSpacing="4" />
+      </ItemsPanelTemplate>
+    </Setter>
+  </Style>
+
+  <!-- Replies and threads -->
+  <Style Selector="Path.replyCurve">
+    <Setter Property="Data" Value="M 18 14 V 9 Q 18 5 22 5 H 46" />
+    <Setter Property="Stroke" Value="{DynamicResource QuoteBarBrush}" />
+    <Setter Property="StrokeThickness" Value="2" />
+    <Setter Property="VerticalAlignment" Value="Bottom" />
+  </Style>
+  <Style Selector="Button.threadSummary">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="6,3" />
+    <Setter Property="Margin" Value="-6,2,0,0" />
+    <Setter Property="CornerRadius" Value="6" />
+  </Style>
+  <Style Selector="Button.threadSummary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SidebarItemHoverBrush}" />
+  </Style>
+  <Style Selector="Button.threadSummary TextBlock.replies">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource LinkBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.threadRoot">
+    <Setter Property="Padding" Value="24,16,90,14" />
+    <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+  <Style Selector="Path.threadConnector">
+    <Setter Property="Data" Value="M 18 -12 V 4 Q 18 9 23 9 H 34" />
+    <Setter Property="Stroke" Value="{DynamicResource QuoteBarBrush}" />
+    <Setter Property="StrokeThickness" Value="1.5" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="ClipToBounds" Value="False" />
+  </Style>
+  <Style Selector="TextBlock.threadTitle">
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+  </Style>
+  <Style Selector="TextBlock.threadTitle.unread">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Button.moreThreads">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.moreThreads:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+  <Style Selector="Button.headerRoom">
+    <Setter Property="FontSize" Value="16" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+  </Style>
+  <Style Selector="Button.headerRoom:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
+  <!-- Buttons showing a single emoji -->
+  <Style Selector="Button.emoji">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="5,2" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="FontSize" Value="17" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.emoji:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SidebarItemHoverBrush}" />
+  </Style>
+
+  <!-- Hover actions of a message -->
+  <Style Selector="Border.messageActions">
+    <Setter Property="IsVisible" Value="False" />
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="2" />
+    <Setter Property="BoxShadow" Value="0 2 6 0 #1F000000" />
+  </Style>
+  <Style Selector="Border.message:pointerover Border.messageActions.sent, Border.message.pinned Border.messageActions.sent">
+    <Setter Property="IsVisible" Value="True" />
+  </Style>
+  <Style Selector="Border.messageActions Button.icon">
+    <Setter Property="Padding" Value="6" />
+  </Style>
+  <Style Selector="Border.messageActions Border.separator">
+    <Setter Property="Width" Value="1" />
+    <Setter Property="Margin" Value="3,6" />
+    <Setter Property="Background" Value="{DynamicResource DividerBrush}" />
+  </Style>
+
+  <!-- Read receipt avatars overlap a little, with a ring in the background color -->
+  <Style Selector="Border.reader">
+    <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="1.5" />
+  </Style>
+
   <Style Selector="controls|MessageDocumentView.notice">
     <Setter Property="TextElement.Foreground" Value="{DynamicResource TextSecondaryBrush}" />
   </Style>
