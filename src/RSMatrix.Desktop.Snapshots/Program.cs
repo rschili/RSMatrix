@@ -51,10 +51,11 @@ return 0;
 void RenderSample()
 {
     Pump(TimeSpan.FromMilliseconds(300));
-    Save("login");
+    Save("signed-out");
+    SaveDialog("login");
 
     main.OpenSession(new SampleChatSession());
-    var chat = (ChatViewModel)main.CurrentPage;
+    var chat = main.Chat!;
     Pump(TimeSpan.FromMilliseconds(500));
     foreach (var theme in new[] { ThemeVariant.Light, ThemeVariant.Dark })
     {
@@ -89,6 +90,46 @@ void RenderSample()
     window.Width = 760;
     Pump(TimeSpan.FromMilliseconds(400));
     Save("narrow");
+    window.Width = 1180;
+
+    chat.SelectedConversation = chat.Rooms.First(r => r.Name == "General");
+    chat.ToggleMemberListCommand.Execute(null);
+    Pump(TimeSpan.FromMilliseconds(500));
+    Save("members");
+    window.Width = 900;
+    Pump(TimeSpan.FromMilliseconds(400));
+    Save("members-narrow");
+    window.Width = 1180;
+    chat.ToggleMemberListCommand.Execute(null);
+
+    RenderSettings(chat);
+}
+
+// Opens the settings dialog and confirms a few appearance changes, the way a user would.
+void RenderSettings(ChatViewModel chat)
+{
+    chat.SelectedConversation = chat.Rooms.First(r => r.Name == "General");
+    main.OpenSettingsCommand.Execute(null);
+    Pump(TimeSpan.FromMilliseconds(400));
+    SaveDialog("settings");
+
+    var settings = main.Settings!;
+    settings.ShowRoomPreviews = false;
+    settings.ConfirmCommand.Execute(null);
+    Pump(TimeSpan.FromMilliseconds(500));
+    Save("appearance-no-previews");
+
+    main.OpenSettingsCommand.Execute(null);
+    settings = main.Settings!;
+    settings.ShowRoomIcons = false;
+    settings.FontFamily = settings.FontFamilies.FirstOrDefault(f => f.Contains("Mono")) ?? settings.FontFamily;
+    settings.FontSize = 16;
+    settings.Theme = settings.Themes.First(t => t.Value == ThemePreference.Dark);
+    Pump(TimeSpan.FromMilliseconds(300));
+    SaveDialog("settings-changed");
+    settings.ConfirmCommand.Execute(null);
+    Pump(TimeSpan.FromMilliseconds(500));
+    Save("appearance-mono-large-dark");
 }
 
 async Task RenderLiveAsync(string userId, string password, string homeserver)
@@ -99,7 +140,7 @@ async Task RenderLiveAsync(string userId, string password, string homeserver)
     while (!connecting.IsCompleted)
         Pump(TimeSpan.FromMilliseconds(100));
     main.OpenSession(await connecting);
-    var chat = (ChatViewModel)main.CurrentPage;
+    var chat = main.Chat!;
     var deadline = DateTime.UtcNow.AddSeconds(30);
     while (chat.ConnectionState != ConnectionState.Online && DateTime.UtcNow < deadline)
         Pump(TimeSpan.FromMilliseconds(200));
@@ -228,10 +269,13 @@ void Pump(TimeSpan duration)
     while (DateTime.UtcNow < end);
 }
 
-void Save(string name)
+// Dialogs are their own windows, owned by the main window.
+void SaveDialog(string name) => Save(name, window.OwnedWindows.Last());
+
+void Save(string name, Window? target = null)
 {
     Dispatcher.UIThread.RunJobs();
-    var frame = window.CaptureRenderedFrame() ?? throw new InvalidOperationException("Nothing was rendered.");
+    var frame = (target ?? window).CaptureRenderedFrame() ?? throw new InvalidOperationException("Nothing was rendered.");
     var path = Path.Combine(outputDirectory, name + ".png");
     frame.Save(path, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
     Console.WriteLine(path);

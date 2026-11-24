@@ -5,7 +5,8 @@
   <Style Selector="Window">
     <Setter Property="Background" Value="{DynamicResource WindowBackgroundBrush}" />
     <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontFamily" Value="{DynamicResource ContentControlThemeFontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource ControlContentThemeFontSize}" />
   </Style>
 
   <Style Selector="TextBlock.secondary, SelectableTextBlock.secondary">
@@ -15,10 +16,10 @@
     <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}" />
   </Style>
   <Style Selector="TextBlock.caption">
-    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
   </Style>
   <Style Selector="TextBlock.title">
-    <Setter Property="FontSize" Value="16" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeTitle}" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
@@ -43,6 +44,12 @@
   </Style>
   <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource SidebarItemHoverBrush}" />
+  </Style>
+  <Style Selector="Button.icon.active /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SidebarItemSelectedBrush}" />
+  </Style>
+  <Style Selector="Button.icon.active Path.icon">
+    <Setter Property="Stroke" Value="{DynamicResource TextPrimaryBrush}" />
   </Style>
   <Style Selector="Button.icon:disabled /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
@@ -135,11 +142,20 @@
     <Setter Property="Background" Value="{DynamicResource UnreadBadgeBrush}" />
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="MinWidth" Value="18" />
-    <Setter Property="Height" Value="18" />
+    <Setter Property="MinHeight" Value="18" />
     <Setter Property="Padding" Value="5,0" />
   </Style>
+  <Style Selector="Border.badge.overlay">
+    <Setter Property="MinWidth" Value="18" />
+    <Setter Property="Padding" Value="4,0" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BorderBrush" Value="{DynamicResource SidebarBackgroundBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Right" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="Margin" Value="0,-7,-8,0" />
+  </Style>
   <Style Selector="Border.badge TextBlock">
-    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeSmall}" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Foreground" Value="White" />
     <Setter Property="HorizontalAlignment" Value="Center" />
@@ -192,7 +208,7 @@
     <Setter Property="BorderBrush" Value="{DynamicResource ReactionMineBorderBrush}" />
   </Style>
   <Style Selector="Button.reaction TextBlock.count">
-    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
   </Style>
@@ -227,7 +243,7 @@
     <Setter Property="Background" Value="{DynamicResource SidebarItemHoverBrush}" />
   </Style>
   <Style Selector="Button.threadSummary TextBlock.replies">
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeCompact}" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Foreground" Value="{DynamicResource LinkBrush}" />
     <Setter Property="VerticalAlignment" Value="Center" />
@@ -238,7 +254,7 @@
     <Setter Property="BorderThickness" Value="0,0,0,1" />
   </Style>
   <Style Selector="Path.threadConnector">
-    <Setter Property="Data" Value="M 18 -12 V 4 Q 18 9 23 9 H 34" />
+    <Setter Property="Data" Value="M 14 -12 V 4 Q 14 9 19 9 H 28" />
     <Setter Property="Stroke" Value="{DynamicResource QuoteBarBrush}" />
     <Setter Property="StrokeThickness" Value="1.5" />
     <Setter Property="VerticalAlignment" Value="Top" />
@@ -255,7 +271,7 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeCaption}" />
     <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -265,7 +281,7 @@
     <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
   </Style>
   <Style Selector="Button.headerRoom">
-    <Setter Property="FontSize" Value="16" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeTitle}" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
   </Style>
@@ -279,7 +295,7 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="5,2" />
     <Setter Property="CornerRadius" Value="6" />
-    <Setter Property="FontSize" Value="17" />
+    <Setter Property="FontSize" Value="{DynamicResource FontSizeEmoji}" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="Button.emoji:pointerover /template/ ContentPresenter#PART_ContentPresenter">

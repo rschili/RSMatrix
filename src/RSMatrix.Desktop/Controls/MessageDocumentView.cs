@@ -69,18 +69,24 @@ public sealed class MessageDocumentView : StackPanel
         return text;
     }
 
-    private static RichTextBlock CreateHeading(HeadingBlock heading)
+    private RichTextBlock CreateHeading(HeadingBlock heading)
     {
         var text = CreateText(heading.Inlines);
         text.FontWeight = FontWeight.SemiBold;
-        text.FontSize = heading.Level switch { 1 => 20, 2 => 18, 3 => 16, _ => 15 };
+        BindScaledFontSize(text, heading.Level switch { 1 => 20, 2 => 18, 3 => 16, _ => 15 });
         text.Margin = new Thickness(0, 2, 0, 0);
         return text;
     }
 
+    /// <summary>Scales a size meant for the default text size of 14 along with the chosen text size.</summary>
+    private void BindScaledFontSize(TextBlock text, double sizeAtDefault)
+        => text.Bind(TextBlock.FontSizeProperty, this.GetResourceObservable("ControlContentThemeFontSize",
+            size => size is double baseSize ? sizeAtDefault * baseSize / 14 : sizeAtDefault));
+
     private Border CreateCode(CodeBlock code)
     {
-        var text = new SelectableTextBlock { Text = code.Code, TextWrapping = TextWrapping.NoWrap, FontSize = 13 };
+        var text = new SelectableTextBlock { Text = code.Code, TextWrapping = TextWrapping.NoWrap };
+        BindScaledFontSize(text, 13);
         text.Bind(TextBlock.FontFamilyProperty, this.GetResourceObservable("MonospaceFont"));
         var border = new Border
         {

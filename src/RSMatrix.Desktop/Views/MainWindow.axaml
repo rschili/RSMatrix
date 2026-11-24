@@ -7,5 +7,16 @@
         Icon="/Assets/icon.ico"
         Width="1180" Height="760"
         MinWidth="720" MinHeight="460"
-        WindowStartupLocation="CenterScreen"
-        Content="{Binding CurrentPage}" />
+        WindowStartupLocation="CenterScreen">
+  <Panel>
+    <ContentControl Content="{Binding Chat}" />
+    <StackPanel IsVisible="{Binding IsSignedOut}" Spacing="14" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <TextBlock Classes="secondary" HorizontalAlignment="Center" Text="Not signed in" />
+      <Button Classes="accent" HorizontalAlignment="Center" Padding="24,8" Content="Sign in…" Command="{Binding SignInCommand}" />
+      <StackPanel Orientation="Horizontal" Spacing="18" HorizontalAlignment="Center">
+        <Button Classes="link" Content="Look around with sample data" Command="{Binding OpenSampleCommand}" />
+        <Button Classes="link" Content="Settings" Command="{Binding OpenSettingsCommand}" />
+      </StackPanel>
+    </StackPanel>
+  </Panel>
+</Window>

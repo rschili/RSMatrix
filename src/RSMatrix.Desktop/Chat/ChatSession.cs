@@ -30,11 +30,16 @@ public interface IChatSession : IAsyncDisposable
     /// <param name="from">Token from the previous page, or null to start at the newest message.</param>
     Task<HistoryPage> LoadHistoryAsync(string roomId, string? from, int limit, CancellationToken cancellationToken);
 
+    /// <summary>Joined and invited members of the room, in no particular order.</summary>
+    Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken);
+
     /// <summary>Returns the media content, or null when it is not available.</summary>
     Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken);
 }
 
 public sealed record ChatUser(string UserId, string DisplayName);
+
+public sealed record ChatMember(ChatUser User, bool IsInvited);
 
 public sealed record ChatRoomInfo(string RoomId, string Name, bool IsEncrypted, bool IsDirect);
 

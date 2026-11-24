@@ -106,6 +106,20 @@ public sealed class SampleChatSession : IChatSession
         return new HistoryPage(messages, page < 2 ? (page + 1).ToString() : null);
     }
 
+    public async Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken)
+    {
+        await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken).ConfigureAwait(false);
+        ChatUser[] joined = roomId switch
+        {
+            _ when roomId == AliceDirect.RoomId => [Me, Alice],
+            _ when roomId == Builds.RoomId => [Me, Bob, Builder],
+            _ when roomId == Design.RoomId => [Me, Alice, Carol, Erin],
+            _ => [Me, Alice, Bob, Carol, Dave, Erin],
+        };
+        var invited = roomId == General.RoomId ? new[] { Frank } : [];
+        return [.. joined.Select(u => new ChatMember(u, false)), .. invited.Select(u => new ChatMember(u, true))];
+    }
+
     public async Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken)
     {
         var name = mxcUri switch

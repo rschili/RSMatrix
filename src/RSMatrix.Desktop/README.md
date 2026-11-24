@@ -13,13 +13,17 @@ make desktop DESKTOP_USER=bob       # a second instance, e.g. to try encryption
 
 `make matrix-seed` creates rooms for alice, bob and carol, with formatted messages, a direct chat, an encrypted room, an image and a room with 150 messages for scrolling back. All users have the password `rsmatrix-test-password`.
 
-`make desktop` starts with fresh local data each time, because a recreated server no longer knows the old device. Run the project without arguments to use the normal data directory and the login form.
+`make desktop` starts with fresh local data each time, because a recreated server no longer knows the old device. Run the project without arguments to use the normal data directory and the sign-in dialog.
 
 Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`, `--homeserver URL`, `--verbose`. With a password, the app signs in right away. Logs go to the console.
 
+## Settings
+
+The `⋯` menu next to the user opens the settings: theme, font, text size, and whether the room list shows icons and the latest message. They are saved in `settings.json` in the data directory and apply after OK. `Appearance` puts them into the application resources, where the views read them through `DynamicResource`. Font sizes in the views use the resource keys `FontSizeTitle`, `FontSizeCompact`, `FontSizeCaption`, `FontSizeSmall` and `FontSizeEmoji`, which scale with the chosen size.
+
 ## Looking at it without a display
 
-`make desktop-snapshots` renders the app headless with sample data and writes PNG files to `temp/snapshots`: the login, each sample room in light and dark, the message actions, a thread, scrolling back, the composer and a narrow window. With `--live USER_ID PASSWORD HOMESERVER` it signs in to a server instead and renders every room.
+`make desktop-snapshots` renders the app headless with sample data and writes PNG files to `temp/snapshots`: the signed-out window and sign-in dialog, each sample room in light and dark, the message actions, a thread, scrolling back, the composer, a narrow window, the member list in a wide and a narrow window, the settings dialog and a few appearance choices. With `--live USER_ID PASSWORD HOMESERVER` it signs in to a server instead and renders every room.
 
 ## How it is built
 
@@ -36,6 +40,7 @@ Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`
 The app works around these, and each would make it simpler or better:
 
 - **Room list**: no public list of joined rooms or change notifications. Rooms appear once a text message from them arrives.
+- **Members**: the sync lazy-loads members, and the full list from `/members` is only used inside the encryption code. The member list shows only the people RSMatrix has seen in the room's state and timeline.
 - **Room names**: no computed display name. The app follows the spec's order, but without the member counts from the room summary.
 - **Formatted messages**: `ReceivedTextMessage` has `Body` only, so `formatted_body` is lost.
 - **Images and other media**: `m.image` events are dropped, and there is no media download.

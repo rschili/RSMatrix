@@ -43,10 +43,7 @@ public sealed partial class RoomViewModel : ConversationViewModel
     public partial string LastMessagePreview { get; private set; } = "";
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(LastActivityText))]
     public partial DateTimeOffset LastActivity { get; private set; }
-
-    public string LastActivityText => FormatActivity(LastActivity, DateTimeOffset.Now);
 
     /// <summary>Threads with at least one reply, most recently active first.</summary>
     public IEnumerable<ThreadViewModel> ActiveThreads
@@ -82,7 +79,6 @@ public sealed partial class RoomViewModel : ConversationViewModel
 
     public void RefreshTimes()
     {
-        OnPropertyChanged(nameof(LastActivityText));
         foreach (var thread in _threadsByRootId.Values)
             thread.RefreshTimes();
     }

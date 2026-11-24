@@ -60,6 +60,37 @@ public class ChatViewModelTests
     }
 
     [Test]
+    public async Task The_Member_List_Follows_The_Selected_Room()
+    {
+        await using var chat = CreateChat();
+        var general = Room with { RoomId = "!general:sample.local", Name = "General" };
+        var builds = Room with { RoomId = "!builds:sample.local", Name = "Builds" };
+        chat.Apply(new MessageReceived(general, Message("$1", Noon, "Hi")));
+        chat.Apply(new MessageReceived(builds, Message("$2", Noon, "Build passed")));
+        chat.SelectedConversation = chat.Rooms.First(r => r.Name == "General");
+
+        chat.ToggleMemberListCommand.Execute(null);
+        await WaitUntil(() => chat.Members.Count > 0);
+        await Assert.That(string.Join(",", chat.Members.Select(m => m.User.DisplayName)))
+            .IsEqualTo("Alice,Bob,Carol,Dave,Erin,Rob,Frank");
+        await Assert.That(chat.Members[^1].IsInvited).IsTrue();
+        await Assert.That(chat.JoinedMemberCount).IsEqualTo(6);
+
+        chat.SelectedConversation = chat.Rooms.First(r => r.Name == "Builds");
+        await WaitUntil(() => chat.Members.Count == 3);
+        await Assert.That(string.Join(",", chat.Members.Select(m => m.User.DisplayName))).IsEqualTo("Bob,Build Bot,Rob");
+
+        chat.ToggleMemberListCommand.Execute(null);
+        await Assert.That(chat.Members.Count).IsEqualTo(0);
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        for (var i = 0; i < 100 && !condition(); i++)
+            await Task.Delay(20);
+    }
+
+    [Test]
     public async Task Collection_Sync_Moves_Inserts_And_Removes()
     {
         string a = "a", b = "b", c = "c", d = "d";
@@ -82,7 +113,7 @@ public class ChatViewModelTests
         await Assert.That(string.Join(",", recent.Keys)).IsEqualTo("🚀,❤️,🍪");
     }
 
-    private static ChatViewModel CreateChat() => new(new SampleChatSession(Noon), _ => { }, () => Noon);
+    private static ChatViewModel CreateChat() => new(new SampleChatSession(Noon), _ => { }, getNow: () => Noon);
 
     private static ChatMessage Message(string eventId, DateTimeOffset timestamp, string body, string? threadRootId = null)
         => new(Room.RoomId, eventId, Alice, timestamp, ChatMessageKind.Text, body, PlainTextParser.Parse(body),

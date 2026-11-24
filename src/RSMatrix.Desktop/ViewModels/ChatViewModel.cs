@@ -10,16 +10,20 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     private const int ThreadsShownPerRoom = 3;
     private readonly IChatSession _session;
     private readonly Action<string?> _onSessionEnded;
+    private readonly Action? _onSettingsRequested;
     private readonly Func<DateTimeOffset> _getNow;
     private readonly Dictionary<string, RoomViewModel> _roomsById = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _lifetime = new();
     private bool _isInitialSyncDone;
+    private RoomViewModel? _membersRoom;
 
     /// <param name="onSessionEnded">Called with an error message, or null when the user disconnected.</param>
-    public ChatViewModel(IChatSession session, Action<string?> onSessionEnded, Func<DateTimeOffset>? getNow = null)
+    public ChatViewModel(IChatSession session, Action<string?> onSessionEnded, Action? onSettingsRequested = null,
+        Func<DateTimeOffset>? getNow = null)
     {
         _session = session;
         _onSessionEnded = onSessionEnded;
+        _onSettingsRequested = onSettingsRequested;
         _getNow = getNow ?? (() => DateTimeOffset.Now);
         Media = new MediaLoader(session);
     }
@@ -88,6 +92,17 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _ => ConnectionDetail == null ? "Disconnected" : $"Disconnected: {ConnectionDetail}",
     };
 
+    /// <summary>Shows the members of the selected room on the right.</summary>
+    [ObservableProperty]
+    public partial bool IsMemberListOpen { get; set; }
+
+    /// <summary>Members of the selected room while the member list is open: joined by name, then invited.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(JoinedMemberCount))]
+    public partial IReadOnlyList<ChatMember> Members { get; private set; } = [];
+
+    public int JoinedMemberCount => Members.Count(m => !m.IsInvited);
+
     /// <summary>The latest problem reported by the session, until dismissed.</summary>
     [ObservableProperty]
     public partial string? Issue { get; private set; }
@@ -141,6 +156,8 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     partial void OnSelectedConversationChanged(ConversationViewModel? value)
     {
         RefreshSidebar();
+        if (IsMemberListOpen && value?.Room != _membersRoom)
+            _ = LoadMembersAsync();
         if (value == null)
             return;
         value.UnreadCount = 0;
@@ -170,6 +187,46 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private void DismissIssue() => Issue = null;
+
+    [RelayCommand]
+    private void ToggleMemberList() => IsMemberListOpen = !IsMemberListOpen;
+
+    partial void OnIsMemberListOpenChanged(bool value)
+    {
+        // Load again on every opening, since the list doesn't follow membership changes.
+        _membersRoom = null;
+        Members = [];
+        if (value)
+            _ = LoadMembersAsync();
+    }
+
+    private async Task LoadMembersAsync()
+    {
+        var room = SelectedConversation?.Room;
+        _membersRoom = room;
+        Members = [];
+        if (room == null)
+            return;
+        try
+        {
+            var members = await _session.GetMembersAsync(room.RoomId, _lifetime.Token);
+            if (_membersRoom != room)
+                return;
+            Members = members.OrderBy(m => m.IsInvited)
+                .ThenBy(m => m.User.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Issue = $"The members of {room.Name} could not be loaded: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void OpenSettings() => _onSettingsRequested?.Invoke();
 
     [RelayCommand]
     private async Task DisconnectAsync()

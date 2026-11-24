@@ -33,7 +33,7 @@ public sealed class LocalData
         }
         catch (JsonException)
         {
-            // A damaged settings file only holds login form defaults, so start over.
+            // A damaged settings file only holds login defaults and appearance choices, so start over.
         }
         return new();
     }
@@ -89,4 +89,8 @@ public sealed class AppSettings
     public string? LastUserId { get; set; }
 
     public string? LastHomeserver { get; set; }
+
+    public AppearanceSettings Appearance { get; set; } = new();
+
+    public bool IsMemberListOpen { get; set; }
 }

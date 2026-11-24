@@ -7,9 +7,6 @@
              RequestedThemeVariant="Default">
 
   <Application.DataTemplates>
-    <DataTemplate DataType="vm:LoginViewModel">
-      <views:LoginView />
-    </DataTemplate>
     <DataTemplate DataType="vm:ChatViewModel">
       <views:ChatView />
     </DataTemplate>

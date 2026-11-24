@@ -112,6 +112,17 @@ public sealed class MatrixChatSession : IChatSession
         _events.Writer.TryWrite(new ReactionRemoved(roomId, targetEventId, key, CurrentUser));
     }
 
+    // The sync lazy-loads members and RSMatrix has no public call for the full list,
+    // so this only knows the members that showed up in the room's state and timeline.
+    public Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ChatMember> members = GetRoom(roomId).Users.Values
+            .Where(u => u.Membership is null or Membership.Join or Membership.Invite)
+            .Select(u => new ChatMember(new ChatUser(u.User.UserId.Full, u.GetDisplayName()), u.Membership == Membership.Invite))
+            .ToList();
+        return Task.FromResult(members);
+    }
+
     // RSMatrix can't download media yet.
     public Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken)
         => Task.FromResult<byte[]?>(null);

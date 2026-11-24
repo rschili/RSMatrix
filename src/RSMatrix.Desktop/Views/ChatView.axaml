@@ -3,13 +3,24 @@
              xmlns:vm="using:RSMatrix.Desktop.ViewModels"
              xmlns:views="using:RSMatrix.Desktop.Views"
              xmlns:controls="using:RSMatrix.Desktop.Controls"
+             xmlns:chat="using:RSMatrix.Desktop.Chat"
              x:Class="RSMatrix.Desktop.Views.ChatView"
              x:DataType="vm:ChatViewModel"
              controls:MediaImageView.Loader="{Binding Media}">
-  <Grid ColumnDefinitions="280,*">
+  <UserControl.Styles>
+    <!-- Narrow windows keep their width for the timeline: no member list, wherever it was left open. -->
+    <ContainerQuery Name="Chat" Query="max-width:959">
+      <Style Selector="Panel.memberList, Button.memberListToggle">
+        <Setter Property="IsVisible" Value="False" />
+      </Style>
+    </ContainerQuery>
+  </UserControl.Styles>
+
+  <Grid ColumnDefinitions="Auto,*,Auto" Container.Name="Chat" Container.Sizing="Width">
 
     <!-- Room list -->
-    <Border Background="{DynamicResource SidebarBackgroundBrush}" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,1,0">
+    <Border Width="{DynamicResource SidebarWidth}" Background="{DynamicResource SidebarBackgroundBrush}"
+            BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,1,0">
       <DockPanel>
         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="20,18,18,10">
           <TextBlock Classes="title" Text="Rooms" />
@@ -27,8 +38,14 @@
                 <TextBlock Classes="caption secondary" Text="{Binding ConnectionText}" TextTrimming="CharacterEllipsis" />
               </StackPanel>
             </StackPanel>
-            <Button Grid.Column="2" Classes="icon" Command="{Binding DisconnectCommand}" ToolTip.Tip="Disconnect">
-              <Path Classes="icon" Data="{StaticResource SignOutIcon}" />
+            <Button Grid.Column="2" Classes="icon" ToolTip.Tip="Menu">
+              <Path Classes="icon" Data="{StaticResource MoreIcon}" />
+              <Button.Flyout>
+                <MenuFlyout Placement="TopEdgeAlignedRight">
+                  <MenuItem Header="Settings…" Command="{Binding OpenSettingsCommand}" />
+                  <MenuItem Header="Disconnect" Command="{Binding DisconnectCommand}" />
+                </MenuFlyout>
+              </Button.Flyout>
             </Button>
           </Grid>
         </Border>
@@ -37,23 +54,29 @@
           <ListBox Classes="rooms" ItemsSource="{Binding SidebarEntries}" SelectedItem="{Binding SelectedConversation}">
             <ListBox.DataTemplates>
               <DataTemplate DataType="vm:RoomViewModel">
-                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                  <controls:AvatarView Width="36" Height="36" IsSquare="{Binding !IsDirect}"
-                                       DisplayName="{Binding Name}" ColorSeed="{Binding RoomId}" />
-                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                    <TextBlock Classes="roomName" Classes.unread="{Binding HasUnread}" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Classes="caption secondary" Text="{Binding LastMessagePreview}" TextTrimming="CharacterEllipsis" MaxLines="1" />
-                  </StackPanel>
-                  <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center">
-                    <TextBlock Classes="caption tertiary" Text="{Binding LastActivityText}" HorizontalAlignment="Right" />
-                    <Border Classes="badge" IsVisible="{Binding HasUnread}" HorizontalAlignment="Right">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <!-- The unread badge sits on the room icon, or beside the name when icons are hidden. -->
+                  <Panel Margin="0,0,10,0" VerticalAlignment="Center" IsVisible="{DynamicResource ShowRoomIcons}">
+                    <controls:AvatarView Width="28" Height="28" IsSquare="{Binding !IsDirect}"
+                                         DisplayName="{Binding Name}" ColorSeed="{Binding RoomId}" />
+                    <Border Classes="badge overlay" IsVisible="{Binding HasUnread}">
                       <TextBlock Text="{Binding UnreadCount}" />
                     </Border>
+                  </Panel>
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                    <TextBlock Classes="roomName" Classes.unread="{Binding HasUnread}" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="caption secondary" Text="{Binding LastMessagePreview}" TextTrimming="CharacterEllipsis" MaxLines="1"
+                               IsVisible="{DynamicResource ShowRoomPreviews}" />
                   </StackPanel>
+                  <Panel Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center" IsVisible="{DynamicResource ShowRoomBadgeBesideName}">
+                    <Border Classes="badge" IsVisible="{Binding HasUnread}">
+                      <TextBlock Text="{Binding UnreadCount}" />
+                    </Border>
+                  </Panel>
                 </Grid>
               </DataTemplate>
               <DataTemplate DataType="vm:ThreadViewModel">
-                <Grid ColumnDefinitions="36,*,Auto" ColumnSpacing="6">
+                <Grid ColumnDefinitions="28,*,Auto" ColumnSpacing="6">
                   <Path Classes="threadConnector" />
                   <TextBlock Grid.Column="1" Classes="caption threadTitle" Classes.unread="{Binding HasUnread}" Text="{Binding Title}"
                              TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip.Tip="{Binding Title}" />
@@ -63,7 +86,7 @@
                 </Grid>
               </DataTemplate>
               <DataTemplate DataType="vm:MoreThreadsViewModel">
-                <Grid ColumnDefinitions="36,*" ColumnSpacing="6">
+                <Grid ColumnDefinitions="28,*" ColumnSpacing="6">
                   <Button Grid.Column="1" Classes="moreThreads" Content="{Binding Text}" Click="OnMoreThreadsClick" />
                 </Grid>
               </DataTemplate>
@@ -79,7 +102,7 @@
     <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*,Auto">
       <Border Height="56" Padding="24,0" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1"
               IsVisible="{Binding SelectedConversation, Converter={x:Static ObjectConverters.IsNotNull}}">
-        <Grid ColumnDefinitions="Auto,Auto,Auto" VerticalAlignment="Center">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" VerticalAlignment="Center">
           <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,8,0" IsVisible="{Binding SelectedConversation.IsThread}">
             <Button Classes="link headerRoom" Content="{Binding SelectedConversation.Room.Name}"
                     Command="{Binding SelectedConversation.ShowRoomCommand}" ToolTip.Tip="Back to the room" />
@@ -88,6 +111,10 @@
           <TextBlock Grid.Column="1" Classes="title" Text="{Binding SelectedConversation.Title}" TextTrimming="CharacterEllipsis" MaxWidth="560" />
           <Path Grid.Column="2" Classes="icon" Width="13" Height="13" Margin="8,0,0,0" Data="{StaticResource LockIcon}"
                 IsVisible="{Binding SelectedConversation.Room.IsEncrypted}" ToolTip.Tip="End-to-end encrypted" VerticalAlignment="Center" />
+          <Button Grid.Column="4" Classes="icon memberListToggle" Classes.active="{Binding IsMemberListOpen}" Margin="0,0,-12,0"
+                  Command="{Binding ToggleMemberListCommand}" ToolTip.Tip="Members">
+            <Path Classes="icon" Data="{StaticResource MembersIcon}" />
+          </Button>
         </Grid>
       </Border>
 
@@ -142,5 +169,35 @@
         </StackPanel>
       </Border>
     </Grid>
+
+    <!-- Members of the selected room -->
+    <Panel Grid.Column="2" Classes="memberList">
+      <Border Width="220" Background="{DynamicResource SidebarBackgroundBrush}"
+              BorderBrush="{DynamicResource DividerBrush}" BorderThickness="1,0,0,0" IsVisible="{Binding IsMemberListOpen}">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Height="56" Padding="16,0" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+              <TextBlock Classes="title" Text="Members" />
+              <TextBlock Grid.Column="1" Classes="caption tertiary" Text="{Binding JoinedMemberCount}" VerticalAlignment="Center" />
+            </Grid>
+          </Border>
+          <ScrollViewer>
+            <ItemsControl ItemsSource="{Binding Members}" Margin="8,8">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="chat:ChatMember">
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" Margin="8,5" Background="Transparent" ToolTip.Tip="{Binding User.UserId}">
+                    <controls:AvatarView Width="24" Height="24" DisplayName="{Binding User.DisplayName}" ColorSeed="{Binding User.UserId}" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding User.DisplayName}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Classes="caption tertiary" Text="Invited" IsVisible="{Binding IsInvited}" />
+                    </StackPanel>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Panel>
   </Grid>
 </UserControl>

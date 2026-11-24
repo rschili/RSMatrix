@@ -8,17 +8,20 @@ using RSMatrix.Desktop.Storage;
 
 namespace RSMatrix.Desktop.ViewModels;
 
+/// <summary>The sign-in dialog. It closes once a session is connected, or when the user cancels.</summary>
 public sealed partial class LoginViewModel : ObservableObject
 {
     private readonly LocalData _localData;
     private readonly ILoggerFactory _loggerFactory;
     private readonly Action<IChatSession> _onConnected;
+    private readonly Action _onCancelled;
 
-    public LoginViewModel(LocalData localData, ILoggerFactory loggerFactory, Action<IChatSession> onConnected)
+    public LoginViewModel(LocalData localData, ILoggerFactory loggerFactory, Action<IChatSession> onConnected, Action onCancelled)
     {
         _localData = localData;
         _loggerFactory = loggerFactory;
         _onConnected = onConnected;
+        _onCancelled = onCancelled;
         var settings = localData.LoadSettings();
         UserId = settings.LastUserId ?? "";
         Homeserver = settings.LastHomeserver ?? "";
@@ -68,7 +71,10 @@ public sealed partial class LoginViewModel : ObservableObject
             return;
         }
 
-        _localData.SaveSettings(new AppSettings { LastUserId = userId, LastHomeserver = homeserver?.ToString() });
+        var settings = _localData.LoadSettings();
+        settings.LastUserId = userId;
+        settings.LastHomeserver = homeserver?.ToString();
+        _localData.SaveSettings(settings);
         try
         {
             var account = _localData.GetAccount(userId);
@@ -96,6 +102,15 @@ public sealed partial class LoginViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenSample() => _onConnected(new SampleChatSession());
+
+    /// <summary>Stops a running sign-in and closes the dialog.</summary>
+    [RelayCommand]
+    private void Cancel()
+    {
+        if (SignInCommand.IsRunning)
+            SignInCommand.Cancel();
+        _onCancelled();
+    }
 
     /// <summary>Shows why the previous session ended.</summary>
     public void ShowError(string message) => ErrorMessage = message;

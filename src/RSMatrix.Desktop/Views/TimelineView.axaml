@@ -12,7 +12,7 @@
               Command="{Binding $parent[ItemsControl].((vm:MessageViewModel)DataContext).ToggleReactionCommand}"
               CommandParameter="{Binding Key}">
         <StackPanel Orientation="Horizontal" Spacing="5">
-          <TextBlock Text="{Binding Key}" FontSize="15" />
+          <TextBlock Text="{Binding Key}" FontSize="{DynamicResource ControlContentThemeFontSize}" />
           <TextBlock Classes="count" Text="{Binding Count}" VerticalAlignment="Center" />
         </StackPanel>
       </Button>
@@ -72,7 +72,7 @@
                   <controls:AvatarView Grid.Row="1" Width="36" Height="36" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
                                        IsVisible="{Binding IsGroupStart}"
                                        DisplayName="{Binding Sender.DisplayName}" ColorSeed="{Binding Sender.UserId}" />
-                  <TextBlock Grid.Row="1" Classes="hoverTime tertiary" FontSize="11" VerticalAlignment="Top" Margin="0,3,0,0"
+                  <TextBlock Grid.Row="1" Classes="hoverTime tertiary" FontSize="{DynamicResource FontSizeSmall}" VerticalAlignment="Top" Margin="0,3,0,0"
                              IsVisible="{Binding !IsGroupStart}" Text="{Binding TimeText}" ToolTip.Tip="{Binding FullTimeText}" />
                   <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
                     <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsGroupStart}">
@@ -84,7 +84,7 @@
                     <StackPanel Orientation="Horizontal" Spacing="8"
                                 IsVisible="{Binding StatusText, Converter={x:Static ObjectConverters.IsNotNull}}">
                       <TextBlock Classes="caption tertiary" Text="{Binding StatusText}" />
-                      <Button Classes="link" FontSize="12" Content="Retry" Command="{Binding RetryCommand}" CommandParameter="{Binding}"
+                      <Button Classes="link" FontSize="{DynamicResource FontSizeCaption}" Content="Retry" Command="{Binding RetryCommand}" CommandParameter="{Binding}"
                               IsVisible="{Binding SendError, Converter={x:Static ObjectConverters.IsNotNull}}" ToolTip.Tip="{Binding SendError}" />
                     </StackPanel>
                     <ItemsControl Classes="reactions" ItemsSource="{Binding Reactions}" IsVisible="{Binding !!Reactions.Count}" />
@@ -116,7 +116,7 @@
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Classes="tertiary" FontSize="11" VerticalAlignment="Center" Margin="3,0,0,0" Text="{Binding ReaderOverflowText}"
+                    <TextBlock Classes="tertiary" FontSize="{DynamicResource FontSizeSmall}" VerticalAlignment="Center" Margin="3,0,0,0" Text="{Binding ReaderOverflowText}"
                                IsVisible="{Binding ReaderOverflowText, Converter={x:Static ObjectConverters.IsNotNull}}" />
                   </StackPanel>
 

@@ -12,7 +12,11 @@ public sealed class App : Application
 {
     public StartupOptions Options { get; init; } = StartupOptions.Parse([]);
 
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        AvaloniaXamlLoader.Load(this);
+        Appearance.Apply(this, new AppearanceSettings());
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
@@ -20,6 +24,7 @@ public sealed class App : Application
         {
             var loggerFactory = CreateLoggerFactory(Options.Verbose);
             var localData = new LocalData(Options.DataDirectory ?? LocalData.DefaultDirectory);
+            Appearance.Apply(this, localData.LoadSettings().Appearance);
             var viewModel = new MainWindowViewModel(localData, loggerFactory);
             desktop.MainWindow = new MainWindow { DataContext = viewModel };
             desktop.Exit += (_, _) => loggerFactory.Dispose();
