@@ -12,6 +12,8 @@ It is slowly getting more comprehensive and moving towards a full client impleme
 
 I'm trying to keep it as simple as possible without sacrificing essential features.
 
+RSMatrix is text-only. It does not support voice or video calls, and there are no plans to add them.
+
 ## Example
 
 Check the github repository for a minimalistic [console example](https://github.com/rschili/RSMatrix/blob/main/src/RSMatrix.Console/Program.cs).
