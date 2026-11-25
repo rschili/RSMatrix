@@ -136,18 +136,18 @@ public class StateEventTests
         }
     };
 
-    private static Room RoomFor(MatrixTextClient client)
+    private static Room RoomFor(MatrixClient client)
     {
         RoomId.TryParse("!room:example.org", out var id);
         return client.GetOrAddRoom(id!);
     }
 
-    private static (MatrixTextClient Client, RecordingLogger Log) CreateClient()
+    private static (MatrixClient Client, RecordingLogger Log) CreateClient()
     {
         var logger = new RecordingLogger();
         UserId.TryParse("@bot:example.org", out var user);
         var parameters = new HttpClientParameters(new StubFactory(), "https://example.org", "token", logger, CancellationToken.None);
-        return (MatrixTextClient.CreateForTesting(parameters, user!), logger);
+        return (MatrixClient.CreateForTesting(parameters, user!), logger);
     }
 
     // Receipts must never reach a real server during these tests.

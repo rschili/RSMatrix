@@ -203,9 +203,9 @@ public class EncryptionTests
 
     /// <summary>Alice creates the room over plain HTTP and invites everyone. Returns Bob's room once all clients have synced it.</summary>
     private static async Task<(string RoomPath, Room BobRoom)> CreateEncryptedRoomAsync(HttpClientParameters alice,
-        MatrixTextClient bob, MatrixTextClient[] others, object encryption, CancellationToken cancellationToken)
+        MatrixClient bob, MatrixClient[] others, object encryption, CancellationToken cancellationToken)
     {
-        MatrixTextClient[] clients = [bob, .. others];
+        MatrixClient[] clients = [bob, .. others];
         foreach (var client in clients)
             client.AutoJoinOnInvite = true;
         var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new
@@ -237,7 +237,7 @@ public class EncryptionTests
     private static async Task<string> GetSessionIdAsync(HttpClientParameters user, string roomPath, string eventId)
         => (await GetEventAsync(user, roomPath, eventId)).GetProperty("content").GetProperty("session_id").GetString()!;
 
-    private static List<ClientIssue> ReadIssues(MatrixTextClient client)
+    private static List<ClientIssue> ReadIssues(MatrixClient client)
     {
         var issues = new List<ClientIssue>();
         while (client.Issues.TryRead(out var issue))
@@ -266,7 +266,7 @@ public class EncryptionTests
     private static Task<JsonElement> GetEventAsync(HttpClientParameters user, string roomPath, string eventId)
         => LocalHomeserver.RequestAsync(user, $"{roomPath}/event/{Uri.EscapeDataString(eventId)}", HttpMethod.Get);
 
-    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixTextClient client, string eventId,
+    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, string eventId,
         CancellationToken cancellationToken)
     {
         await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))

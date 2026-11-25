@@ -9,7 +9,7 @@ namespace RSMatrix.Tests;
 internal sealed class MatrixTestContext : IDisposable
 {
     public CancellationTokenSource Lifetime { get; } = new();
-    public MatrixTextClient Client { get; }
+    public MatrixClient Client { get; }
     public List<(string Path, string Body)> Requests { get; } = [];
     public List<(LogLevel Level, string Message)> Logs { get; } = [];
     public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? Send { get; set; }
@@ -24,7 +24,7 @@ internal sealed class MatrixTestContext : IDisposable
             return Send != null ? await Send(request, token) : Json("""{"event_id":"$sent","room_id":"!invite:example.org"}""");
         });
         UserId.TryParse("@bot:example.org", out var user);
-        Client = MatrixTextClient.CreateForTesting(new HttpClientParameters(
+        Client = MatrixClient.CreateForTesting(new HttpClientParameters(
             new Factory(_handler), "https://example.org", "token", logger ?? new RecordingLogger(Logs), Lifetime.Token)
             { RetryDelayAsync = (_, _) => Task.CompletedTask }, user!);
     }

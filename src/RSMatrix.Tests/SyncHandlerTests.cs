@@ -14,7 +14,7 @@ namespace RSMatrix.Tests;
 /// </summary>
 public class SyncHandlerTests
 {
-    private readonly MatrixTextClient _client;
+    private readonly MatrixClient _client;
     private readonly MatrixId _testUserId;
 
     public SyncHandlerTests()
@@ -32,7 +32,7 @@ public class SyncHandlerTests
 
         UserId.TryParse("@testuser:example.org", out var userId);
         _testUserId = userId!;
-        _client = MatrixTextClient.CreateForTesting(parameters, _testUserId);
+        _client = MatrixClient.CreateForTesting(parameters, _testUserId);
     }
 
     private static async Task<SyncResponse> LoadFixtureAsync(string fileName)

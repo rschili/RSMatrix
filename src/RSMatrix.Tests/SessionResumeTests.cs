@@ -16,7 +16,7 @@ public class SessionResumeTests
         string? encryptionDirectory = null)
     {
         using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var client = await MatrixTextClient.ConnectAsync(User, "password", Device, new ClientFactory(server), lifetime.Token,
+        var client = await MatrixClient.ConnectAsync(User, "password", Device, new ClientFactory(server), lifetime.Token,
             NullLogger.Instance, (_, token) => Task.CompletedTask, encryptionDirectory, sessionDirectory);
         // The fake server ends the second sync with a terminal error, which also releases the session.
         return await Assert.ThrowsAsync<MatrixResponseException>(() => client.Messages.Completion.WaitAsync(lifetime.Token));
@@ -110,7 +110,7 @@ public class SessionResumeTests
         {
             StoreSession(directory);
             var server = new FakeServer { WhoAmIError = """{"errcode":"M_UNKNOWN_TOKEN"}""" };
-            await Assert.ThrowsAsync<InvalidOperationException>(() => MatrixTextClient.ConnectAsync(User, "password", Device,
+            await Assert.ThrowsAsync<InvalidOperationException>(() => MatrixClient.ConnectAsync(User, "password", Device,
                 new ClientFactory(server), CancellationToken.None, NullLogger.Instance, (_, token) => Task.CompletedTask,
                 encryptionStoreDirectory: directory, sessionStoreDirectory: directory));
             await Assert.That(server.LoginCount).IsEqualTo(0);
@@ -151,7 +151,7 @@ public class SessionResumeTests
         try
         {
             using var held = SessionStore.Open(directory, User, Device);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => MatrixTextClient.ConnectAsync(User, "password", Device,
+            await Assert.ThrowsAsync<InvalidOperationException>(() => MatrixClient.ConnectAsync(User, "password", Device,
                 new ClientFactory(new FakeServer()), CancellationToken.None, NullLogger.Instance, (_, token) => Task.CompletedTask,
                 sessionStoreDirectory: directory));
 
@@ -171,7 +171,7 @@ public class SessionResumeTests
         try
         {
             var server = new FakeServer { FailWellKnownOnce = true };
-            var error = await Assert.ThrowsAsync<MatrixResponseException>(() => MatrixTextClient.ConnectAsync(User, "password", Device,
+            var error = await Assert.ThrowsAsync<MatrixResponseException>(() => MatrixClient.ConnectAsync(User, "password", Device,
                 new ClientFactory(server), CancellationToken.None, NullLogger.Instance, (_, token) => Task.CompletedTask,
                 sessionStoreDirectory: directory));
             await Assert.That(error!.StatusCode).IsEqualTo(HttpStatusCode.ServiceUnavailable);

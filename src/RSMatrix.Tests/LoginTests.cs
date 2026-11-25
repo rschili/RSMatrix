@@ -16,7 +16,7 @@ public class LoginTests
         using var handler = new LoginHandler(failInitialization);
         using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var delays = new List<TimeSpan>();
-        var client = await MatrixTextClient.ConnectAsync("@bot:example.org", "test-password", "fixed-device",
+        var client = await MatrixClient.ConnectAsync("@bot:example.org", "test-password", "fixed-device",
             new ClientFactory(handler), lifetime.Token, NullLogger.Instance, (delay, token) =>
             {
                 token.ThrowIfCancellationRequested();

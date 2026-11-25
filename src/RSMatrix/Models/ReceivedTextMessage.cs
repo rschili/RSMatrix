@@ -8,7 +8,7 @@ public class ReceivedTextMessage
     public string? Body { get; private set; }
     public Room Room { get; private set; }
     public RoomUser Sender { get; private set; }
-    public MatrixTextClient Client { get; private set; }
+    public MatrixClient Client { get; private set; }
 
     public List<RoomUser>? Mentions { get; internal set; }
 
@@ -30,7 +30,7 @@ public class ReceivedTextMessage
     public bool IsEncrypted { get; }
 
     //TODO: format and formatted_body
-    internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, string? threadId, string msgType, MatrixTextClient client, bool isEncrypted = false)
+    internal ReceivedTextMessage(string? body, Room room, RoomUser sender, string eventId, DateTimeOffset timestamp, string? threadId, string msgType, MatrixClient client, bool isEncrypted = false)
     {
         IsEncrypted = isEncrypted;
         Body = body;

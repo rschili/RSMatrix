@@ -96,7 +96,7 @@ public class SessionTests
         return sent.GetProperty("event_id").GetString()!;
     }
 
-    private static async Task WaitForSyncAsync(MatrixTextClient client, CancellationToken cancellationToken)
+    private static async Task WaitForSyncAsync(MatrixClient client, CancellationToken cancellationToken)
     {
         while (client.LastSyncAt == null)
         {
@@ -107,13 +107,13 @@ public class SessionTests
     }
 
     /// <summary>Stops the client and waits until its session file is released.</summary>
-    private static async Task StopAsync(MatrixTextClient client, CancellationTokenSource lifetime)
+    private static async Task StopAsync(MatrixClient client, CancellationTokenSource lifetime)
     {
         await lifetime.CancelAsync();
         await foreach (var unused in client.Messages.ReadAllAsync(CancellationToken.None)) { }
     }
 
-    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixTextClient client, string eventId,
+    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, string eventId,
         CancellationToken cancellationToken)
     {
         await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))

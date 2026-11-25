@@ -89,7 +89,7 @@ public class HomeserverTests
         await Assert.That(history.Messages.Any(message => message.EventId == noticeId)).IsTrue();
     }
 
-    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixTextClient client,
+    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client,
         string eventId, CancellationToken cancellationToken)
     {
         await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))

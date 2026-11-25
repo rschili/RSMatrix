@@ -172,7 +172,7 @@ public class ThreadReplyTests
     {
         var parameters = new HttpClientParameters(new Factory(handler), "https://example.org", "test-token",
             NullLogger.Instance, CancellationToken.None);
-        var client = MatrixTextClient.CreateForTesting(parameters, ParseUserId("@bot:example.org"));
+        var client = MatrixClient.CreateForTesting(parameters, ParseUserId("@bot:example.org"));
         RoomId.TryParse("!room:example.org", out var roomId);
         var room = new Room(roomId!, client);
         var sender = new RoomUser(new User(ParseUserId("@sender:example.org")));

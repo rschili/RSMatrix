@@ -14,7 +14,7 @@ namespace RSMatrix;
 /// <summary>
 /// The low level class for interacting with the Matrix server.
 /// </summary>
-public sealed class MatrixTextClient
+public sealed class MatrixClient
 {
     internal ILogger Logger => HttpClientParameters.Logger;
     public MatrixId CurrentUser { get; }
@@ -84,7 +84,7 @@ public sealed class MatrixTextClient
     private SessionStore? _sessionStore;
     private string? _resumeSyncToken;
 
-    private MatrixTextClient(HttpClientParameters parameters,
+    private MatrixClient(HttpClientParameters parameters,
         MatrixId userId,
         IList<SpecVersion> supportedSpecVersions,
         Capabilities capabilities)
@@ -99,13 +99,13 @@ public sealed class MatrixTextClient
     }
 
     /// <summary>
-    /// Creates a MatrixTextClient for testing purposes without connecting to a server.
+    /// Creates a MatrixClient for testing purposes without connecting to a server.
     /// </summary>
-    internal static MatrixTextClient CreateForTesting(HttpClientParameters parameters, MatrixId userId)
+    internal static MatrixClient CreateForTesting(HttpClientParameters parameters, MatrixId userId)
     {
         var versions = new List<SpecVersion> { CurrentSpecVersion };
         var capabilities = new Capabilities();
-        return new MatrixTextClient(parameters, userId, versions, capabilities);
+        return new MatrixClient(parameters, userId, versions, capabilities);
     }
 
     /// <summary>
@@ -148,19 +148,19 @@ public sealed class MatrixTextClient
     /// </param>
     /// <exception cref="ArgumentException">Provided arguments not valid</exception>
     /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
-    public static Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory,
+    public static Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory,
         CancellationToken cancellationToken, ILogger? logger = null, string? encryptionStoreDirectory = null,
         string? sessionStoreDirectory = null)
         => ConnectAsync(userId, password, deviceId, httpClientFactory, cancellationToken, logger,
             (delay, token) => Task.Delay(delay, token), encryptionStoreDirectory, sessionStoreDirectory);
 
-    internal static async Task<MatrixTextClient> ConnectAsync(string userId, string password, string deviceId,
+    internal static async Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId,
         IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger,
         Func<TimeSpan, CancellationToken, Task> retryDelayAsync, string? encryptionStoreDirectory = null,
         string? sessionStoreDirectory = null)
     {
         if (logger == null)
-            logger = NullLogger<MatrixTextClient>.Instance;
+            logger = NullLogger<MatrixClient>.Instance;
 
         if (string.IsNullOrWhiteSpace(userId))
         {
@@ -206,7 +206,7 @@ public sealed class MatrixTextClient
         }
     }
 
-    private static async Task<MatrixTextClient> ConnectAsync(MatrixId userId, string password, string deviceId,
+    private static async Task<MatrixClient> ConnectAsync(MatrixId userId, string password, string deviceId,
         IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger logger,
         Func<TimeSpan, CancellationToken, Task> retryDelayAsync, EncryptionStore? encryptionStore, SessionStore? sessionStore)
     {
@@ -264,7 +264,7 @@ public sealed class MatrixTextClient
         var serverCapabilities = await MatrixRetry.ExecuteAsync(http, "Fetching capabilities",
             () => MatrixHelper.FetchCapabilitiesAsync(http)).ConfigureAwait(false);
         http.RateLimiter = new LeakyBucket(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
-        var client = new MatrixTextClient(http, userId, parsedVersions, serverCapabilities.Capabilities)
+        var client = new MatrixClient(http, userId, parsedVersions, serverCapabilities.Capabilities)
         {
             _password = password,
             _deviceId = deviceId,

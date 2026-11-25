@@ -96,17 +96,17 @@ public class ClientIssueTests
     public async Task IssueChannel_KeepsTheLatestIssues()
     {
         using var context = new MatrixTestContext();
-        var total = MatrixTextClient.IssueChannelCapacity + 20;
+        var total = MatrixClient.IssueChannelCapacity + 20;
         for (var i = 0; i < total; i++)
             context.Client.ReportIssue(ClientIssueKind.SyncInterrupted, $"issue {i}");
 
         var issues = ReadAll(context.Client);
-        await Assert.That(issues.Count).IsEqualTo(MatrixTextClient.IssueChannelCapacity);
+        await Assert.That(issues.Count).IsEqualTo(MatrixClient.IssueChannelCapacity);
         await Assert.That(issues[0].Message).IsEqualTo("issue 20");
         await Assert.That(issues[^1].Message).IsEqualTo($"issue {total - 1}");
     }
 
-    internal static List<ClientIssue> ReadAll(MatrixTextClient client)
+    internal static List<ClientIssue> ReadAll(MatrixClient client)
     {
         var issues = new List<ClientIssue>();
         while (client.Issues.TryRead(out var issue))

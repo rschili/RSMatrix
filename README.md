@@ -20,7 +20,7 @@ Check the github repository for a minimalistic [console example](https://github.
 Here is the basic usage:
 
 ```cs
-MatrixTextClient client = await MatrixTextClient.ConnectAsync(userid, password, device,
+MatrixClient client = await MatrixClient.ConnectAsync(userid, password, device,
     httpClientFactory, cancellationToken, logger);
 ```
 
@@ -45,7 +45,7 @@ Once the client has logged in, it retries network errors, unavailable servers an
 Pass a directory for sessions to resume after a restart instead of logging in and syncing from scratch:
 
 ```cs
-MatrixTextClient client = await MatrixTextClient.ConnectAsync(userid, password, device,
+MatrixClient client = await MatrixClient.ConnectAsync(userid, password, device,
     httpClientFactory, cancellationToken, logger,
     sessionStoreDirectory: "/var/lib/mybot/matrix-session");
 ```
@@ -70,7 +70,7 @@ _ = Task.Run(async () =>
 Pass a directory for encryption keys to enable encryption:
 
 ```cs
-MatrixTextClient client = await MatrixTextClient.ConnectAsync(userid, password, device,
+MatrixClient client = await MatrixClient.ConnectAsync(userid, password, device,
     httpClientFactory, cancellationToken, logger,
     encryptionStoreDirectory: "/var/lib/mybot/matrix-encryption");
 ```

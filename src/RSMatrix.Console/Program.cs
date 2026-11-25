@@ -43,9 +43,9 @@ Console.CancelKeyPress += (sender, e) =>
 
 try
 {
-    var client = await MatrixTextClient.ConnectAsync(userid, password, device,
+    var client = await MatrixClient.ConnectAsync(userid, password, device,
         services.GetRequiredService<IHttpClientFactory>(), cancellationTokenSource.Token,
-        services.GetRequiredService<ILogger<MatrixTextClient>>(),
+        services.GetRequiredService<ILogger<MatrixClient>>(),
         string.IsNullOrWhiteSpace(encryptionStore) ? null : encryptionStore,
         string.IsNullOrWhiteSpace(sessionStore) ? null : sessionStore);
 

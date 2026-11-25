@@ -12,7 +12,7 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
     internal const string Password = "rsmatrix-test-password";
     private readonly CancellationTokenSource _lifetime;
     private readonly ConcurrentBag<string> _tokens = [];
-    private readonly List<MatrixTextClient> _clients = [];
+    private readonly List<MatrixClient> _clients = [];
     private readonly LocalTransport _transport;
     internal Uri BaseUri { get; }
     internal CancellationToken CancellationToken => _lifetime.Token;
@@ -64,14 +64,14 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
         return parameters;
     }
 
-    internal Task<MatrixTextClient> ConnectAsync(string user)
+    internal Task<MatrixClient> ConnectAsync(string user)
         => ConnectAsync(user, $"RSMATRIX-{Guid.NewGuid():N}", null, CancellationToken);
 
     /// <summary>The lifetime token may end before the fixture's, to restart a client.</summary>
-    internal async Task<MatrixTextClient> ConnectAsync(string user, string deviceId,
+    internal async Task<MatrixClient> ConnectAsync(string user, string deviceId,
         string? encryptionStoreDirectory, CancellationToken lifetime, string? sessionStoreDirectory = null)
     {
-        var client = await MatrixTextClient.ConnectAsync($"@{user}:localhost", Password,
+        var client = await MatrixClient.ConnectAsync($"@{user}:localhost", Password,
             deviceId, this, lifetime, encryptionStoreDirectory: encryptionStoreDirectory,
             sessionStoreDirectory: sessionStoreDirectory);
         _clients.Add(client);

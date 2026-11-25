@@ -103,7 +103,7 @@ public class RustInteropTests
         }
     }
 
-    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixTextClient client, Func<ReceivedTextMessage, bool> match,
+    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, Func<ReceivedTextMessage, bool> match,
         CancellationToken cancellationToken)
     {
         await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))

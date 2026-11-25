@@ -12,7 +12,7 @@ namespace RSMatrix.Desktop.Matrix;
 public sealed record MatrixLogin(string UserId, string Password, Uri? Homeserver);
 
 /// <summary>
-/// Connects the UI to a homeserver through <see cref="MatrixTextClient"/>.
+/// Connects the UI to a homeserver through <see cref="MatrixClient"/>.
 /// Workarounds for things RSMatrix does not offer yet are kept in this class.
 /// </summary>
 public sealed class MatrixChatSession : IChatSession
@@ -21,7 +21,7 @@ public sealed class MatrixChatSession : IChatSession
     // A sync long poll returns at least once a minute, so a longer silence means the connection is gone.
     private static readonly TimeSpan SyncSilenceLimit = TimeSpan.FromSeconds(90);
 
-    private readonly MatrixTextClient _client;
+    private readonly MatrixClient _client;
     private readonly CancellationTokenSource _lifetime;
     private readonly DesktopHttpClientFactory _httpClientFactory;
     private readonly ILogger _logger;
@@ -35,7 +35,7 @@ public sealed class MatrixChatSession : IChatSession
     private readonly ConcurrentDictionary<(string RoomId, string TargetEventId, string Key), string> _sentReactionIds = new();
     private long _syncInterruptedAtUnixMilliseconds;
 
-    private MatrixChatSession(MatrixTextClient client, CancellationTokenSource lifetime,
+    private MatrixChatSession(MatrixClient client, CancellationTokenSource lifetime,
         DesktopHttpClientFactory httpClientFactory, ILogger logger)
     {
         _client = client;
@@ -60,11 +60,11 @@ public sealed class MatrixChatSession : IChatSession
         var httpClientFactory = new DesktopHttpClientFactory(login.Homeserver);
         try
         {
-            MatrixTextClient client;
+            MatrixClient client;
             await using (cancellationToken.Register(lifetime.Cancel))
             {
-                client = await MatrixTextClient.ConnectAsync(login.UserId, login.Password, account.DeviceId,
-                    httpClientFactory, lifetime.Token, loggerFactory.CreateLogger<MatrixTextClient>(),
+                client = await MatrixClient.ConnectAsync(login.UserId, login.Password, account.DeviceId,
+                    httpClientFactory, lifetime.Token, loggerFactory.CreateLogger<MatrixClient>(),
                     encryptionStoreDirectory: account.EncryptionDirectory,
                     sessionStoreDirectory: account.SessionDirectory).ConfigureAwait(false);
             }

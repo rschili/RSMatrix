@@ -11,8 +11,8 @@ namespace RSMatrix.Models;
 /// <see cref="NotSupportedException"/> once encryption has been observed.</remarks>
 public class Room
 {
-    internal MatrixTextClient Client { get; }
-    internal Room(MatrixId roomId, MatrixTextClient client)
+    internal MatrixClient Client { get; }
+    internal Room(MatrixId roomId, MatrixClient client)
     {
         RoomId = roomId ?? throw new ArgumentNullException(nameof(roomId));
         Client = client ?? throw new ArgumentNullException(nameof(client));

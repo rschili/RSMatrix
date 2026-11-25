@@ -28,7 +28,7 @@ The `⋯` menu next to the user opens the settings: theme, font, text size, and 
 ## How it is built
 
 - `Chat/` holds what the UI needs from a connection: `IChatSession` with app-level rooms, messages and events.
-- `Matrix/MatrixChatSession` implements it with `MatrixTextClient`. Workarounds for things RSMatrix lacks live in this one class.
+- `Matrix/MatrixChatSession` implements it with `MatrixClient`. Workarounds for things RSMatrix lacks live in this one class.
 - `Sample/SampleChatSession` implements it with built-in data, including formatting and images that RSMatrix doesn't deliver yet.
 - `Content/` turns message bodies into a `MessageDocument`. The HTML parser interprets only the tags and attributes the spec suggests. Links must be absolute with an allowed scheme, and images load only from `mxc://` URIs. Nothing is rendered by a browser engine.
 - `Controls/` renders documents as native Avalonia controls: selectable text with clickable links and spoilers, code blocks, quotes, lists, tables and images.
