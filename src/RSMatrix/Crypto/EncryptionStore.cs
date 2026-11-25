@@ -16,6 +16,8 @@ internal sealed class EncryptionStoreData
     public Dictionary<string, List<OlmSession>> OlmSessions { get; init; } = [];
     /// <summary>Megolm sessions for decrypting room messages, keyed by session ID.</summary>
     public ConcurrentDictionary<string, InboundGroupSession> InboundGroupSessions { get; init; } = new();
+    /// <summary>The master cross-signing key we last saw for each user, so we notice when it changes.</summary>
+    public Dictionary<string, string> PinnedMasterKeys { get; init; } = [];
 }
 
 /// <summary>A received Megolm session and who it came from.</summary>
@@ -27,6 +29,11 @@ internal sealed class InboundGroupSession
     public required string SenderKey { get; init; }
     /// <summary>The unsigned Megolm export, starting at the earliest index we can decrypt.</summary>
     public required string Export { get; init; }
+    /// <summary>
+    /// Whether the owner had cross-signed the device that shared the session. Null for sessions stored
+    /// before we checked; those are still accepted.
+    /// </summary>
+    public bool? SenderCrossSigned { get; set; }
 
     [JsonIgnore]
     public MegolmInboundSession Session => _session ??= MegolmInboundSession.FromExport(Export);

@@ -11,3 +11,5 @@ Requires Linux/rootless Podman, Bash, curl, and the .NET SDK.
   needed; keep the same environment for startup, tests, and cleanup.
 - `make test-matrix-scripts` runs the offline lifecycle checks (requires Python 3,
   no Podman or server).
+- Encryption tests register new users through the registration shared secret, so cross-signing identities from earlier runs don't get in the way. `LocalHomeserver` keeps the recovery key a user's first encrypted client created and gives it to the user's later devices.
+- Set `RSMATRIX_TEST_LOG` to a log level like `Warning` or `Debug` to see the clients' logs.

@@ -2,11 +2,12 @@ namespace RSMatrix.Desktop;
 
 /// <summary>
 /// Command line options, mainly for development against the local test server:
-/// <c>--sample</c>, <c>--data-dir DIR</c>, <c>--user ID</c>, <c>--password PW</c>, <c>--homeserver URL</c>, <c>--verbose</c>.
+/// <c>--sample</c>, <c>--data-dir DIR</c>, <c>--user ID</c>, <c>--password PW</c>, <c>--homeserver URL</c>,
+/// <c>--recovery-key-file PATH</c>, <c>--verbose</c>.
 /// With a password, the app signs in right away.
 /// </summary>
 public sealed record StartupOptions(bool UseSample, string? DataDirectory, string? UserId, string? Password,
-    string? Homeserver, bool Verbose)
+    string? Homeserver, bool Verbose, string? RecoveryKeyFile = null)
 {
     public static StartupOptions Parse(IReadOnlyList<string> args)
     {
@@ -22,6 +23,7 @@ public sealed record StartupOptions(bool UseSample, string? DataDirectory, strin
                 "--user" => options with { UserId = Value() },
                 "--password" => options with { Password = Value() },
                 "--homeserver" => options with { Homeserver = Value() },
+                "--recovery-key-file" => options with { RecoveryKeyFile = Value() },
                 _ => throw new ArgumentException($"Unknown option {args[i]}."),
             };
         }

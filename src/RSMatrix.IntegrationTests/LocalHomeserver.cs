@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using RSMatrix.Http;
 
@@ -10,9 +13,13 @@ namespace RSMatrix.IntegrationTests;
 internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
 {
     internal const string Password = "rsmatrix-test-password";
+    /// <summary>Matches registration_shared_secret in Homeserver/homeserver.yaml.</summary>
+    private const string RegistrationSharedSecret = "rsmatrix-local-test-registration-only";
     private readonly CancellationTokenSource _lifetime;
     private readonly ConcurrentBag<string> _tokens = [];
     private readonly List<MatrixClient> _clients = [];
+    /// <summary>The recovery key each user's first encrypted client created, by user localpart.</summary>
+    internal ConcurrentDictionary<string, string> RecoveryKeys { get; } = new();
     private readonly LocalTransport _transport;
     internal Uri BaseUri { get; }
     internal CancellationToken CancellationToken => _lifetime.Token;
@@ -64,16 +71,48 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
         return parameters;
     }
 
+    /// <summary>
+    /// Registers a new user with a unique name starting with <paramref name="prefix"/> and returns its localpart.
+    /// Encryption tests use new users, so cross-signing identities from earlier runs don't get in the way.
+    /// </summary>
+    internal async Task<string> RegisterUserAsync(string prefix)
+    {
+        var localpart = $"{prefix}-{Guid.NewGuid():N}"[..(prefix.Length + 9)];
+        var parameters = Parameters();
+        var nonce = (await RequestAsync(parameters, "/_synapse/admin/v1/register", HttpMethod.Get)).GetProperty("nonce").GetString()!;
+        var mac = HMACSHA1.HashData(Encoding.UTF8.GetBytes(RegistrationSharedSecret),
+            Encoding.UTF8.GetBytes($"{nonce}\0{localpart}\0{Password}\0notadmin"));
+        var registered = await RequestAsync(parameters, "/_synapse/admin/v1/register", HttpMethod.Post,
+            new { nonce, username = localpart, password = Password, admin = false, mac = Convert.ToHexStringLower(mac) });
+        if (registered.TryGetProperty("access_token", out var token) && token.GetString() is { } value)
+            _tokens.Add(value);
+        return localpart;
+    }
+
     internal Task<MatrixClient> ConnectAsync(string user)
         => ConnectAsync(user, $"RSMATRIX-{Guid.NewGuid():N}", null, CancellationToken);
 
-    /// <summary>The lifetime token may end before the fixture's, to restart a client.</summary>
+    /// <summary>
+    /// The lifetime token may end before the fixture's, to restart a client. With encryption, a new recovery key
+    /// goes to <see cref="RecoveryKeys"/>, and the client gets it from there unless <paramref name="getRecoveryKey"/> is given.
+    /// </summary>
     internal async Task<MatrixClient> ConnectAsync(string user, string deviceId,
-        string? encryptionStoreDirectory, CancellationToken lifetime, string? sessionStoreDirectory = null)
+        string? encryptionStoreDirectory, CancellationToken lifetime, string? sessionStoreDirectory = null,
+        Func<string?>? getRecoveryKey = null)
     {
+        var encryption = encryptionStoreDirectory == null ? null : new EncryptionOptions
+        {
+            StoreDirectory = encryptionStoreDirectory,
+            GetRecoveryKeyAsync = _ => Task.FromResult(getRecoveryKey != null ? getRecoveryKey() : RecoveryKeys.GetValueOrDefault(user)),
+            SaveRecoveryKeyAsync = (key, _) =>
+            {
+                RecoveryKeys[user] = key;
+                return Task.CompletedTask;
+            }
+        };
         var client = await MatrixClient.ConnectAsync($"@{user}:localhost", Password,
-            deviceId, this, lifetime, encryptionStoreDirectory: encryptionStoreDirectory,
-            sessionStoreDirectory: sessionStoreDirectory);
+            deviceId, this, lifetime, TestLogger.Create($"{user}/{deviceId[..Math.Min(8, deviceId.Length)]}"),
+            sessionStoreDirectory: sessionStoreDirectory, encryption: encryption);
         _clients.Add(client);
         return client;
     }
@@ -121,6 +160,22 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
         }
         _transport.Dispose();
         _lifetime.Dispose();
+    }
+
+    /// <summary>Writes the client's log to stderr when RSMATRIX_TEST_LOG names a minimum level, like Warning or Debug.</summary>
+    private sealed class TestLogger(string name, LogLevel minimum) : ILogger
+    {
+        public static ILogger? Create(string name)
+            => Enum.TryParse<LogLevel>(Environment.GetEnvironmentVariable("RSMATRIX_TEST_LOG"), out var minimum)
+                ? new TestLogger(name, minimum) : null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= minimum;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (IsEnabled(logLevel))
+                Console.Error.WriteLine($"[{logLevel}] {name}: {formatter(state, exception)}{(exception == null ? "" : $" ({exception.Message})")}");
+        }
     }
 
     internal sealed class LocalTransport(Uri baseUri, ConcurrentBag<string> tokens,

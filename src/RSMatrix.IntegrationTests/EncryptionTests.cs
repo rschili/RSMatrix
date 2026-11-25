@@ -10,16 +10,18 @@ public class EncryptionTests
     public async Task EncryptedRoom_SendReceiveReplyEditReactionHistory_AndRestart()
     {
         await using var server = new LocalHomeserver();
+        var bobUser = await server.RegisterUserAsync("bob");
+        var carolUser = await server.RegisterUserAsync("carol");
         var storeRoot = Path.Combine(Path.GetTempPath(), $"rsmatrix-e2ee-{Guid.NewGuid():N}");
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync("bob", $"BOB{Guid.NewGuid():N}",
+            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}",
                 Path.Combine(storeRoot, "bob"), server.CancellationToken);
             var carolDevice = $"CAROL{Guid.NewGuid():N}";
             var carolStore = Path.Combine(storeRoot, "carol");
             using var carolLifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken);
-            var carol = await server.ConnectAsync("carol", carolDevice, carolStore, carolLifetime.Token);
+            var carol = await server.ConnectAsync(carolUser, carolDevice, carolStore, carolLifetime.Token);
             bob.AutoJoinOnInvite = true;
             carol.AutoJoinOnInvite = true;
 
@@ -27,7 +29,7 @@ public class EncryptionTests
             var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new
             {
                 preset = "private_chat",
-                invite = new[] { "@bob:localhost", "@carol:localhost" },
+                invite = new[] { $"@{bobUser}:localhost", $"@{carolUser}:localhost" },
                 initial_state = new[]
                 {
                     new { type = "m.room.encryption", state_key = "", content = new { algorithm = "m.megolm.v1.aes-sha2" } }
@@ -52,7 +54,7 @@ public class EncryptionTests
             var secret = await ReceiveAsync(carol, secretId, server.CancellationToken);
             await Assert.That(secret.Body).IsEqualTo("secret body");
             await Assert.That(secret.IsEncrypted).IsTrue();
-            await Assert.That(secret.Sender.User.UserId.Full).IsEqualTo("@bob:localhost");
+            await Assert.That(secret.Sender.User.UserId.Full).IsEqualTo($"@{bobUser}:localhost");
             var rawSecret = await GetEventAsync(alice, roomPath, secretId);
             await Assert.That(rawSecret.GetProperty("type").GetString()).IsEqualTo("m.room.encrypted");
             await Assert.That(rawSecret.GetRawText().Contains("secret body")).IsFalse();
@@ -83,7 +85,7 @@ public class EncryptionTests
             // Restart Carol with the same device and store: old sessions must still work both ways.
             await carolLifetime.CancelAsync();
             await foreach (var unused in carol.Messages.ReadAllAsync(server.CancellationToken)) { }
-            var restarted = await server.ConnectAsync("carol", carolDevice, carolStore, server.CancellationToken);
+            var restarted = await server.ConnectAsync(carolUser, carolDevice, carolStore, server.CancellationToken);
             restarted.AutoJoinOnInvite = true;
 
             var afterRestartId = await bobRoom.SendTextMessageAsync("after restart", null, null);
@@ -105,17 +107,18 @@ public class EncryptionTests
     public async Task StoreForAnotherDevice_IsRejectedBeforeLogin()
     {
         await using var server = new LocalHomeserver();
+        var bobUser = await server.RegisterUserAsync("bob");
         var store = Path.Combine(Path.GetTempPath(), $"rsmatrix-e2ee-{Guid.NewGuid():N}");
         try
         {
             using (var lifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken))
             {
-                var first = await server.ConnectAsync("bob", $"BOB{Guid.NewGuid():N}", store, lifetime.Token);
+                var first = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", store, lifetime.Token);
                 await lifetime.CancelAsync();
                 await foreach (var unused in first.Messages.ReadAllAsync(server.CancellationToken)) { }
             }
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                server.ConnectAsync("bob", $"BOB{Guid.NewGuid():N}", store, server.CancellationToken));
+                server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", store, server.CancellationToken));
         }
         finally
         {
@@ -127,12 +130,14 @@ public class EncryptionTests
     public async Task RoomKey_RotatesAfterConfiguredMessageCount()
     {
         await using var server = new LocalHomeserver();
+        var bobUser = await server.RegisterUserAsync("bob");
+        var carolUser = await server.RegisterUserAsync("carol");
         var storeRoot = Path.Combine(Path.GetTempPath(), $"rsmatrix-e2ee-{Guid.NewGuid():N}");
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync("bob", $"BOB{Guid.NewGuid():N}", Path.Combine(storeRoot, "bob"), server.CancellationToken);
-            var carol = await server.ConnectAsync("carol", $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol"), server.CancellationToken);
+            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", Path.Combine(storeRoot, "bob"), server.CancellationToken);
+            var carol = await server.ConnectAsync(carolUser, $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol"), server.CancellationToken);
             var (roomPath, bobRoom) = await CreateEncryptedRoomAsync(alice, bob, [carol],
                 new { algorithm = "m.megolm.v1.aes-sha2", rotation_period_msgs = 2 }, server.CancellationToken);
 
@@ -157,12 +162,14 @@ public class EncryptionTests
     public async Task NewDevice_ReceivesCurrentKey_ReportsOlderHistory_AndLeaveRotatesKey()
     {
         await using var server = new LocalHomeserver();
+        var bobUser = await server.RegisterUserAsync("bob");
+        var carolUser = await server.RegisterUserAsync("carol");
         var storeRoot = Path.Combine(Path.GetTempPath(), $"rsmatrix-e2ee-{Guid.NewGuid():N}");
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync("bob", $"BOB{Guid.NewGuid():N}", Path.Combine(storeRoot, "bob"), server.CancellationToken);
-            var carol = await server.ConnectAsync("carol", $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol"), server.CancellationToken);
+            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", Path.Combine(storeRoot, "bob"), server.CancellationToken);
+            var carol = await server.ConnectAsync(carolUser, $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol"), server.CancellationToken);
             var (roomPath, bobRoom) = await CreateEncryptedRoomAsync(alice, bob, [carol],
                 new { algorithm = "m.megolm.v1.aes-sha2" }, server.CancellationToken);
 
@@ -171,7 +178,7 @@ public class EncryptionTests
             var firstSession = await GetSessionIdAsync(alice, roomPath, beforeId);
 
             // Carol adds a second device. A later plaintext ping shows that Bob has synced past its device list change.
-            var carolPhone = await server.ConnectAsync("carol", $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol-phone"), server.CancellationToken);
+            var carolPhone = await server.ConnectAsync(carolUser, $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol-phone"), server.CancellationToken);
             var pingId = await SendPlaintextAsync(alice, roomPath, "ping");
             await ReceiveAsync(bob, pingId, server.CancellationToken);
             await ReceiveAsync(carolPhone, pingId, server.CancellationToken);
@@ -188,8 +195,8 @@ public class EncryptionTests
             await Assert.That(ReadIssues(carolPhone).Any(i => i.Kind == ClientIssueKind.DecryptionFailed && i.EventId == beforeId)).IsTrue();
 
             // Once Bob has seen Carol leave, his next message uses a new key.
-            await LocalHomeserver.RequestAsync(alice, $"{roomPath}/kick", HttpMethod.Post, new { user_id = "@carol:localhost" });
-            await WaitUntilAsync(() => bobRoom.Users.TryGetValue("@carol:localhost", out var member) && member.Membership == Membership.Leave,
+            await LocalHomeserver.RequestAsync(alice, $"{roomPath}/kick", HttpMethod.Post, new { user_id = $"@{carolUser}:localhost" });
+            await WaitUntilAsync(() => bobRoom.Users.TryGetValue($"@{carolUser}:localhost", out var member) && member.Membership == Membership.Leave,
                 server.CancellationToken);
             var afterLeaveId = await bobRoom.SendTextMessageAsync("after carol left", null, null);
             await Assert.That(await GetSessionIdAsync(alice, roomPath, afterLeaveId)).IsNotEqualTo(firstSession);
@@ -202,7 +209,7 @@ public class EncryptionTests
     }
 
     /// <summary>Alice creates the room over plain HTTP and invites everyone. Returns Bob's room once all clients have synced it.</summary>
-    private static async Task<(string RoomPath, Room BobRoom)> CreateEncryptedRoomAsync(HttpClientParameters alice,
+    internal static async Task<(string RoomPath, Room BobRoom)> CreateEncryptedRoomAsync(HttpClientParameters alice,
         MatrixClient bob, MatrixClient[] others, object encryption, CancellationToken cancellationToken)
     {
         MatrixClient[] clients = [bob, .. others];
@@ -211,11 +218,11 @@ public class EncryptionTests
         var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new
         {
             preset = "private_chat",
-            invite = clients.Select(c => c.CurrentUser.Full).ToArray(),
+            invite = clients.Select(c => c.CurrentUser.Full).Distinct().ToArray(),
             initial_state = new[] { new { type = "m.room.encryption", state_key = "", content = encryption } }
         });
         var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(created.GetProperty("room_id").GetString()!)}";
-        await WaitForJoinedMembersAsync(alice, roomPath, clients.Length + 1, cancellationToken);
+        await WaitForJoinedMembersAsync(alice, roomPath, clients.Select(c => c.CurrentUser.Full).Distinct().Count() + 1, cancellationToken);
 
         var pingId = await SendPlaintextAsync(alice, roomPath, "ping");
         Room? bobRoom = null;
@@ -227,7 +234,7 @@ public class EncryptionTests
         return (roomPath, bobRoom!);
     }
 
-    private static async Task<string> SendPlaintextAsync(HttpClientParameters user, string roomPath, string body)
+    internal static async Task<string> SendPlaintextAsync(HttpClientParameters user, string roomPath, string body)
     {
         var sent = await LocalHomeserver.RequestAsync(user, $"{roomPath}/send/m.room.message/{Guid.NewGuid():N}",
             HttpMethod.Put, new { msgtype = "m.text", body });
@@ -237,7 +244,7 @@ public class EncryptionTests
     private static async Task<string> GetSessionIdAsync(HttpClientParameters user, string roomPath, string eventId)
         => (await GetEventAsync(user, roomPath, eventId)).GetProperty("content").GetProperty("session_id").GetString()!;
 
-    private static List<ClientIssue> ReadIssues(MatrixClient client)
+    internal static List<ClientIssue> ReadIssues(MatrixClient client)
     {
         var issues = new List<ClientIssue>();
         while (client.Issues.TryRead(out var issue))
@@ -251,7 +258,7 @@ public class EncryptionTests
             await Task.Delay(100, cancellationToken);
     }
 
-    private static async Task WaitForJoinedMembersAsync(HttpClientParameters user, string roomPath, int count,
+    internal static async Task WaitForJoinedMembersAsync(HttpClientParameters user, string roomPath, int count,
         CancellationToken cancellationToken)
     {
         while (true)
@@ -266,7 +273,7 @@ public class EncryptionTests
     private static Task<JsonElement> GetEventAsync(HttpClientParameters user, string roomPath, string eventId)
         => LocalHomeserver.RequestAsync(user, $"{roomPath}/event/{Uri.EscapeDataString(eventId)}", HttpMethod.Get);
 
-    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, string eventId,
+    internal static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, string eventId,
         CancellationToken cancellationToken)
     {
         await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))

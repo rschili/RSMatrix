@@ -15,7 +15,7 @@ make desktop DESKTOP_USER=bob       # a second instance, e.g. to try encryption
 
 `make desktop` starts with fresh local data each time, because a recreated server no longer knows the old device. Run the project without arguments to use the normal data directory and the sign-in dialog.
 
-Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`, `--homeserver URL`, `--verbose`. With a password, the app signs in right away. Logs go to the console.
+Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`, `--homeserver URL`, `--recovery-key-file PATH`, `--verbose`. The app keeps the account's recovery key in that file, by default in the account's data directory: RSMatrix saves a new key there when it sets up cross-signing, and reads it when a new device needs it. `make desktop` keeps it next to the data directory, so it survives the fresh start. With a password, the app signs in right away. Logs go to the console.
 
 ## Settings
 

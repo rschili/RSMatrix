@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Experimental end-to-end encryption, with Olm and Megolm implemented in C#. Pass `encryptionStoreDirectory` to `ConnectAsync` to enable it. Messages in encrypted rooms are then decrypted, and messages, replies, edits and reactions are encrypted automatically. Not supported: device verification, cross-signing, key backup, key requests and encrypted attachments.
+- Experimental end-to-end encryption, with Olm and Megolm implemented in C#. Pass `EncryptionOptions` to `ConnectAsync` to enable it. Messages in encrypted rooms are then decrypted, and messages, replies, edits and reactions are encrypted automatically. Not supported: interactive device verification, key backup, key requests and encrypted attachments.
 - `ReceivedTextMessage.IsEncrypted` and `MatrixClient.IsEncryptionEnabled`.
-- `MatrixClient.Issues`: a channel that reports problems the client keeps running through (`DecryptionFailed`, `RoomKeyNotShared`, `AutoJoinFailed`, `SyncInterrupted`). It keeps the latest 100 issues.
+- `MatrixClient.Issues`: a channel that reports problems the client keeps running through (`DecryptionFailed`, `RoomKeyNotShared`, `AutoJoinFailed`, `SyncInterrupted`, `DeviceNotCrossSigned`, `IdentityChanged`). It keeps the latest 100 issues.
 - `sessionStoreDirectory` parameter on `ConnectAsync`. The client keeps its access token and sync position there and resumes on the next connect with the same user and device ID, including messages sent while it was offline. If the server rejects the stored sync position, the client syncs from scratch.
 - After a soft logout, the client logs in again with the same device and keeps its sync position, while running and when resuming. Applications no longer need their own reconnect loop.
 

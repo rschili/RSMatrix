@@ -9,7 +9,8 @@ using RSMatrix.Models;
 
 namespace RSMatrix.Desktop.Matrix;
 
-public sealed record MatrixLogin(string UserId, string Password, Uri? Homeserver);
+/// <param name="RecoveryKeyFile">Where the recovery key is read from and saved to. Defaults to the account's data directory.</param>
+public sealed record MatrixLogin(string UserId, string Password, Uri? Homeserver, string? RecoveryKeyFile = null);
 
 /// <summary>
 /// Connects the UI to a homeserver through <see cref="MatrixClient"/>.
@@ -65,8 +66,8 @@ public sealed class MatrixChatSession : IChatSession
             {
                 client = await MatrixClient.ConnectAsync(login.UserId, login.Password, account.DeviceId,
                     httpClientFactory, lifetime.Token, loggerFactory.CreateLogger<MatrixClient>(),
-                    encryptionStoreDirectory: account.EncryptionDirectory,
-                    sessionStoreDirectory: account.SessionDirectory).ConfigureAwait(false);
+                    sessionStoreDirectory: account.SessionDirectory,
+                    encryption: CreateEncryptionOptions(account, login.RecoveryKeyFile ?? account.RecoveryKeyPath)).ConfigureAwait(false);
             }
             return new MatrixChatSession(client, lifetime, httpClientFactory, loggerFactory.CreateLogger<MatrixChatSession>());
         }
@@ -78,6 +79,22 @@ public sealed class MatrixChatSession : IChatSession
             throw;
         }
     }
+
+    // The app has no screen for the recovery key yet, so it keeps it in a file.
+    private static EncryptionOptions CreateEncryptionOptions(AccountData account, string recoveryKeyFile) => new()
+    {
+        StoreDirectory = account.EncryptionDirectory,
+        GetRecoveryKeyAsync = async cancellationToken => File.Exists(recoveryKeyFile)
+            ? (await File.ReadAllTextAsync(recoveryKeyFile, cancellationToken).ConfigureAwait(false)).Trim()
+            : null,
+        SaveRecoveryKeyAsync = async (recoveryKey, cancellationToken) =>
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(recoveryKeyFile))!);
+            await File.WriteAllTextAsync(recoveryKeyFile, recoveryKey, cancellationToken).ConfigureAwait(false);
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(recoveryKeyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        },
+    };
 
     public IAsyncEnumerable<ChatEvent> ReadEventsAsync(CancellationToken cancellationToken)
         => _events.Reader.ReadAllAsync(cancellationToken);

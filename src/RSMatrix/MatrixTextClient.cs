@@ -29,10 +29,25 @@ public sealed class MatrixClient
     internal EncryptionEngine? Encryption { get; set; }
 
     /// <summary>
-    /// Whether the client was connected with an encryption store directory. Without it,
+    /// Whether the client was connected with <see cref="EncryptionOptions"/>. Without them,
     /// messages in encrypted rooms are not received and sending to them throws.
     /// </summary>
     public bool IsEncryptionEnabled => Encryption != null;
+
+    /// <summary>
+    /// Replaces the account's cross-signing keys and recovery key, for when the recovery key is lost or the
+    /// keys are damaged. The new recovery key goes to <see cref="EncryptionOptions.SaveRecoveryKeyAsync"/> first,
+    /// then this device is signed with the new keys.
+    /// </summary>
+    /// <remarks>
+    /// Other devices of the account lose their cross-signature: they need the new recovery key once to be signed again.
+    /// Other users' clients see that the account's identity changed. The server asks for the account password,
+    /// which the client has; servers that want a confirmation in the browser instead are not supported.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Encryption is not enabled, or the server refused the new keys.</exception>
+    public Task ResetCrossSigningAsync()
+        => Encryption?.ResetCrossSigningAsync()
+           ?? throw new InvalidOperationException("Cross-signing needs encryption; connect with EncryptionOptions.");
 
     private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
 
@@ -133,12 +148,6 @@ public sealed class MatrixClient
     /// <param name="httpClientFactory">factory to use for creating http clients</param>
     /// <param name="cancellationToken">cancellation token used to disconnect</param>
     /// <param name="logger">logger</param>
-    /// <param name="encryptionStoreDirectory">
-    /// Enables end-to-end encryption. The directory holds this device's private keys as plain JSON;
-    /// protect it accordingly. It belongs to one user and device ID and must persist across restarts.
-    /// Only one client at a time can use it. Without it, encrypted messages are ignored and sending
-    /// to encrypted rooms throws <see cref="NotSupportedException"/>.
-    /// </param>
     /// <param name="sessionStoreDirectory">
     /// Keeps the session (access token and sync position) in this directory, so the next connect with
     /// the same user and device ID resumes instead of logging in and syncing from scratch. Messages sent
@@ -146,18 +155,22 @@ public sealed class MatrixClient
     /// plain JSON; protect the directory accordingly. It can be the same as the encryption store directory.
     /// Only one client at a time can use a session.
     /// </param>
+    /// <param name="encryption">
+    /// Turns on end-to-end encryption; see <see cref="EncryptionOptions"/> for what it needs and does.
+    /// Without it, encrypted messages are ignored and sending to encrypted rooms throws <see cref="NotSupportedException"/>.
+    /// </param>
     /// <exception cref="ArgumentException">Provided arguments not valid</exception>
     /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
     public static Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory,
-        CancellationToken cancellationToken, ILogger? logger = null, string? encryptionStoreDirectory = null,
-        string? sessionStoreDirectory = null)
+        CancellationToken cancellationToken, ILogger? logger = null, string? sessionStoreDirectory = null,
+        EncryptionOptions? encryption = null)
         => ConnectAsync(userId, password, deviceId, httpClientFactory, cancellationToken, logger,
-            (delay, token) => Task.Delay(delay, token), encryptionStoreDirectory, sessionStoreDirectory);
+            (delay, token) => Task.Delay(delay, token), sessionStoreDirectory, encryption);
 
     internal static async Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId,
         IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger,
-        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, string? encryptionStoreDirectory = null,
-        string? sessionStoreDirectory = null)
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, string? sessionStoreDirectory = null,
+        EncryptionOptions? encryption = null)
     {
         if (logger == null)
             logger = NullLogger<MatrixClient>.Instance;
@@ -186,17 +199,23 @@ public sealed class MatrixClient
             throw new ArgumentException("The user id seems invalid, it should look like: '@user:example.org'.", nameof(userId));
         }
 
+        if (encryption != null && (string.IsNullOrWhiteSpace(encryption.StoreDirectory) ||
+            encryption.GetRecoveryKeyAsync == null || encryption.SaveRecoveryKeyAsync == null))
+        {
+            throw new ArgumentException($"{nameof(EncryptionOptions)} needs a store directory and both recovery key callbacks.", nameof(encryption));
+        }
+
         // Fail on a wrong or busy store before creating a session on the server.
         EncryptionStore? encryptionStore = null;
         SessionStore? sessionStore = null;
         try
         {
-            if (encryptionStoreDirectory != null)
-                encryptionStore = EncryptionEngine.OpenStore(encryptionStoreDirectory, parsedUserId.Full, deviceId);
+            if (encryption != null)
+                encryptionStore = EncryptionEngine.OpenStore(encryption.StoreDirectory, parsedUserId.Full, deviceId);
             if (sessionStoreDirectory != null)
                 sessionStore = SessionStore.Open(sessionStoreDirectory, parsedUserId.Full, deviceId);
             return await ConnectAsync(parsedUserId, password, deviceId, httpClientFactory, cancellationToken, logger,
-                retryDelayAsync, encryptionStore, sessionStore).ConfigureAwait(false);
+                retryDelayAsync, encryptionStore, sessionStore, encryption).ConfigureAwait(false);
         }
         catch
         {
@@ -208,7 +227,8 @@ public sealed class MatrixClient
 
     private static async Task<MatrixClient> ConnectAsync(MatrixId userId, string password, string deviceId,
         IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger logger,
-        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, EncryptionStore? encryptionStore, SessionStore? sessionStore)
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, EncryptionStore? encryptionStore, SessionStore? sessionStore,
+        EncryptionOptions? encryption)
     {
         HttpClientParameters http = new(httpClientFactory, "", null, logger, cancellationToken)
         {
@@ -272,7 +292,7 @@ public sealed class MatrixClient
             _resumeSyncToken = syncToken,
         };
         if (encryptionStore != null)
-            client.Encryption = await EncryptionEngine.StartAsync(encryptionStore, http).ConfigureAwait(false);
+            client.Encryption = await EncryptionEngine.StartAsync(encryptionStore, client, encryption!, password).ConfigureAwait(false);
         await MatrixRetry.ExecuteAsync(http, "Initializing Matrix", client.InitAsync).ConfigureAwait(false);
         client.IsSyncing = true;
         _ = client.SyncAsync();

@@ -39,6 +39,9 @@ public sealed partial class LoginViewModel : ObservableObject
     [ObservableProperty]
     public partial string Homeserver { get; set; }
 
+    /// <summary>Where the account's recovery key is kept, instead of the account's data directory. Only settable from the command line for now.</summary>
+    public string? RecoveryKeyFile { get; set; }
+
     [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
 
@@ -78,7 +81,7 @@ public sealed partial class LoginViewModel : ObservableObject
         try
         {
             var account = _localData.GetAccount(userId);
-            var session = await MatrixChatSession.ConnectAsync(new MatrixLogin(userId, Password, homeserver), account,
+            var session = await MatrixChatSession.ConnectAsync(new MatrixLogin(userId, Password, homeserver, RecoveryKeyFile), account,
                 _loggerFactory, cancellationToken);
             Password = "";
             _onConnected(session);

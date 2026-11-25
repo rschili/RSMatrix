@@ -12,7 +12,16 @@ public enum ClientIssueKind
     AutoJoinFailed,
 
     /// <summary>A sync request failed and the client keeps retrying. Reported once per interruption.</summary>
-    SyncInterrupted
+    SyncInterrupted,
+
+    /// <summary>
+    /// This device could not be cross-signed, for example because the account already has a cross-signing
+    /// identity and no recovery key was given. Clients that follow the spec won't share keys with it.
+    /// </summary>
+    DeviceNotCrossSigned,
+
+    /// <summary>A user's cross-signing identity changed. Only devices signed by the new identity are trusted.</summary>
+    IdentityChanged
 }
 
 /// <summary>Something went wrong that callers may want to know about. The client keeps running.</summary>

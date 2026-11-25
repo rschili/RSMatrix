@@ -17,10 +17,17 @@ public class SessionResumeTests
     {
         using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var client = await MatrixClient.ConnectAsync(User, "password", Device, new ClientFactory(server), lifetime.Token,
-            NullLogger.Instance, (_, token) => Task.CompletedTask, encryptionDirectory, sessionDirectory);
+            NullLogger.Instance, (_, token) => Task.CompletedTask, sessionDirectory, Encryption(encryptionDirectory));
         // The fake server ends the second sync with a terminal error, which also releases the session.
         return await Assert.ThrowsAsync<MatrixResponseException>(() => client.Messages.Completion.WaitAsync(lifetime.Token));
     }
+
+    private static EncryptionOptions? Encryption(string? directory) => directory == null ? null : new EncryptionOptions
+    {
+        StoreDirectory = directory,
+        GetRecoveryKeyAsync = _ => Task.FromResult<string?>(null),
+        SaveRecoveryKeyAsync = (_, _) => Task.CompletedTask
+    };
 
     private static void StoreSession(string directory, string? syncToken = "stored-batch")
     {
@@ -112,7 +119,7 @@ public class SessionResumeTests
             var server = new FakeServer { WhoAmIError = """{"errcode":"M_UNKNOWN_TOKEN"}""" };
             await Assert.ThrowsAsync<InvalidOperationException>(() => MatrixClient.ConnectAsync(User, "password", Device,
                 new ClientFactory(server), CancellationToken.None, NullLogger.Instance, (_, token) => Task.CompletedTask,
-                encryptionStoreDirectory: directory, sessionStoreDirectory: directory));
+                sessionStoreDirectory: directory, encryption: Encryption(directory)));
             await Assert.That(server.LoginCount).IsEqualTo(0);
 
             // Both stores were released.

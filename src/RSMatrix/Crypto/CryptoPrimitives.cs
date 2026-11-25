@@ -103,13 +103,43 @@ internal static class CryptoPrimitives
         return aes.DecryptCbc(ciphertext, iv, PaddingMode.PKCS7);
     }
 
+    /// <summary>AES-256-CTR with a 128-bit big-endian counter starting at <paramref name="iv"/>. Encrypts and decrypts.</summary>
+    public static byte[] AesCtr(byte[] key, byte[] iv, ReadOnlySpan<byte> input)
+    {
+        using var aes = Aes.Create();
+        aes.Key = key;
+        var counter = (byte[])iv.Clone();
+        var keyStream = new byte[16];
+        var output = new byte[input.Length];
+        for (var offset = 0; offset < input.Length; offset += 16)
+        {
+            aes.EncryptEcb(counter, keyStream, PaddingMode.None);
+            for (var i = 0; i < 16 && offset + i < input.Length; i++)
+                output[offset + i] = (byte)(input[offset + i] ^ keyStream[i]);
+            for (var i = 15; i >= 0; i--)
+            {
+                if (++counter[i] != 0)
+                    break;
+            }
+        }
+        return output;
+    }
+
     /// <summary>Matrix encodes binary values as unpadded standard base64.</summary>
     public static string ToBase64(ReadOnlySpan<byte> data) => Convert.ToBase64String(data).TrimEnd('=');
 
-    /// <summary>Accepts padded and unpadded input. Throws <see cref="FormatException"/> on invalid data.</summary>
+    private const string Base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    /// <summary>
+    /// Accepts padded and unpadded input, and ignores unused bits in the last character like other
+    /// Matrix implementations do. Throws <see cref="FormatException"/> on invalid data.
+    /// </summary>
     public static byte[] FromBase64(string value)
     {
         var trimmed = value.TrimEnd('=');
+        var unusedBits = (trimmed.Length % 4) switch { 2 => 4, 3 => 2, _ => 0 };
+        if (unusedBits > 0 && Base64Alphabet.IndexOf(trimmed[^1]) is var index and >= 0)
+            trimmed = trimmed[..^1] + Base64Alphabet[index & ~((1 << unusedBits) - 1)];
         return Convert.FromBase64String(trimmed + new string('=', (4 - trimmed.Length % 4) % 4));
     }
 }

@@ -55,7 +55,7 @@ The files contain the access token unencrypted, so protect the directory as nece
 
 ## Issues and health
 
-`client.Issues` reports problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, failed auto-joins and interrupted syncs. Reading it is optional. It keeps the latest 100 issues.
+`client.Issues` reports problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, a device that could not be cross-signed, changed identities of other users, failed auto-joins and interrupted syncs. Reading it is optional. It buffers the latest 100 issues.
 
 ```cs
 _ = Task.Run(async () =>
@@ -67,13 +67,28 @@ _ = Task.Run(async () =>
 
 ## End-to-end encryption
 
-Pass a directory for encryption keys to enable encryption:
+Pass `EncryptionOptions` to turn on encryption. Without them, nothing changes: encrypted messages are ignored and sending to encrypted rooms throws.
 
 ```cs
 MatrixClient client = await MatrixClient.ConnectAsync(userid, password, device,
     httpClientFactory, cancellationToken, logger,
-    encryptionStoreDirectory: "/var/lib/mybot/matrix-encryption");
+    encryption: new EncryptionOptions
+    {
+        StoreDirectory = "/var/lib/mybot/matrix-encryption",
+        // Asked once per new device, when the account already has cross-signing keys.
+        GetRecoveryKeyAsync = _ => Task.FromResult(Environment.GetEnvironmentVariable("MATRIX_RECOVERY_KEY")),
+        // Called once with a new key, when RSMatrix sets up cross-signing for the account.
+        SaveRecoveryKeyAsync = (key, _) => File.WriteAllTextAsync("/var/lib/mybot/matrix-recovery-key", key),
+    });
 ```
+
+The store directory holds this device's private keys and must survive restarts.
+
+Encrypted rooms only work between devices the account vouches for, called cross-signed devices. As the spec recommends, RSMatrix only shares keys with cross-signed devices and only shows encrypted messages from them, and other clients increasingly do the same. RSMatrix cross-signs its own device while connecting:
+
+- On an account without cross-signing keys, it creates them and a recovery key, which goes to `SaveRecoveryKeyAsync`. The keys are kept on the server, encrypted with the recovery key.
+- On a new device of an account that has them, it asks `GetRecoveryKeyAsync` for the recovery key, once. Return null if you don't have it: the device then works unsigned, and `client.Issues` reports `DeviceNotCrossSigned`.
+- If the recovery key is lost, `client.ResetCrossSigningAsync()` creates new keys and a new recovery key. Other devices of the account then need the new key once.
 
 > [!WARNING]
 > The encryption code was written by AI, from the Matrix specification. It has been tested locally against a synapse server, but I have not done any real-world testing yet.

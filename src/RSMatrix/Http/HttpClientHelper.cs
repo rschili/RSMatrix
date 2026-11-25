@@ -20,10 +20,12 @@ internal record HttpClientParameters
     internal Func<TimeSpan, CancellationToken, Task> RetryDelayAsync { get; init; }
         = (delay, token) => Task.Delay(delay, token);
 
-    // Used as txnId when sending events, incremented for each event sent.
+    // Transaction IDs must be unique per device, also across restarts. A client restarted with the same
+    // device within the same second must not reuse an ID, or the server answers with the earlier result.
+    private readonly string _txnPrefix = Guid.NewGuid().ToString("N")[..12];
     internal uint _txnId = 0;
 
-    internal string NextTransactionId() => $"{DateTimeOffset.Now.ToUnixTimeSeconds()}-{Interlocked.Increment(ref _txnId)}";
+    internal string NextTransactionId() => $"{_txnPrefix}-{Interlocked.Increment(ref _txnId)}";
 
     public HttpClientParameters(IHttpClientFactory factory, string baseUri, string? bearerToken, ILogger logger, CancellationToken cancellationToken)
     {
@@ -112,7 +114,9 @@ internal static class HttpClientHelper
                 continue;
             }
 
-            parameters.Logger.LogError("{Path} failed (HTTP {Status}): {ErrorCode}, {ErrorMessage}",
+            // Callers often expect "not found", for example for account data that isn't set.
+            parameters.Logger.Log(error.ErrorCode == "M_NOT_FOUND" ? LogLevel.Information : LogLevel.Error,
+                "{Path} failed (HTTP {Status}): {ErrorCode}, {ErrorMessage}",
                 debugPath, (int?)error.StatusCode, error.ErrorCode, error.ErrorMessage);
             throw error;
         }
@@ -150,7 +154,10 @@ internal static class HttpClientHelper
         return new MatrixResponseException(
             error?.ErrorCode ?? (response.StatusCode == HttpStatusCode.TooManyRequests ? "M_LIMIT_EXCEEDED" : "M_UNKNOWN"),
             error?.ErrorMessage ?? response.ReasonPhrase ?? "Matrix request failed.",
-            response.StatusCode, retryAfter, error?.SoftLogout ?? false);
+            response.StatusCode, retryAfter, error?.SoftLogout ?? false)
+        {
+            ResponseBody = text
+        };
     }
 }
 
@@ -165,6 +172,8 @@ public class MatrixResponseException : Exception
     /// <summary>Server-requested minimum wait. Retry-After takes precedence over retry_after_ms.</summary>
     public TimeSpan? RetryAfter { get; }
     public bool SoftLogout { get; }
+    /// <summary>The JSON error body, for answers that carry more than the error code, like authentication challenges.</summary>
+    internal string? ResponseBody { get; init; }
     public bool IsRateLimited => StatusCode == HttpStatusCode.TooManyRequests || ErrorCode == "M_LIMIT_EXCEEDED";
     public bool IsTransient => IsRateLimited || MatrixRetry.IsTransientStatus(StatusCode);
 

@@ -8,6 +8,8 @@ HOMESERVER_DIR := src/RSMatrix.IntegrationTests/Homeserver
 DESKTOP_PROJECT := src/RSMatrix.Desktop/RSMatrix.Desktop.csproj
 DESKTOP_USER ?= alice
 DESKTOP_DATA := temp/desktop-data/$(DESKTOP_USER)
+# Outside DESKTOP_DATA, so the account's recovery key survives the fresh start of each run.
+DESKTOP_RECOVERY_KEY_FILE := temp/desktop-data/$(DESKTOP_USER).recovery-key
 
 default: build
 
@@ -39,7 +41,8 @@ matrix-seed:
 desktop:
 	rm -rf $(DESKTOP_DATA)
 	dotnet run --project $(DESKTOP_PROJECT) -- --data-dir $(DESKTOP_DATA) \
-		--homeserver http://127.0.0.1:$(MATRIX_PORT) --user @$(DESKTOP_USER):localhost --password rsmatrix-test-password
+		--homeserver http://127.0.0.1:$(MATRIX_PORT) --user @$(DESKTOP_USER):localhost --password rsmatrix-test-password \
+		--recovery-key-file $(DESKTOP_RECOVERY_KEY_FILE)
 
 desktop-sample:
 	dotnet run --project $(DESKTOP_PROJECT) -- --sample

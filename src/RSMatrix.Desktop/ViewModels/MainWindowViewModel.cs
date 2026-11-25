@@ -53,6 +53,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             login.UserId = options.UserId;
         if (options.Homeserver != null)
             login.Homeserver = options.Homeserver;
+        login.RecoveryKeyFile = options.RecoveryKeyFile;
         if (options.Password != null)
         {
             login.Password = options.Password;

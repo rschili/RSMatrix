@@ -5,6 +5,7 @@ namespace RSMatrix.IntegrationTests;
 
 /// <summary>
 /// Talks to an independent implementation: a matrix-rust-sdk client (the SDK behind Element X).
+/// The peer only trusts cross-signed devices, so this also checks that our device is cross-signed.
 /// Opt-in: set RSMATRIX_RUST_PEER to the built rust-peer binary.
 /// </summary>
 public class RustInteropTests
@@ -18,18 +19,21 @@ public class RustInteropTests
         TUnit.Core.Skip.When(string.IsNullOrEmpty(peer), "Set RSMATRIX_RUST_PEER to run the matrix-rust-sdk interop test.");
 
         await using var server = new LocalHomeserver();
+        // New users: the peer creates its own cross-signing identity, which only works for a user without one.
+        var bobUser = await server.RegisterUserAsync("bob");
+        var peerUser = await server.RegisterUserAsync("rust");
         var storeRoot = Path.Combine(Path.GetTempPath(), $"rsmatrix-interop-{Guid.NewGuid():N}");
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync("bob", $"BOB{Guid.NewGuid():N}",
+            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}",
                 Path.Combine(storeRoot, "bob"), server.CancellationToken);
             bob.AutoJoinOnInvite = true;
 
             var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new
             {
                 preset = "private_chat",
-                invite = new[] { "@bob:localhost", "@carol:localhost" },
+                invite = new[] { $"@{bobUser}:localhost", $"@{peerUser}:localhost" },
                 initial_state = new[]
                 {
                     new { type = "m.room.encryption", state_key = "", content = new { algorithm = "m.megolm.v1.aes-sha2" } }
@@ -39,10 +43,9 @@ public class RustInteropTests
             var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId)}";
 
             var marker = Guid.NewGuid().ToString("N");
-            // Other tests use carol too; only look at this room.
-            bool fromPeer(ReceivedTextMessage m) => m.Room.RoomId.Full == roomId && m.Sender.User.UserId.Full == "@carol:localhost";
+            bool fromPeer(ReceivedTextMessage m) => m.Room.RoomId.Full == roomId && m.Sender.User.UserId.Full == $"@{peerUser}:localhost";
             using var process = Process.Start(new ProcessStartInfo(peer!,
-                [server.BaseUri.AbsoluteUri.TrimEnd('/'), "carol", LocalHomeserver.Password, roomId, marker, mode])
+                [server.BaseUri.AbsoluteUri.TrimEnd('/'), peerUser, LocalHomeserver.Password, roomId, marker, mode])
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true

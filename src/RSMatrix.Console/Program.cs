@@ -10,6 +10,8 @@ var password = Environment.GetEnvironmentVariable("MATRIX_PASSWORD");
 var device = Environment.GetEnvironmentVariable("MATRIX_DEVICE_ID");
 // Optional. Enables end-to-end encryption; keep the directory between runs.
 var encryptionStore = Environment.GetEnvironmentVariable("MATRIX_ENCRYPTION_STORE");
+// Needed once per new device if the account already has cross-signing keys.
+var recoveryKey = Environment.GetEnvironmentVariable("MATRIX_RECOVERY_KEY");
 // Optional. Resumes the session on the next run instead of logging in and syncing from scratch.
 var sessionStore = Environment.GetEnvironmentVariable("MATRIX_SESSION_STORE");
 if (string.IsNullOrWhiteSpace(userid) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(device))
@@ -46,8 +48,17 @@ try
     var client = await MatrixClient.ConnectAsync(userid, password, device,
         services.GetRequiredService<IHttpClientFactory>(), cancellationTokenSource.Token,
         services.GetRequiredService<ILogger<MatrixClient>>(),
-        string.IsNullOrWhiteSpace(encryptionStore) ? null : encryptionStore,
-        string.IsNullOrWhiteSpace(sessionStore) ? null : sessionStore);
+        string.IsNullOrWhiteSpace(sessionStore) ? null : sessionStore,
+        string.IsNullOrWhiteSpace(encryptionStore) ? null : new EncryptionOptions
+        {
+            StoreDirectory = encryptionStore,
+            GetRecoveryKeyAsync = _ => Task.FromResult(string.IsNullOrWhiteSpace(recoveryKey) ? null : recoveryKey),
+            SaveRecoveryKeyAsync = (key, _) =>
+            {
+                Console.WriteLine($"New recovery key, set it as MATRIX_RECOVERY_KEY for new devices: {key}");
+                return Task.CompletedTask;
+            }
+        });
 
     await foreach (var message in client.Messages.ReadAllAsync(cancellationTokenSource.Token))
     {

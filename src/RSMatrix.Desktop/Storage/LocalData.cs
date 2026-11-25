@@ -82,6 +82,9 @@ public sealed record AccountData(string UserId, string DeviceId, string Director
     public string SessionDirectory => Path.Combine(Directory, "session");
 
     public string EncryptionDirectory => Path.Combine(Directory, "encryption");
+
+    /// <summary>Where the app keeps the account's recovery key until there is a way to show it to the user.</summary>
+    public string RecoveryKeyPath => Path.Combine(Directory, "recovery-key");
 }
 
 public sealed class AppSettings
