@@ -76,12 +76,11 @@ public class EncryptionTests
 
             var editId = await bobRoom.EditMessageAsync(secretId, "edited body");
             var edited = await ReceiveUpdateAsync<MessageEdited>(carol, u => u.Message.Id == secretId, server.CancellationToken);
-            await Assert.That(ReferenceEquals(edited.Message, secret)).IsTrue();
-            await Assert.That(secret.Body).IsEqualTo("edited body");
+            await Assert.That(edited.Message.Body).IsEqualTo("edited body");
 
             var history = await secret.Room.GetMessagesAsync(limit: 20);
             await Assert.That(string.Join(",", history.Select(m => m.Id))).IsEqualTo($"{pingId},{secretId},{replyId}");
-            await Assert.That(ReferenceEquals(history[1], secret)).IsTrue();
+            await Assert.That(history[1].Body).IsEqualTo("edited body");
             await Assert.That(history[0].IsEncrypted).IsFalse();
             var source = await secret.GetSourceAsync();
             await Assert.That(source).Contains("\"type\": \"m.room.message\"");
@@ -96,7 +95,7 @@ public class EncryptionTests
             var afterRestart = await ReceiveAsync(restarted, afterRestartId, server.CancellationToken);
             await Assert.That(afterRestart.Body).IsEqualTo("after restart");
 
-            // The restarted window starts after the restart, so the edit and the reaction come from history.
+            // The restarted cache starts after the restart, so the edit and the reaction come from history.
             var loaded = await afterRestart.Room.GetMessageAsync(secretId);
             await Assert.That(loaded!.Body).IsEqualTo("edited body");
             await Assert.That(loaded.IsEncrypted).IsTrue();
@@ -106,7 +105,8 @@ public class EncryptionTests
             await Assert.That(walked[1].Body).IsEqualTo("edited body");
             await Assert.That(walked[2].Reactions.Single().Key).IsEqualTo("👍");
             var walkedById = await afterRestart.Room.GetMessagesAsync(limit: 1, beforeId: replyId);
-            await Assert.That(ReferenceEquals(walkedById.Single(), walked[1])).IsTrue();
+            await Assert.That(walkedById.Single().Id).IsEqualTo(secretId);
+            await Assert.That(walkedById.Single().HasAllReactions).IsTrue();
 
             var answerId = await afterRestart.ReplyAsync("answer after restart", quote: false);
             var answer = await ReceiveAsync(bob, answerId, server.CancellationToken);

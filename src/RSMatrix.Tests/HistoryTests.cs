@@ -10,6 +10,19 @@ public class HistoryTests
     private static string SyncWithPrevBatch(string prevBatch, params string[] timeline)
         => $$"""{"next_batch":"next","rooms":{"join":{"{{Room}}":{"timeline":{"prev_batch":"{{prevBatch}}","events":[""" + string.Join(",", timeline) + "]}}}}}";
 
+    /// <summary>A sync whose timeline the server cut short, so events before it were left out.</summary>
+    private static string LimitedSync(string prevBatch, params string[] timeline)
+        => SyncWithPrevBatch(prevBatch, timeline).Replace("\"timeline\":{", "\"timeline\":{\"limited\":true,");
+
+    private static string[] Texts(int from, int count) => Enumerable.Range(from, count).Select(i => Text($"$m{i}", $"m{i}")).ToArray();
+
+    private sealed class ManualTime : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UnixEpoch;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Now.Ticks;
+    }
+
     /// <summary>A /messages response, newest event first. Without <paramref name="end"/>, it reaches the start of the room.</summary>
     private static string Page(string? end, params string[] events)
         => $$"""{"start":"s",{{(end == null ? "" : $"\"end\":\"{end}\",")}}"chunk":[""" + string.Join(",", events) + "]}";
@@ -27,7 +40,7 @@ public class HistoryTests
     private static string Ids(IEnumerable<Message> messages) => string.Join(",", messages.Select(m => m.Id));
 
     [Test]
-    public async Task EmptyWindow_LoadsTheNewestPage_WithEditsReactionsAndTombstones()
+    public async Task EmptyCache_LoadsTheNewestPage_WithEditsReactionsAndTombstones()
     {
         using var context = new MatrixTestContext();
         Serve(context, ("/messages?dir=b&limit=6", Page(null,
@@ -46,14 +59,15 @@ public class HistoryTests
         await Assert.That(history[2].Body).IsEqualTo("two!");
         await Assert.That(history[2].Reactions.Single().Key).IsEqualTo("👍");
 
-        // The page joined the window, so live changes reach the same objects.
+        // The page joined the room's cache, so live changes to its messages come out.
         await context.Process(Sync(Reaction("$r2", "$3", "🎉")));
         var added = (ReactionAdded)context.ReadUpdates().Single().Value!;
-        await Assert.That(ReferenceEquals(added.Message, history[3])).IsTrue();
+        await Assert.That(added.Message.Id).IsEqualTo("$3");
+        await Assert.That(history.All(m => m.HasAllReactions)).IsTrue();
     }
 
     [Test]
-    public async Task Walk_UsesTheWindowFirst_ThenContinuesFromPrevBatch()
+    public async Task Walk_UsesTheCacheFirst_ThenContinuesFromPrevBatch()
     {
         using var context = new MatrixTestContext();
         Serve(context,
@@ -72,11 +86,10 @@ public class HistoryTests
         await Assert.That(Ids(oldest)).IsEqualTo("$1");
         await Assert.That(context.Requests.Count).IsEqualTo(2);
 
-        // The start was reached and everything is in the window now.
+        // The start was reached and everything is in the cache now.
         await Assert.That(await room.GetMessagesAsync(limit: 10, before: oldest[0])).IsEmpty();
         var all = await room.GetMessagesAsync(limit: 10);
         await Assert.That(Ids(all)).IsEqualTo("$1,$2,$3,$4,$5");
-        await Assert.That(ReferenceEquals(all[1], older[0])).IsTrue();
         await Assert.That(context.Requests.Count).IsEqualTo(2);
     }
 
@@ -96,15 +109,15 @@ public class HistoryTests
     }
 
     [Test]
-    public async Task LiveReaction_ToAMessageNotLoaded_IsAppliedWhenItLoads_UnlessRedacted()
+    public async Task LiveReaction_ToAMessageNotLoaded_IsThereWhenItLoads_UnlessRedacted()
     {
         using var context = new MatrixTestContext();
-        await context.Process(Sync(
+        await context.Process(SyncWithPrevBatch("p0", 
             Reaction("$r1", "$old", "👍"),
             Reaction("$r2", "$old", "🎉"),
             Redaction("$x", "$r2", sender: "@bob:example.org")));
         await Assert.That(context.ReadUpdates()).IsEmpty();
-        Serve(context, ("/messages", Page(null, Text("$old", "old"))));
+        Serve(context, ("from=p0", Page(null, Text("$old", "old"))));
 
         var old = (await context.Room().GetMessagesAsync(limit: 1)).Single();
 
@@ -126,7 +139,7 @@ public class HistoryTests
     }
 
     [Test]
-    public async Task UnknownId_FindsItsPositionOnce_AndResultsStayOutOfTheWindow()
+    public async Task UnknownId_FindsItsPositionOnce_AndResultsStayOutOfTheCache()
     {
         using var context = new MatrixTestContext();
         Serve(context,
@@ -137,20 +150,21 @@ public class HistoryTests
 
         var history = await room.GetMessagesAsync(limit: 2, beforeId: "$far");
         await Assert.That(Ids(history)).IsEqualTo("$a,$b");
-        await Assert.That(room.Window.Count).IsEqualTo(0);
+        await Assert.That(history.Any(m => m.HasAllReactions)).IsFalse();
+        await Assert.That(room.Cache.MessageCount).IsEqualTo(0);
 
         await Assert.That(await room.GetMessagesAsync(limit: 2, before: history[0])).IsEmpty();
         await Assert.That(context.Requests.Count(r => r.Path.Contains("/context/"))).IsEqualTo(1);
     }
 
     [Test]
-    public async Task GetMessage_UsesTheWindow_ThenTheServer()
+    public async Task GetMessage_UsesTheCache_ThenTheServer()
     {
         using var context = new MatrixTestContext();
         await context.Process(Sync(Text("$reply", "re", relatesTo: ""","m.relates_to":{"m.in_reply_to":{"event_id":"$target"}}""")));
         var reply = context.ReadMessages().Single();
         var room = context.Room();
-        await Assert.That(ReferenceEquals(await room.GetMessageAsync("$reply"), reply)).IsTrue();
+        await Assert.That((await room.GetMessageAsync("$reply"))!.HasAllReactions).IsTrue();
         await Assert.That(context.Requests).IsEmpty();
 
         Serve(context,
@@ -158,7 +172,8 @@ public class HistoryTests
             ("/event/%24reaction", Reaction("$reaction", "$target", "👍")));
         var target = await reply.GetReplyToAsync();
         await Assert.That(target!.Body).IsEqualTo("target");
-        await Assert.That(room.Window.Find("$target")).IsNull();
+        await Assert.That(target.HasAllReactions).IsFalse();
+        await Assert.That(room.Cache.Find("$target")).IsNull();
         await Assert.That(await room.GetMessageAsync("$reaction")).IsNull();
 
         context.Send = (_, _) => Task.FromResult(MatrixTestContext.Json("""{"errcode":"M_NOT_FOUND","error":"Event not found."}""",
@@ -174,7 +189,7 @@ public class HistoryTests
         => Text(id, body, ts: ts, relatesTo: ""","m.relates_to":{"rel_type":"m.thread","event_id":"$root","is_falling_back":true}""");
 
     [Test]
-    public async Task ThreadMessages_ComeFromTheWindow_WhenItHoldsTheRoot()
+    public async Task ThreadMessages_ComeFromTheCache_WhenItHoldsTheRoot()
     {
         using var context = new MatrixTestContext();
         await context.Process(Sync(Text("$root", "root"), ThreadReply("$t1", "one", 1), Text("$other", "other"), ThreadReply("$t2", "two", 2)));
@@ -192,7 +207,7 @@ public class HistoryTests
     {
         using var context = new MatrixTestContext();
         await context.Process(Sync(ThreadReply("$t3", "three", 3)));
-        var inWindow = context.ReadMessages().Single();
+        var inCache = context.ReadMessages().Single();
         Serve(context,
             ("from=n1", Relations(null, ThreadReply("$t1", "one", 1))),
             ("from=n0", Relations("n1", ThreadReply("$t2", "two", 2))),
@@ -200,7 +215,7 @@ public class HistoryTests
         var room = context.Room();
 
         // Starting at a reply without a token skips the newer replies first.
-        var page = await room.GetThreadMessagesAsync("$root", limit: 1, before: inWindow);
+        var page = await room.GetThreadMessagesAsync("$root", limit: 1, before: inCache);
         await Assert.That(Ids(page)).IsEqualTo("$t2");
         var rest = await room.GetThreadMessagesAsync("$root", limit: 5, before: page[0]);
         await Assert.That(Ids(rest)).IsEqualTo("$t1");
@@ -209,17 +224,18 @@ public class HistoryTests
     }
 
     [Test]
-    public async Task ThreadSummary_FollowsRepliesInTheWindow()
+    public async Task ThreadSummary_FollowsRepliesInTheCache()
     {
         using var context = new MatrixTestContext();
         await context.Process(Sync(Text("$root", "root"), ThreadReply("$t1", "one", 1)));
-        var root = context.ReadMessages()[0];
+        var root = (await context.Room().GetMessageAsync("$root"))!;
         await Assert.That(root.Thread!.ReplyCount).IsEqualTo(1);
         await Assert.That(root.Thread.CurrentUserParticipated).IsFalse();
 
         await context.Process(Sync(Text("$t2", "mine", sender: "@bot:example.org",
             relatesTo: ""","m.relates_to":{"rel_type":"m.thread","event_id":"$root","is_falling_back":true}""")));
-        await Assert.That(root.Thread.ReplyCount).IsEqualTo(2);
+        root = (await context.Room().GetMessageAsync("$root"))!;
+        await Assert.That(root.Thread!.ReplyCount).IsEqualTo(2);
         await Assert.That(root.Thread.LatestReply!.Id).IsEqualTo("$t2");
         await Assert.That(root.Thread.CurrentUserParticipated).IsTrue();
     }
@@ -251,5 +267,82 @@ public class HistoryTests
 
         await Assert.That(source).Contains("\"body\": \"grüezi\"");
         await Assert.That(source).Contains("\n");
+    }
+    [Test]
+    public async Task LimitedSync_StartsTheCacheOver_AndTheWalkCrossesTheGap()
+    {
+        using var context = new MatrixTestContext();
+        await context.Process(LimitedSync("p0", Text("$1", "one"), Text("$2", "two"), Reaction("$r", "$1", "👍")));
+        await context.Process(LimitedSync("p1", Text("$5", "five")));
+        var updates = context.ReadUpdates().Select(u => u.Value).ToList();
+        await Assert.That(updates.OfType<ClientIssue>()).IsEmpty();
+        var room = context.Room();
+        await Assert.That(room.Cache.MessageCount).IsEqualTo(1);
+
+        Serve(context, ("from=p1", Page(null, Reaction("$r", "$1", "👍"), Text("$4", "four"), Text("$3", "three"), Text("$2", "two"), Text("$1", "one"))));
+        var history = await room.GetMessagesAsync(limit: 10);
+
+        await Assert.That(Ids(history)).IsEqualTo("$1,$2,$3,$4,$5");
+        await Assert.That(history[0].Reactions.Single().Key).IsEqualTo("👍");
+        await Assert.That(context.Requests.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Cut_KeepsNewerReactions_ForMessagesLoadedAgain()
+    {
+        using var context = new MatrixTestContext();
+        var timeline = Texts(0, TimelineCache.MaxMessages + 1).ToList();
+        // The reaction is newer than the messages the walk loads again, so the walk doesn't see it.
+        timeline.Insert(150, Reaction("$r", "$m100", "👍"));
+        await context.Process(SyncWithPrevBatch("p0", [.. timeline]));
+        var room = context.Room();
+        await Assert.That(room.Cache.MessageCount).IsEqualTo(TimelineCache.MessagesAfterCut);
+        await Assert.That(room.Cache.Find("$m100")).IsNull();
+
+        Serve(context,
+            ("/context/%24m101?limit=0", """{"start":"c0"}"""),
+            ("from=c0", Page("e1", Text("$m100", "m100"))));
+        var history = await room.GetMessagesAsync(limit: TimelineCache.MessagesAfterCut + 1);
+
+        await Assert.That(history[0].Id).IsEqualTo("$m100");
+        await Assert.That(history[0].Reactions.Single().Key).IsEqualTo("👍");
+        await Assert.That(history[0].HasAllReactions).IsTrue();
+    }
+
+    [Test]
+    public async Task Cache_IsNotCut_WhileTheRoomIsBeingRead()
+    {
+        using var context = new MatrixTestContext();
+        var time = new ManualTime();
+        var room = context.Room();
+        room.Cache.Time = time;
+        await context.Process(SyncWithPrevBatch("p0", Texts(0, 150)));
+        await room.GetMessagesAsync(limit: 10);
+
+        await context.Process(Sync(Texts(150, 100)));
+        await Assert.That(room.Cache.MessageCount).IsEqualTo(250);
+
+        time.Now += TimelineCache.ReadTimeout;
+        await context.Process(Sync(Texts(250, 1)));
+        await Assert.That(room.Cache.MessageCount).IsEqualTo(TimelineCache.MessagesAfterCut);
+    }
+
+    [Test]
+    public async Task GetReactions_AsksTheServer_ForMessagesWithoutAllReactions()
+    {
+        using var context = new MatrixTestContext();
+        Serve(context,
+            ("/event/%24m", Text("$m", "old")),
+            ("/relations/%24m/m.annotation", Relations(null,
+                Reaction("$r3", "$m", "🎉", sender: "@carol:example.org"),
+                Event("$r2", "m.reaction", "{}", extra: ""","unsigned":{"redacted_because":{"type":"m.room.redaction"}}"""),
+                Reaction("$r1", "$m", "👍"))));
+        var message = (await context.Room().GetMessageAsync("$m"))!;
+        await Assert.That(message.HasAllReactions).IsFalse();
+
+        var reactions = await message.GetReactionsAsync();
+
+        await Assert.That(string.Join(",", reactions.Select(r => r.Key))).IsEqualTo("👍,🎉");
+        await Assert.That(context.Requests.Count).IsEqualTo(2);
     }
 }

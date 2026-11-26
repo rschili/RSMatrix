@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 namespace RSMatrix.Models;
 
 public enum MessageKind
@@ -23,9 +21,9 @@ public sealed record Reaction(string Key, IReadOnlyList<RoomUser> Users);
 public sealed record ThreadSummary(int ReplyCount, Message? LatestReply, bool CurrentUserParticipated);
 
 /// <summary>
-/// A message in a room, in its current state: edits applied, deletion and reactions.
-/// While the message is in its room's window, the client updates this object and reports each change on
-/// <see cref="MatrixClient.Updates"/>. Messages fetched on their own don't receive later changes.
+/// A message in a room as it was when the client built this object: edits applied, deletion, reactions and thread.
+/// It doesn't change afterwards. Later changes come out on <see cref="MatrixClient.Updates"/>, each with a new
+/// <see cref="Message"/> for the same <see cref="Id"/>.
 /// </summary>
 public sealed class Message
 {
@@ -49,41 +47,54 @@ public sealed class Message
     /// <summary>The first message of the thread this message belongs to. Null for messages in the main timeline and thread roots.</summary>
     public string? ThreadRootId { get; }
 
-    public MessageKind Kind => _state.Content.Kind;
+    public MessageKind Kind => _content.Kind;
 
     /// <summary>The text of the message with the latest edit applied. Empty once deleted.</summary>
-    public string Body => _state.Content.Body;
+    public string Body => _content.Body;
 
     /// <summary>The HTML version of <see cref="Body"/>, if the sender provided one.</summary>
-    public string? Html => _state.Content.Html;
+    public string? Html => _content.Html;
 
-    public IReadOnlyList<RoomUser> Mentions => _state.Content.Mentions;
+    public IReadOnlyList<RoomUser> Mentions => _content.Mentions;
 
     /// <summary>When the edit that <see cref="Body"/> shows was sent. Null if the message wasn't edited.</summary>
-    public DateTimeOffset? EditedAt => _state.CurrentEdit?.Timestamp;
+    public DateTimeOffset? EditedAt => _currentEdit?.Timestamp;
 
-    public bool IsDeleted => _state.IsDeleted;
+    public bool IsDeleted { get; }
 
-    public IReadOnlyList<Reaction> Reactions => _state.Reactions;
+    public IReadOnlyList<Reaction> Reactions { get; }
 
     /// <summary>
-    /// Set on messages that start a thread. Kept current while the message is in its room's window;
-    /// a new reply comes out as <see cref="NewMessage"/> with <see cref="ThreadRootId"/> pointing here.
+    /// Whether <see cref="Reactions"/> is complete. True for messages the client reached by reading back from the
+    /// newest one. Matrix servers don't send reactions along with a message, so messages loaded on their own, like
+    /// reply targets, only have the reactions the client happened to see. <see cref="GetReactionsAsync"/> asks the server.
     /// </summary>
-    public ThreadSummary? Thread => _thread;
-    private volatile ThreadSummary? _thread;
+    public bool HasAllReactions { get; }
 
-    // Replaced as a whole, so a reader on another thread sees the old state or the new one, never a mix.
-    private volatile MessageState _state;
+    /// <summary>
+    /// Set on messages that start a thread. A new reply comes out as <see cref="NewMessage"/> with
+    /// <see cref="ThreadRootId"/> pointing here.
+    /// </summary>
+    public ThreadSummary? Thread { get; }
 
-    /// <summary>A /messages token for the events before this message, if a sync or history page told us one.</summary>
+    private readonly MessageContent _content;
+    private readonly MessageEdit? _currentEdit;
+
+    internal IReadOnlyList<ReactionEvent> ReactionEvents { get; }
+
+    /// <summary>The edit <see cref="Body"/> shows, to tell whether an edit changed the message.</summary>
+    internal string? CurrentEditId => _currentEdit?.EventId;
+
+    /// <summary>A /messages token for the events before this message, if it is the oldest of a page outside the room's cache.</summary>
     internal string? HistoryToken { get; set; }
 
     /// <summary>A /relations token for the older replies of this message's thread, if a thread page told us one.</summary>
     internal string? ThreadHistoryToken { get; set; }
 
     internal Message(string id, Room room, RoomUser sender, DateTimeOffset timestamp, bool isOwn, bool isEncrypted,
-        string? replyToId, string? threadRootId, MessageContent content)
+        string? replyToId, string? threadRootId, MessageContent content, MessageEdit? currentEdit = null,
+        IReadOnlyList<ReactionEvent>? reactionEvents = null, ThreadSummary? thread = null, bool isDeleted = false,
+        bool hasAllReactions = false)
     {
         Id = id;
         Room = room;
@@ -93,8 +104,23 @@ public sealed class Message
         IsEncrypted = isEncrypted;
         ReplyToId = replyToId;
         ThreadRootId = threadRootId;
-        _state = MessageState.Create(content, [], [], isDeleted: false);
+        _content = currentEdit?.Content ?? content;
+        _currentEdit = currentEdit;
+        ReactionEvents = reactionEvents ?? [];
+        Reactions = ToReactions(ReactionEvents);
+        Thread = thread;
+        IsDeleted = isDeleted;
+        HasAllReactions = hasAllReactions;
     }
+
+    /// <summary>Groups reaction events by key. A user's second reaction with the same key counts once.</summary>
+    internal static IReadOnlyList<Reaction> ToReactions(IEnumerable<ReactionEvent> reactionEvents)
+        => reactionEvents
+            .GroupBy(r => r.Key, StringComparer.Ordinal)
+            .Select(g => new Reaction(g.Key, g.Select(r => r.User).Distinct().ToList()))
+            .ToList();
+
+    internal bool HasReaction(string key, RoomUser user) => ReactionEvents.Any(r => r.Key == key && r.User == user);
 
     /// <summary>
     /// Answers this message. Inside a thread, the answer stays in the thread.
@@ -120,6 +146,13 @@ public sealed class Message
         => Room.GetEventSourceAsync(Id, cancellationToken);
 
     /// <summary>
+    /// All reactions to this message. Returns <see cref="Reactions"/> if <see cref="HasAllReactions"/> is true and
+    /// asks the server otherwise, which takes one or more requests. The client runs a few of these at a time.
+    /// </summary>
+    public Task<IReadOnlyList<Reaction>> GetReactionsAsync(CancellationToken cancellationToken = default)
+        => HasAllReactions ? Task.FromResult(Reactions) : Room.GetReactionsAsync(Id, cancellationToken);
+
+    /// <summary>
     /// Sends a reaction to this message. The key can be any string, typically an emoji like 👍.
     /// The server rejects a second reaction with the same key from the same user with M_DUPLICATE_ANNOTATION.
     /// </summary>
@@ -134,7 +167,7 @@ public sealed class Message
     public async Task RemoveReactionAsync(string key)
     {
         ArgumentException.ThrowIfNullOrEmpty(key);
-        foreach (var reaction in _state.ReactionEvents)
+        foreach (var reaction in ReactionEvents)
         {
             if (reaction.Key == key && reaction.User.User.UserId.Equals(Room.Client.CurrentUser))
                 await Room.RedactEventAsync(reaction.EventId).ConfigureAwait(false);
@@ -164,74 +197,6 @@ public sealed class Message
         => Room.RedactEventAsync(Id, reason);
 
     public override string ToString() => $"{Sender}: {Body}";
-
-    internal void SetThread(ThreadSummary thread) => _thread = thread;
-
-    internal void AddThreadReply(Message reply)
-    {
-        var thread = _thread;
-        _thread = new ThreadSummary((thread?.ReplyCount ?? 0) + 1, reply, (thread?.CurrentUserParticipated ?? IsOwn) || reply.IsOwn);
-    }
-
-    internal bool HasRelatedEvent(string eventId)
-    {
-        var state = _state;
-        return state.Edits.Any(e => e.EventId == eventId) || state.ReactionEvents.Any(r => r.EventId == eventId);
-    }
-
-    /// <summary>Returns false if the edit is already known.</summary>
-    internal bool AddEdit(MessageEdit edit, out bool contentChanged)
-    {
-        var state = _state;
-        contentChanged = false;
-        if (state.IsDeleted || state.Edits.Any(e => e.EventId == edit.EventId))
-            return false;
-        _state = MessageState.Create(state.Original, state.Edits.Add(edit), state.ReactionEvents, state.IsDeleted);
-        contentChanged = !ReferenceEquals(state.Content, _state.Content);
-        return true;
-    }
-
-    /// <summary>Returns true if the content changed, because the removed edit was the one shown.</summary>
-    internal bool RemoveEdit(string editEventId)
-    {
-        var state = _state;
-        if (state.IsDeleted || !state.Edits.Any(e => e.EventId == editEventId))
-            return false;
-        _state = MessageState.Create(state.Original, state.Edits.RemoveAll(e => e.EventId == editEventId), state.ReactionEvents, state.IsDeleted);
-        return !ReferenceEquals(state.Content, _state.Content);
-    }
-
-    /// <summary>Returns false if the reaction is already known. A user's second reaction with the same key counts once.</summary>
-    internal bool AddReaction(ReactionEvent reaction, out bool isNewKey)
-    {
-        var state = _state;
-        isNewKey = false;
-        if (state.IsDeleted || state.ReactionEvents.Any(r => r.EventId == reaction.EventId))
-            return false;
-        isNewKey = !state.ReactionEvents.Any(r => r.Key == reaction.Key && r.User == reaction.User);
-        _state = MessageState.Create(state.Original, state.Edits, state.ReactionEvents.Add(reaction), state.IsDeleted);
-        return true;
-    }
-
-    /// <summary>Returns the removed reaction if its user has no other reaction with the same key.</summary>
-    internal ReactionEvent? RemoveReaction(string reactionEventId)
-    {
-        var state = _state;
-        var removed = state.ReactionEvents.FirstOrDefault(r => r.EventId == reactionEventId);
-        if (state.IsDeleted || removed == null)
-            return null;
-        _state = MessageState.Create(state.Original, state.Edits, state.ReactionEvents.Remove(removed), state.IsDeleted);
-        return _state.ReactionEvents.Any(r => r.Key == removed.Key && r.User == removed.User) ? null : removed;
-    }
-
-    /// <summary>Returns false if the message was deleted before.</summary>
-    internal bool Delete()
-    {
-        if (_state.IsDeleted)
-            return false;
-        _state = MessageState.Create(_state.Original with { Body = "", Html = null, Mentions = [] }, [], [], isDeleted: true);
-        return true;
-    }
 }
 
 internal sealed record MessageContent(MessageKind Kind, string Body, string? Html, IReadOnlyList<RoomUser> Mentions);
@@ -239,35 +204,3 @@ internal sealed record MessageContent(MessageKind Kind, string Body, string? Htm
 internal sealed record MessageEdit(string EventId, DateTimeOffset Timestamp, MessageContent Content);
 
 internal sealed record ReactionEvent(string EventId, string Key, RoomUser User);
-
-/// <summary>An edit and the message it points at, before checking that it may change that message.</summary>
-internal sealed record EditChange(string TargetId, string SenderId, bool IsEncrypted, MessageEdit Edit);
-
-/// <summary>A reaction and the message it points at.</summary>
-internal sealed record ReactionChange(string TargetId, ReactionEvent Reaction);
-
-internal sealed class MessageState
-{
-    public required MessageContent Original { get; init; }
-    public required ImmutableList<MessageEdit> Edits { get; init; }
-    public required ImmutableList<ReactionEvent> ReactionEvents { get; init; }
-    public required bool IsDeleted { get; init; }
-    public required MessageEdit? CurrentEdit { get; init; }
-    public required IReadOnlyList<Reaction> Reactions { get; init; }
-    public MessageContent Content => CurrentEdit?.Content ?? Original;
-
-    public static MessageState Create(MessageContent original, ImmutableList<MessageEdit> edits,
-        ImmutableList<ReactionEvent> reactionEvents, bool isDeleted) => new()
-    {
-        Original = original,
-        Edits = edits,
-        ReactionEvents = reactionEvents,
-        IsDeleted = isDeleted,
-        // The newest edit wins, by timestamp, then by the larger event ID.
-        CurrentEdit = edits.OrderByDescending(e => e.Timestamp).ThenByDescending(e => e.EventId, StringComparer.Ordinal).FirstOrDefault(),
-        Reactions = reactionEvents
-            .GroupBy(r => r.Key, StringComparer.Ordinal)
-            .Select(g => new Reaction(g.Key, g.Select(r => r.User).Distinct().ToList()))
-            .ToList(),
-    };
-}

@@ -114,7 +114,8 @@ public class ThreadReplyTests
     {
         using var handler = new CaptureHandler();
         var message = CreateMessage(handler, threaded: true);
-        message.Room.Window.Add(message);
+        message.Room.Cache.Append(new MessageEntry(message.Id, message.Sender, message.Timestamp, false, false, null, ThreadRoot,
+            new MessageContent(MessageKind.Text, "Incoming message", null, []), IsDeleted: false, BundledEdit: null, BundledThread: null));
 
         await message.Room.SendMessageAsync(Body, threadRootId: ThreadRoot);
 

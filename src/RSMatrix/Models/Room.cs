@@ -18,6 +18,7 @@ public class Room
     {
         RoomId = roomId ?? throw new ArgumentNullException(nameof(roomId));
         Client = client ?? throw new ArgumentNullException(nameof(client));
+        Cache = new TimelineCache(this, holdsNewest: true);
     }
 
     public MatrixId RoomId { get; }
@@ -38,9 +39,9 @@ public class Room
     public MatrixId? CanonicalAlias { get; internal set; }
     public List<MatrixId>? AltAliases { get; internal set; }
 
-    internal MessageWindow Window { get; } = new();
+    internal TimelineCache Cache { get; }
 
-    /// <summary>Serialises the sync with history walks, so changes to the window and its messages apply one at a time.</summary>
+    /// <summary>Serialises the sync with history walks and guards <see cref="Cache"/>.</summary>
     internal Lock TimelineLock { get; } = new();
 
     public RoomEncryption? Encryption { get; internal set; }
@@ -76,7 +77,12 @@ public class Room
         string? threadRootId = null, IList<MatrixId>? mentions = null)
     {
         // Clients without threads show a thread message as a reply to the thread's latest message.
-        var threadFallbackId = threadRootId == null ? null : Window.FindLatestInThread(threadRootId)?.Id ?? threadRootId;
+        string? threadFallbackId = null;
+        if (threadRootId != null)
+        {
+            lock (TimelineLock)
+                threadFallbackId = Cache.FindLatestInThread(threadRootId)?.EventId ?? threadRootId;
+        }
         return SendMessageInternalAsync(notice ? "m.notice" : "m.text", body, html, replyToId, mentions, threadRootId, threadFallbackId);
     }
 
@@ -110,7 +116,12 @@ public class Room
     /// </summary>
     /// <returns>The event ID of the edit event</returns>
     public Task<string> EditMessageAsync(string originalEventId, string newBody, string? newHtml = null, IList<MatrixId>? mentions = null)
-        => EditMessageInternalAsync(originalEventId, Window.Find(originalEventId)?.Kind ?? MessageKind.Text, newBody, newHtml, mentions);
+    {
+        MessageKind kind;
+        lock (TimelineLock)
+            kind = Cache.FindMessage(originalEventId) is { } original ? Cache.Build(original).Kind : MessageKind.Text;
+        return EditMessageInternalAsync(originalEventId, kind, newBody, newHtml, mentions);
+    }
 
     internal async Task<string> EditMessageInternalAsync(string originalEventId, MessageKind kind, string newBody, string? newHtml,
         IList<MatrixId>? mentions)
@@ -178,8 +189,7 @@ public class Room
     /// Returns messages of the room, oldest first. Without <paramref name="before"/>, the newest ones; to continue,
     /// pass the first message of the previous result. Fewer than <paramref name="limit"/> messages means the start
     /// of the visible history. Thread replies are included, each with <see cref="Message.ThreadRootId"/>.
-    /// Messages that continue the room's window receive later edits, reactions and deletions. The others are
-    /// separate objects that don't.
+    /// Recent messages come from memory; the client asks the server for the rest and keeps them for a while.
     /// </summary>
     public Task<IReadOnlyList<Message>> GetMessagesAsync(int limit, Message? before = null, CancellationToken cancellationToken = default)
     {
@@ -195,28 +205,43 @@ public class Room
     public Task<IReadOnlyList<Message>> GetMessagesAsync(int limit, string beforeId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(beforeId);
-        return GetMessagesCoreAsync(limit, beforeId, Window.Find(beforeId)?.HistoryToken, cancellationToken);
+        return GetMessagesCoreAsync(limit, beforeId, null, cancellationToken);
     }
 
     private async Task<IReadOnlyList<Message>> GetMessagesCoreAsync(int limit, string? beforeId, string? beforeToken, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
         List<Message> messages; // newest first, like the pages
-        bool continuesWindow;
-        Message? windowStart;
+        TimelineCache cache;
+        int generation;
+        string? cacheOldestId;
         string? token;
+        string? startId;
         lock (TimelineLock)
         {
-            continuesWindow = beforeId == null || Window.Find(beforeId) != null;
-            messages = continuesWindow ? Window.TakeOlder(beforeId, limit) : [];
-            if (messages.Count == limit || (continuesWindow && Window.ReachedStart))
-                return Chronological(messages);
-            windowStart = continuesWindow ? Window.Oldest : null;
-            token = continuesWindow ? windowStart?.HistoryToken : beforeToken;
+            Cache.MarkRead();
+            if (beforeId == null || Cache.Contains(beforeId))
+            {
+                messages = Cache.TakeOlder(beforeId, limit);
+                if (messages.Count == limit || Cache.ReachedStart)
+                    return Chronological(messages);
+                cache = Cache;
+                token = Cache.OlderToken;
+                startId = Cache.OldestEventId;
+            }
+            else
+            {
+                // Without the events after the starting point, messages may miss reactions.
+                messages = [];
+                cache = new TimelineCache(this, holdsNewest: false);
+                token = beforeToken;
+                startId = beforeId;
+            }
+            generation = cache.Generation;
+            cacheOldestId = cache.OldestEventId;
         }
 
-        // Without a token, the server tells us the position before the message. Without a message, /messages starts at the newest one.
-        var startId = continuesWindow ? windowStart?.Id : beforeId;
+        // Without a token, the server tells us the position before the event. Without an event, /messages starts at the newest one.
         if (token == null && startId != null)
         {
             var context = await MatrixHelper.GetEventContextAsync(Client.HttpClientParameters, RoomId, startId, limit: 0, cancellationToken).ConfigureAwait(false);
@@ -233,19 +258,16 @@ public class Room
             var reachedStart = response.End == null || response.Chunk.Count == 0;
             lock (TimelineLock)
             {
-                var page = Client.ReadHistoryPage(this, response.Chunk);
+                // The sync may have cut the room's cache meanwhile, or another walk extended it.
+                if (cache.Generation != generation || cache.OldestEventId != cacheOldestId)
+                    cache = new TimelineCache(this, holdsNewest: false);
+                var entries = Client.ReadHistoryEntries(this, response.Chunk);
+                cache.Prepend(entries, response.End, reachedStart);
+                generation = cache.Generation;
+                cacheOldestId = cache.OldestEventId;
+                var page = entries.OfType<MessageEntry>().Select(cache.Build).ToList();
                 if (page.Count > 0 && !reachedStart)
                     page[^1].HistoryToken = response.End;
-                // The page joins the window if it continues it, and the sync didn't change the window's older end meanwhile.
-                if (continuesWindow && Window.Oldest == windowStart)
-                {
-                    Window.Prepend(page, reachedStart);
-                    windowStart = Window.Oldest;
-                }
-                else
-                {
-                    continuesWindow = false;
-                }
                 messages.AddRange(page);
             }
             if (reachedStart)
@@ -256,15 +278,19 @@ public class Room
     }
 
     /// <summary>
-    /// Returns the message with this ID: the one the room's window holds, or else a separate object loaded from the
-    /// server that doesn't receive later changes and may miss reactions. Null if the server doesn't know the event,
+    /// Returns the message with this ID, from memory or from the server. A message from the server may miss
+    /// reactions, see <see cref="Message.HasAllReactions"/>. Null if the server doesn't know the event,
     /// we may not see it, or it isn't a message.
     /// </summary>
     public async Task<Message?> GetMessageAsync(string eventId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(eventId);
-        if (Window.Find(eventId) is { } known)
-            return known;
+        lock (TimelineLock)
+        {
+            Cache.MarkRead();
+            if (Cache.FindMessage(eventId) is { } known)
+                return Cache.Build(known);
+        }
 
         RoomEvent e;
         try
@@ -276,27 +302,34 @@ public class Room
             return null;
         }
         lock (TimelineLock)
-            return Client.ReadHistoryPage(this, [e]).SingleOrDefault();
+        {
+            var cache = new TimelineCache(this, holdsNewest: false);
+            var entries = Client.ReadHistoryEntries(this, [e]);
+            cache.Prepend(entries, null, false);
+            return entries.OfType<MessageEntry>().Select(cache.Build).SingleOrDefault();
+        }
     }
 
     /// <summary>
     /// Returns replies of a thread, oldest first, without the thread's first message. Paging works like
     /// <see cref="GetMessagesAsync(int, Message?, CancellationToken)"/>: pass the first reply of the previous result
-    /// to continue. Replies the room's window holds are returned as they are.
+    /// to continue.
     /// </summary>
     public async Task<IReadOnlyList<Message>> GetThreadMessagesAsync(string threadRootId, int limit, Message? before = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(threadRootId);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
-        // Replies are newer than their thread's first message, so the window holds all of them if it holds that one.
+        // Replies are newer than their thread's first message, so the cache holds all of them if it holds that one.
         lock (TimelineLock)
         {
-            if (Window.Find(threadRootId) != null)
-                return Chronological(Window.TakeOlderInThread(threadRootId, before?.Id, limit));
+            Cache.MarkRead();
+            if (Cache.FindMessage(threadRootId) != null)
+                return Chronological(Cache.TakeOlderInThread(threadRootId, before?.Id, limit));
         }
 
         List<Message> messages = []; // newest first, like the pages
+        var cache = new TimelineCache(this, holdsNewest: false);
         var token = before?.ThreadHistoryToken;
         // Without a token, walk from the newest reply and skip everything up to the one to continue from.
         var skipUntilId = token == null ? before?.Id : null;
@@ -306,7 +339,9 @@ public class Room
                 limit - messages.Count, cancellationToken).ConfigureAwait(false);
             lock (TimelineLock)
             {
-                var page = Client.ReadHistoryPage(this, response.Chunk);
+                var entries = Client.ReadHistoryEntries(this, response.Chunk);
+                cache.Prepend(entries, null, false);
+                var page = entries.OfType<MessageEntry>().Select(cache.Build).ToList();
                 if (skipUntilId != null)
                 {
                     var skipped = page.FindIndex(m => m.Id == skipUntilId) + 1;
@@ -323,6 +358,40 @@ public class Room
             token = response.NextBatch;
         }
         return Chronological(messages);
+    }
+
+    internal async Task<IReadOnlyList<Reaction>> GetReactionsAsync(string messageId, CancellationToken cancellationToken)
+    {
+        lock (TimelineLock)
+        {
+            if (Cache.FindMessage(messageId) is { } cached)
+                return Cache.Build(cached).Reactions;
+        }
+
+        List<ReactionEvent> reactions = []; // newest first, like the pages
+        await Client.ReactionRequests.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            string? token = null;
+            do
+            {
+                var response = await MatrixHelper.GetRelationsAsync(Client.HttpClientParameters, RoomId, messageId, "m.annotation", token,
+                    limit: 100, cancellationToken).ConfigureAwait(false);
+                lock (TimelineLock)
+                {
+                    reactions.AddRange(Client.ReadHistoryEntries(this, response.Chunk).OfType<ReactionEntry>()
+                        .Where(r => r.TargetId == messageId).Select(r => new ReactionEvent(r.EventId, r.Key, r.User)));
+                }
+                token = response.Chunk.Count == 0 ? null : response.NextBatch;
+            }
+            while (token != null);
+        }
+        finally
+        {
+            Client.ReactionRequests.Release();
+        }
+        reactions.Reverse();
+        return Message.ToReactions(reactions);
     }
 
     private static readonly JsonSerializerOptions SourceOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -368,7 +437,7 @@ public class Room
             lock (_readMarkerLock)
             {
                 target = _readMarkerTarget;
-                if (target == _readMarkerSent)
+                if (target.Id == _readMarkerSent?.Id)
                     return;
             }
             await MatrixHelper.PostReadMarkersAsync(Client.HttpClientParameters, RoomId, target.Id, sendReceipt: true).ConfigureAwait(false);

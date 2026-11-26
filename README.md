@@ -42,6 +42,10 @@ await foreach (var update in client.Updates.ReadAllAsync(cancellationToken))
 }
 ```
 
+A `Message` holds the snapshot of a message at the time the event occurred. Edits applied, deletion, reactions arrive as updates like `MessageEdited` or `ReactionAdded`, each with the message in its new state. They come for recent messages and for the ones you read recently.
+
+`room.GetMessagesAsync(limit, before)` returns older messages, oldest first. Matrix servers don't send reactions along with a message, so a message loaded on its own, like a reply target, may miss some. `message.HasAllReactions` indicates that state, `message.GetReactionsAsync()` fetches them from the server, which needs an extra request.
+
 The client did previously send read receipts on its own, which I changed in 2.0. `message.MarkAsReadAsync()` marks a room as read up to that message. Try and not use this too chatty, as it can generate a lot of requests if called frequently. You will want to rate limit this for a bot which may handle thousands of incoming messages per second.
 
 The cancellation token cancels logging in or resuming.

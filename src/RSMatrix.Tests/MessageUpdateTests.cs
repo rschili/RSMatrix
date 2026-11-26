@@ -37,6 +37,10 @@ public class MessageUpdateTests
     private static async Task<Message> ReceiveAsync(MatrixTestContext context, string messageEvent)
         => ((NewMessage)(await ProcessAsync(context, messageEvent)).Single()).Message;
 
+    /// <summary>The message as the client has it now, from memory.</summary>
+    private static async Task<Message> CurrentAsync(MatrixTestContext context, string id)
+        => (await context.Room().GetMessageAsync(id))!;
+
     [Test]
     public async Task TextMessage_ComesOutAsNewMessage()
     {
@@ -97,16 +101,18 @@ public class MessageUpdateTests
     }
 
     [Test]
-    public async Task Edit_UpdatesTheSameMessage()
+    public async Task Edit_ComesOutWithTheEditedMessage()
     {
         using var context = new MatrixTestContext();
         var message = await ReceiveAsync(context, Text("$m", "helo"));
 
         var updates = await ProcessAsync(context, Edit("$e", "$m", "hello", ts: 1700000005000));
-        await Assert.That(updates.Count).IsEqualTo(1);
-        await Assert.That(ReferenceEquals(((MessageEdited)updates[0]).Message, message)).IsTrue();
-        await Assert.That(message.Body).IsEqualTo("hello");
-        await Assert.That(message.EditedAt).IsEqualTo(DateTimeOffset.FromUnixTimeMilliseconds(1700000005000));
+        var edited = ((MessageEdited)updates.Single()).Message;
+        await Assert.That(edited.Id).IsEqualTo("$m");
+        await Assert.That(edited.Body).IsEqualTo("hello");
+        await Assert.That(edited.EditedAt).IsEqualTo(DateTimeOffset.FromUnixTimeMilliseconds(1700000005000));
+        // Messages don't change after they were built.
+        await Assert.That(message.Body).IsEqualTo("helo");
     }
 
     [Test]
@@ -120,90 +126,90 @@ public class MessageUpdateTests
     public async Task Edit_FromAnotherSender_IsIgnored()
     {
         using var context = new MatrixTestContext();
-        var message = await ReceiveAsync(context, Text("$m", "original"));
+        await ReceiveAsync(context, Text("$m", "original"));
         await Assert.That(await ProcessAsync(context, Edit("$e", "$m", "forged", sender: "@mallory:example.org"))).IsEmpty();
-        await Assert.That(message.Body).IsEqualTo("original");
+        await Assert.That((await CurrentAsync(context, "$m")).Body).IsEqualTo("original");
     }
 
     [Test]
     public async Task Edits_NewestWins_ByTimestamp()
     {
         using var context = new MatrixTestContext();
-        var message = await ReceiveAsync(context, Text("$m", "original"));
+        await ReceiveAsync(context, Text("$m", "original"));
         await ProcessAsync(context, Edit("$new", "$m", "newer", ts: 1700000009000));
         await Assert.That(await ProcessAsync(context, Edit("$old", "$m", "older", ts: 1700000002000))).IsEmpty();
-        await Assert.That(message.Body).IsEqualTo("newer");
+        await Assert.That((await CurrentAsync(context, "$m")).Body).IsEqualTo("newer");
     }
 
     [Test]
     public async Task Edit_CanChangeTheKind()
     {
         using var context = new MatrixTestContext();
-        var message = await ReceiveAsync(context, Text("$m", "original"));
-        await ProcessAsync(context, Edit("$e", "$m", "notice now", msgType: "m.notice"));
-        await Assert.That(message.Kind).IsEqualTo(MessageKind.Notice);
+        await ReceiveAsync(context, Text("$m", "original"));
+        var edited = ((MessageEdited)(await ProcessAsync(context, Edit("$e", "$m", "notice now", msgType: "m.notice"))).Single()).Message;
+        await Assert.That(edited.Kind).IsEqualTo(MessageKind.Notice);
     }
 
     [Test]
     public async Task RedactingTheShownEdit_FallsBackToThePreviousOne()
     {
         using var context = new MatrixTestContext();
-        var message = await ReceiveAsync(context, Text("$m", "original"));
+        await ReceiveAsync(context, Text("$m", "original"));
         await ProcessAsync(context, Edit("$e1", "$m", "first", ts: 1700000001000), Edit("$e2", "$m", "second", ts: 1700000002000));
-        await Assert.That(message.Body).IsEqualTo("second");
+        await Assert.That((await CurrentAsync(context, "$m")).Body).IsEqualTo("second");
 
         var updates = await ProcessAsync(context, Redaction("$r2", "$e2"));
-        await Assert.That(updates.Single() is MessageEdited).IsTrue();
-        await Assert.That(message.Body).IsEqualTo("first");
+        await Assert.That(((MessageEdited)updates.Single()).Message.Body).IsEqualTo("first");
 
-        await ProcessAsync(context, Redaction("$r1", "$e1"));
-        await Assert.That(message.Body).IsEqualTo("original");
-        await Assert.That(message.EditedAt).IsNull();
+        var last = ((MessageEdited)(await ProcessAsync(context, Redaction("$r1", "$e1"))).Single()).Message;
+        await Assert.That(last.Body).IsEqualTo("original");
+        await Assert.That(last.EditedAt).IsNull();
     }
 
     [Test]
     public async Task Reactions_CountOncePerUserAndKey()
     {
         using var context = new MatrixTestContext();
-        var message = await ReceiveAsync(context, Text("$m", "hello"));
+        await ReceiveAsync(context, Text("$m", "hello"));
 
         var added = (ReactionAdded)(await ProcessAsync(context, Reaction("$r1", "$m", "👍"))).Single();
         await Assert.That(added.Key).IsEqualTo("👍");
         await Assert.That(added.User.User.UserId.Full).IsEqualTo("@bob:example.org");
+        await Assert.That(added.Message.Reactions.Single().Key).IsEqualTo("👍");
 
         await Assert.That(await ProcessAsync(context, Reaction("$r2", "$m", "👍"))).IsEmpty();
-        await Assert.That(message.Reactions.Single().Users.Count).IsEqualTo(1);
+        await Assert.That((await CurrentAsync(context, "$m")).Reactions.Single().Users.Count).IsEqualTo(1);
 
         await Assert.That(await ProcessAsync(context, Redaction("$x1", "$r1", sender: "@bob:example.org"))).IsEmpty();
-        await Assert.That(message.Reactions.Single().Key).IsEqualTo("👍");
+        await Assert.That((await CurrentAsync(context, "$m")).Reactions.Single().Key).IsEqualTo("👍");
 
         var removed = (ReactionRemoved)(await ProcessAsync(context, Redaction("$x2", "$r2", sender: "@bob:example.org"))).Single();
         await Assert.That(removed.Key).IsEqualTo("👍");
-        await Assert.That(message.Reactions).IsEmpty();
+        await Assert.That(removed.Message.Reactions).IsEmpty();
     }
 
     [Test]
     public async Task DeletedMessage_StaysDeleted()
     {
         using var context = new MatrixTestContext();
-        var message = await ReceiveAsync(context, Text("$m", "oops"));
+        await ReceiveAsync(context, Text("$m", "oops"));
 
         var deleted = (MessageDeleted)(await ProcessAsync(context, Redaction("$x", "$m", sender: "@admin:example.org"))).Single();
         await Assert.That(deleted.DeletedBy.User.UserId.Full).IsEqualTo("@admin:example.org");
-        await Assert.That(message.IsDeleted).IsTrue();
-        await Assert.That(message.Body).IsEqualTo("");
+        await Assert.That(deleted.Message.IsDeleted).IsTrue();
+        await Assert.That(deleted.Message.Body).IsEqualTo("");
 
         await Assert.That(await ProcessAsync(context, Reaction("$r", "$m", "👍"), Edit("$e", "$m", "back"))).IsEmpty();
-        await Assert.That(message.Body).IsEqualTo("");
+        await Assert.That((await CurrentAsync(context, "$m")).Body).IsEqualTo("");
     }
 
     [Test]
     public async Task Redaction_WithTopLevelRedacts_Works()
     {
         using var context = new MatrixTestContext();
-        var message = await ReceiveAsync(context, Text("$m", "oops"));
-        await ProcessAsync(context, Event("$x", "m.room.redaction", "{}", extra: ""","redacts":"$m" """));
-        await Assert.That(message.IsDeleted).IsTrue();
+        await ReceiveAsync(context, Text("$m", "oops"));
+        var updates = await ProcessAsync(context, Event("$x", "m.room.redaction", "{}", extra: ""","redacts":"$m" """));
+        await Assert.That(((MessageDeleted)updates.Single()).Message.IsDeleted).IsTrue();
     }
 
     [Test]
@@ -245,8 +251,9 @@ public class MessageUpdateTests
     public async Task RemoveReaction_RedactsOurReaction()
     {
         using var context = new MatrixTestContext();
-        var message = await ReceiveAsync(context, Text("$m", "hello"));
+        await ReceiveAsync(context, Text("$m", "hello"));
         await ProcessAsync(context, Reaction("$mine", "$m", "👍", sender: "@bot:example.org"), Reaction("$theirs", "$m", "🎉"));
+        var message = await CurrentAsync(context, "$m");
 
         await message.RemoveReactionAsync("🎉");
         await Assert.That(context.Requests).IsEmpty();
