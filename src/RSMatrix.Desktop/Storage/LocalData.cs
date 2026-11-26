@@ -5,8 +5,8 @@ using System.Text.Json;
 namespace RSMatrix.Desktop.Storage;
 
 /// <summary>
-/// Files the app keeps between runs: login form defaults and, per account, the device ID with
-/// RSMatrix's session and encryption stores.
+/// Files the app keeps between runs: login form defaults, RSMatrix's store with the sessions and encryption keys,
+/// and each account's recovery key.
 /// </summary>
 public sealed class LocalData
 {
@@ -44,29 +44,12 @@ public sealed class LocalData
         File.WriteAllText(_settingsPath, JsonSerializer.Serialize(settings, JsonOptions));
     }
 
-    /// <summary>Returns the account's local data, creating a device ID on first use.</summary>
-    public AccountData GetAccount(string userId)
-    {
-        var directory = Path.Combine(Directory, "accounts", ToDirectoryName(userId));
-        var deviceIdPath = Path.Combine(directory, "device-id");
-        System.IO.Directory.CreateDirectory(directory);
-        if (!File.Exists(deviceIdPath))
-            File.WriteAllText(deviceIdPath, CreateDeviceId());
-        return new AccountData(userId, File.ReadAllText(deviceIdPath).Trim(), directory);
-    }
+    /// <summary>RSMatrix's store directory, with one session per account.</summary>
+    public string StoreDirectory => Path.Combine(Directory, "store");
 
-    /// <summary>
-    /// Deletes the account's session, encryption keys and device ID. The next login creates a new device.
-    /// </summary>
-    public void ResetAccount(string userId)
-    {
-        var directory = Path.Combine(Directory, "accounts", ToDirectoryName(userId));
-        if (System.IO.Directory.Exists(directory))
-            System.IO.Directory.Delete(directory, recursive: true);
-    }
-
-    private static string CreateDeviceId()
-        => "RSMATRIXDESKTOP" + Convert.ToHexString(RandomNumberGenerator.GetBytes(4));
+    /// <summary>Where the app reads the account's recovery key from until there is a way to enter it.</summary>
+    public string GetRecoveryKeyPath(string userId)
+        => Path.Combine(Directory, "accounts", ToDirectoryName(userId), "recovery-key");
 
     /// <summary>A readable, file system safe name that stays unique per user ID.</summary>
     private static string ToDirectoryName(string userId)
@@ -75,16 +58,6 @@ public sealed class LocalData
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(userId)))[..8].ToLowerInvariant();
         return $"{readable}-{hash}";
     }
-}
-
-public sealed record AccountData(string UserId, string DeviceId, string Directory)
-{
-    public string SessionDirectory => Path.Combine(Directory, "session");
-
-    public string EncryptionDirectory => Path.Combine(Directory, "encryption");
-
-    /// <summary>Where the app keeps the account's recovery key until there is a way to show it to the user.</summary>
-    public string RecoveryKeyPath => Path.Combine(Directory, "recovery-key");
 }
 
 public sealed class AppSettings

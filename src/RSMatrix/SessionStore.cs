@@ -5,7 +5,8 @@ using System.Text.Json.Serialization;
 
 namespace RSMatrix;
 
-internal sealed class StoredSession
+/// <summary>The session file. Contains the access token.</summary>
+internal sealed class SessionData
 {
     [JsonPropertyName("version")]
     public int Version { get; init; } = 1;
@@ -24,46 +25,45 @@ internal sealed class StoredSession
 }
 
 /// <summary>
-/// Keeps one session per user and device ID in a directory, so a restarted client can resume
-/// instead of logging in and syncing from scratch.
+/// One user's folder in a store directory: the session file, the encryption store and a lock file
+/// that keeps a second client away while one uses the folder.
 /// </summary>
 internal sealed class SessionStore : IDisposable
 {
+    private const string SessionFileName = "session.json";
+    private const string LockFileName = "lock";
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    private readonly string _path;
     private readonly FileStream _lock;
+    private string SessionPath => Path.Combine(Directory, SessionFileName);
 
-    /// <summary>The stored session, or null if there is none for this user and device.</summary>
-    public StoredSession? Session { get; private set; }
+    public string UserId { get; }
+    /// <summary>The user's folder, which also holds the encryption store.</summary>
+    public string Directory { get; }
+    /// <summary>The stored session, or null if there is none for this user.</summary>
+    public SessionData? Session { get; private set; }
 
-    private SessionStore(string path, FileStream fileLock, StoredSession? session)
+    private SessionStore(string userId, string directory, FileStream fileLock, SessionData? session)
     {
-        _path = path;
+        UserId = userId;
+        Directory = directory;
         _lock = fileLock;
         Session = session;
     }
 
-    public static SessionStore Open(string directory, string userId, string deviceId)
+    /// <summary>Reads the stored session without taking the lock.</summary>
+    public static SessionData? Read(string storeDirectory, string userId)
+        => ReadSession(Path.Combine(GetUserDirectory(storeDirectory, userId), SessionFileName), userId);
+
+    public static SessionStore Open(string storeDirectory, string userId)
     {
+        var directory = GetUserDirectory(storeDirectory, userId);
         PrivateFiles.CreateDirectory(directory);
-        // User and device IDs may contain characters that file systems reject.
-        var name = "rsmatrix-session-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"{userId}\n{deviceId}")))[..32];
-        var fileLock = PrivateFiles.Lock(Path.Combine(directory, name + ".lock"),
-            $"The session of {userId} with device {deviceId} in {directory} is already in use by another client.");
+        var fileLock = PrivateFiles.Lock(Path.Combine(directory, LockFileName),
+            $"The session of {userId} in {storeDirectory} is already in use by another client.");
         try
         {
-            var path = Path.Combine(directory, name + ".json");
-            if (!File.Exists(path))
-                return new SessionStore(path, fileLock, null);
-
-            var session = JsonSerializer.Deserialize<StoredSession>(File.ReadAllText(path), JsonOptions)
-                ?? throw new InvalidOperationException($"The session file {path} is empty.");
-            if (session.Version != 1)
-                throw new InvalidOperationException($"The session file {path} has unsupported version {session.Version}.");
-            if (session.UserId != userId || session.DeviceId != deviceId)
-                throw new InvalidOperationException($"The session file {path} belongs to {session.UserId} with device {session.DeviceId}.");
-            return new SessionStore(path, fileLock, session);
+            return new SessionStore(userId, directory, fileLock, ReadSession(Path.Combine(directory, SessionFileName), userId));
         }
         catch
         {
@@ -72,11 +72,36 @@ internal sealed class SessionStore : IDisposable
         }
     }
 
-    public void Save(StoredSession session)
+    public void Save(SessionData session)
     {
-        PrivateFiles.WriteAtomically(_path, stream => JsonSerializer.Serialize(stream, session, JsonOptions));
+        PrivateFiles.WriteAtomically(SessionPath, stream => JsonSerializer.Serialize(stream, session, JsonOptions));
         Session = session;
     }
 
+    /// <summary>Deletes the session and the encryption keys, after the server deleted the device.</summary>
+    public void Delete()
+    {
+        File.Delete(SessionPath);
+        Crypto.EncryptionStore.Delete(Directory);
+        Session = null;
+    }
+
     public void Dispose() => _lock.Dispose();
+
+    // User IDs may contain characters that file systems reject.
+    private static string GetUserDirectory(string storeDirectory, string userId)
+        => Path.Combine(storeDirectory, Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(userId)))[..32]);
+
+    private static SessionData? ReadSession(string path, string userId)
+    {
+        if (!File.Exists(path))
+            return null;
+        var session = JsonSerializer.Deserialize<SessionData>(File.ReadAllText(path), JsonOptions)
+            ?? throw new InvalidOperationException($"The session file {path} is empty.");
+        if (session.Version != 1)
+            throw new InvalidOperationException($"The session file {path} has unsupported version {session.Version}.");
+        if (session.UserId != userId)
+            throw new InvalidOperationException($"The session file {path} belongs to {session.UserId}.");
+        return session;
+    }
 }

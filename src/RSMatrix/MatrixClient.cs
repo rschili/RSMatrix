@@ -14,7 +14,7 @@ namespace RSMatrix;
 /// <summary>
 /// The low level class for interacting with the Matrix server.
 /// </summary>
-public sealed class MatrixClient
+public sealed class MatrixClient : IAsyncDisposable
 {
     internal ILogger Logger => HttpClientParameters.Logger;
     public MatrixId CurrentUser { get; }
@@ -25,29 +25,34 @@ public sealed class MatrixClient
 
     internal Filter? Filter { get; private set; }
 
-    /// <summary>Set when the client was connected with an encryption store directory.</summary>
+    /// <summary>Set when the client was logged in with a store directory.</summary>
     internal EncryptionEngine? Encryption { get; set; }
 
     /// <summary>
-    /// Whether the client was connected with <see cref="EncryptionOptions"/>. Without them,
-    /// messages in encrypted rooms are not received and sending to them throws.
+    /// How ready the client is for encrypted rooms. Encryption is on when the client was logged in with a store directory.
+    /// Clients that follow the spec only share keys with devices their owner cross-signed and only show encrypted
+    /// messages from them, so this device works in encrypted rooms once it is <see cref="EncryptionState.Ready"/>.
     /// </summary>
-    public bool IsEncryptionEnabled => Encryption != null;
+    public EncryptionState EncryptionState => Encryption?.State ?? EncryptionState.Off;
 
     /// <summary>
-    /// Replaces the account's cross-signing keys and recovery key, for when the recovery key is lost or the
-    /// keys are damaged. The new recovery key goes to <see cref="EncryptionOptions.SaveRecoveryKeyAsync"/> first,
-    /// then this device is signed with the new keys.
+    /// Creates new cross-signing keys for the account, protected by a new recovery key, and signs this device with them.
+    /// Replaces the keys the account had before. Returns the recovery key: save it somewhere safe, apart from the store
+    /// directory. Every new device of the account needs it once, and nobody can recover it for you.
     /// </summary>
     /// <remarks>
     /// Other devices of the account lose their cross-signature: they need the new recovery key once to be signed again.
-    /// Other users' clients see that the account's identity changed. The server asks for the account password,
-    /// which the client has; servers that want a confirmation in the browser instead are not supported.
+    /// Other users' clients see that the account's identity changed. Servers ask for the password before they replace
+    /// existing keys; servers that want a confirmation in the browser instead are not supported.
     /// </remarks>
     /// <exception cref="InvalidOperationException">Encryption is not enabled, or the server refused the new keys.</exception>
-    public Task ResetCrossSigningAsync()
-        => Encryption?.ResetCrossSigningAsync()
-           ?? throw new InvalidOperationException("Cross-signing needs encryption; connect with EncryptionOptions.");
+    public Task<string> SetUpCrossSigningAsync(string password)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(password);
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        return Encryption?.SetUpCrossSigningAsync(password)
+           ?? throw new InvalidOperationException("Cross-signing needs encryption; log in with a store directory.");
+    }
 
     private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
 
@@ -57,7 +62,7 @@ public sealed class MatrixClient
     /// <summary>
     /// The channel to receive messages from the server.
     /// The channel is unbounded, so it will not block the sender.
-    /// The channel closes on cancellation and faults on a terminal sync error.
+    /// The channel completes when the client is disposed and faults on a terminal sync error.
     /// Transient failures are retried with the existing session.
     /// </summary>
     public ChannelReader<ReceivedTextMessage> Messages => MessageChannel.Reader;
@@ -69,7 +74,7 @@ public sealed class MatrixClient
     /// <summary>
     /// Problems the client ran into while it keeps running, like messages it could not decrypt.
     /// Reading is optional. The channel keeps the latest 100 issues and drops older ones.
-    /// It completes when syncing ends.
+    /// It completes when the client stops.
     /// </summary>
     public ChannelReader<ClientIssue> Issues => _issueChannel.Reader;
 
@@ -83,8 +88,6 @@ public sealed class MatrixClient
         ? DateTimeOffset.FromUnixTimeMilliseconds(value)
         : null;
 
-    internal bool DebugMode = false;
-
     /// <summary>
     /// When true, the client will automatically join rooms when invited.
     /// Default is false.
@@ -93,8 +96,12 @@ public sealed class MatrixClient
 
     public bool IsSyncing { get; private set;}
 
-    // Kept to log in again when the server ends the session (soft logout).
+    // Kept to log in again after a soft logout.
     private string? _password;
+    // Null for clients created for tests, which don't own their lifetime.
+    private CancellationTokenSource? _lifetime;
+    private Task? _syncTask;
+    private int _disposed;
     private string? _deviceId;
     private SessionStore? _sessionStore;
     private string? _resumeSyncToken;
@@ -130,117 +137,234 @@ public sealed class MatrixClient
         => HandleSyncResponseAsync(response);
 
     /// <summary>
-    /// Connects to the Matrix server using the provided credentials.
-    /// The Task will finish when the client is connected and ready to receive messages.
-    /// Use <see cref="Messages" />  to retrieve messages.
+    /// Returns the session kept in <paramref name="storeDirectory"/> for the user, or null if there is none.
+    /// Only reads the session file; doesn't check the session with the server.
+    /// </summary>
+    /// <param name="storeDirectory">The store directory given to <see cref="LoginAsync"/>.</param>
+    /// <param name="userId">The user ID as the server confirmed it, see <see cref="CurrentUser"/>. Compared exactly.</param>
+    public static StoredSession? GetStoredSession(string storeDirectory, string userId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        var session = SessionStore.Read(storeDirectory, userId);
+        return session == null ? null : new StoredSession(session.UserId, session.DeviceId, new Uri(session.Homeserver), storeDirectory);
+    }
+
+    /// <summary>
+    /// Logs in with the password and creates a new session. The task finishes when the client is connected and ready to
+    /// receive messages through <see cref="Messages"/>. Dispose the client to disconnect.
     /// </summary>
     /// <remarks>
-    /// Once logged in, or when resuming a stored session, transient failures (network errors,
-    /// unavailable server, rate limits) are retried until cancellation. Before the first login they
-    /// throw, since they more likely point to a wrong configuration. If the server ends the session but allows
-    /// logging in again (soft logout), the client logs in again with the same device and continues
-    /// where it stopped. Other errors, like a wrong password, end the connection: ConnectAsync throws,
-    /// or the Messages channel faults if the client was already running.
+    /// <para>
+    /// Failures before the login, like a wrong homeserver or password, throw right away, since they more likely point to
+    /// a wrong configuration than to an outage. Once logged in, transient failures (network errors, unavailable server,
+    /// rate limits) are retried until the client is disposed.
+    /// </para>
+    /// <para>
+    /// If the server ends the session but allows logging in again (soft logout), the client logs in again with the
+    /// password and continues where it stopped. If the server deleted the device, <see cref="Messages"/> faults with
+    /// <see cref="SessionEndedException"/>. Other terminal errors fault <see cref="Messages"/> as well.
+    /// </para>
     /// </remarks>
-    /// <param name="userId">User id e.g. @user:example.org</param>
-    /// <param name="password">password for the user</param>
-    /// <param name="deviceId">device id to identify this client to the server</param>
-    /// <param name="httpClientFactory">factory to use for creating http clients</param>
-    /// <param name="cancellationToken">cancellation token used to disconnect</param>
-    /// <param name="logger">logger</param>
-    /// <param name="sessionStoreDirectory">
-    /// Keeps the session (access token and sync position) in this directory, so the next connect with
-    /// the same user and device ID resumes instead of logging in and syncing from scratch. Messages sent
-    /// while the client was offline are delivered after resuming. The files contain the access token in
-    /// plain JSON; protect the directory accordingly. It can be the same as the encryption store directory.
-    /// Only one client at a time can use a session.
+    /// <param name="userId">User ID, like @user:example.org.</param>
+    /// <param name="password">The account password. The client keeps it in memory to log in again after a soft logout.</param>
+    /// <param name="cancellationToken">Cancels connecting. Once connected, the client runs until it is disposed.</param>
+    /// <param name="deviceId">
+    /// Identifies this client to the server. With a store directory it is optional: the server creates one, and the
+    /// store keeps it. Without a store directory it is required; keep it across restarts, or every start creates
+    /// another device on the account.
     /// </param>
-    /// <param name="encryption">
-    /// Turns on end-to-end encryption; see <see cref="EncryptionOptions"/> for what it needs and does.
-    /// Without it, encrypted messages are ignored and sending to encrypted rooms throws <see cref="NotSupportedException"/>.
+    /// <param name="deviceDisplayName">The name other clients show for a new device. Defaults to "RSMatrix".</param>
+    /// <param name="storeDirectory">
+    /// Keeps the session (access token and sync position) and this device's encryption keys, so a restarted client
+    /// can continue with <see cref="GetStoredSession"/> and <see cref="ResumeAsync"/>. The files are plain JSON and
+    /// contain the access token and private keys; protect the directory like a password file. It holds one session per
+    /// user, and only one client at a time can use it. A session the directory held for this user before is replaced;
+    /// its device is logged out if the server still knows it. Without a store directory nothing is kept, encrypted
+    /// messages are ignored and sending to encrypted rooms throws <see cref="NotSupportedException"/>.
+    /// </param>
+    /// <param name="homeserver">
+    /// The homeserver's URL, like https://matrix.example.org. Without it, the client looks it up through the
+    /// .well-known file of the user ID's domain.
+    /// </param>
+    /// <param name="logger">logger</param>
+    /// <param name="recoveryKey">
+    /// The account's recovery key, in the format other clients show it ("EsTc oGp8 ..."; spaces don't matter). Used
+    /// when the account has a cross-signing identity, to sign this new device. Without it, the device stays unsigned;
+    /// see <see cref="EncryptionState"/>. A key that doesn't belong to the account makes LoginAsync throw.
     /// </param>
     /// <exception cref="ArgumentException">Provided arguments not valid</exception>
     /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
-    public static Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId, IHttpClientFactory httpClientFactory,
-        CancellationToken cancellationToken, ILogger? logger = null, string? sessionStoreDirectory = null,
-        EncryptionOptions? encryption = null)
-        => ConnectAsync(userId, password, deviceId, httpClientFactory, cancellationToken, logger,
-            (delay, token) => Task.Delay(delay, token), sessionStoreDirectory, encryption);
+    public static Task<MatrixClient> LoginAsync(string userId, string password, CancellationToken cancellationToken,
+        string? deviceId = null, string? deviceDisplayName = null, string? storeDirectory = null, Uri? homeserver = null,
+        ILogger? logger = null, string? recoveryKey = null)
+        => LoginAsync(userId, password, cancellationToken, deviceId, deviceDisplayName, storeDirectory, homeserver, logger,
+            recoveryKey, CreateHttpClient(), (delay, token) => Task.Delay(delay, token));
 
-    internal static async Task<MatrixClient> ConnectAsync(string userId, string password, string deviceId,
-        IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger? logger,
-        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, string? sessionStoreDirectory = null,
-        EncryptionOptions? encryption = null)
+    /// <summary>Takes ownership of <paramref name="httpClient"/>, also when logging in fails.</summary>
+    internal static Task<MatrixClient> LoginAsync(string userId, string password, CancellationToken cancellationToken,
+        string? deviceId, string? deviceDisplayName, string? storeDirectory, Uri? homeserver, ILogger? logger,
+        string? recoveryKey, HttpClient httpClient, Func<TimeSpan, CancellationToken, Task> retryDelayAsync)
+        => StartAsync(httpClient, retryDelayAsync, logger, cancellationToken, (http, lifetime) => LoginCoreAsync(http, lifetime,
+            userId, password, deviceId, deviceDisplayName, storeDirectory, homeserver, recoveryKey));
+
+    /// <summary>
+    /// Continues a stored session without logging in, at the stored sync position: messages sent while the client was
+    /// offline are delivered after resuming. The task finishes when the client is connected and ready to receive
+    /// messages through <see cref="Messages"/>. Dispose the client to disconnect.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Transient failures (network errors, unavailable server, rate limits) are retried until the client is disposed.
+    /// </para>
+    /// <para>
+    /// If the server ended the session but allows logging in again (soft logout), the client logs in again with
+    /// <paramref name="password"/> and the same device, and continues where it stopped. Without a password, ResumeAsync
+    /// throws <see cref="PasswordRequiredException"/>, and <see cref="Messages"/> faults with it when that happens
+    /// while the client runs. If the server deleted the device, for example after a password change, the store
+    /// discards the session and the device's encryption keys, and ResumeAsync throws <see cref="SessionEndedException"/>
+    /// (or <see cref="Messages"/> faults with it); log in again with <see cref="LoginAsync"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="session">The session from <see cref="GetStoredSession"/>.</param>
+    /// <param name="cancellationToken">Cancels connecting. Once connected, the client runs until it is disposed.</param>
+    /// <param name="password">(optional) The account password, to log in again after a soft logout.</param>
+    /// <param name="logger">logger</param>
+    /// <param name="recoveryKey">
+    /// The account's recovery key, to sign this device if the account has a cross-signing identity that hasn't signed
+    /// it yet. See <see cref="LoginAsync"/>.
+    /// </param>
+    /// <exception cref="PasswordRequiredException">The server ended the session, and no password was given.</exception>
+    /// <exception cref="SessionEndedException">The server deleted the device.</exception>
+    /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
+    public static Task<MatrixClient> ResumeAsync(StoredSession session, CancellationToken cancellationToken,
+        string? password = null, ILogger? logger = null, string? recoveryKey = null)
+        => ResumeAsync(session, cancellationToken, password, logger, recoveryKey, CreateHttpClient(),
+            (delay, token) => Task.Delay(delay, token));
+
+    /// <summary>Takes ownership of <paramref name="httpClient"/>, also when resuming fails.</summary>
+    internal static Task<MatrixClient> ResumeAsync(StoredSession session, CancellationToken cancellationToken,
+        string? password, ILogger? logger, string? recoveryKey, HttpClient httpClient,
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync)
+        => StartAsync(httpClient, retryDelayAsync, logger, cancellationToken, (http, lifetime) => ResumeCoreAsync(http, lifetime,
+            session, password, recoveryKey));
+
+    private static HttpClient CreateHttpClient()
+        => new(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) })
+        {
+            MaxResponseContentBufferSize = 1024 * 1024 * 2 // 2 MB
+        };
+
+    private static async Task<MatrixClient> StartAsync(HttpClient httpClient, Func<TimeSpan, CancellationToken, Task> retryDelayAsync,
+        ILogger? logger, CancellationToken cancellationToken,
+        Func<HttpClientParameters, CancellationTokenSource, Task<MatrixClient>> startAsync)
     {
-        if (logger == null)
-            logger = NullLogger<MatrixClient>.Instance;
-
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            logger.LogError("User ID cannot be null or empty.");
-            throw new ArgumentException("User ID cannot be null or empty.", nameof(userId));
-        }
-
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            logger.LogError("Password cannot be null or empty.");
-            throw new ArgumentException("Password cannot be null or empty.", nameof(password));
-        }
-
-        if (string.IsNullOrWhiteSpace(deviceId))
-        {
-            logger.LogError("Device ID cannot be null or empty.");
-            throw new ArgumentException("Device ID cannot be null or empty.", nameof(deviceId));
-        }
-
-        if (!UserId.TryParse(userId, out var parsedUserId) || parsedUserId == null)
-        {
-            logger.LogError("The user id '{UserId}' seems invalid, it should look like: '@user:example.org'.", userId);
-            throw new ArgumentException("The user id seems invalid, it should look like: '@user:example.org'.", nameof(userId));
-        }
-
-        if (encryption != null && (string.IsNullOrWhiteSpace(encryption.StoreDirectory) ||
-            encryption.GetRecoveryKeyAsync == null || encryption.SaveRecoveryKeyAsync == null))
-        {
-            throw new ArgumentException($"{nameof(EncryptionOptions)} needs a store directory and both recovery key callbacks.", nameof(encryption));
-        }
-
-        // Fail on a wrong or busy store before creating a session on the server.
-        EncryptionStore? encryptionStore = null;
-        SessionStore? sessionStore = null;
+        logger ??= NullLogger<MatrixClient>.Instance;
+        var lifetime = new CancellationTokenSource();
         try
         {
-            if (encryption != null)
-                encryptionStore = EncryptionEngine.OpenStore(encryption.StoreDirectory, parsedUserId.Full, deviceId);
-            if (sessionStoreDirectory != null)
-                sessionStore = SessionStore.Open(sessionStoreDirectory, parsedUserId.Full, deviceId);
-            return await ConnectAsync(parsedUserId, password, deviceId, httpClientFactory, cancellationToken, logger,
-                retryDelayAsync, encryptionStore, sessionStore, encryption).ConfigureAwait(false);
+            MatrixDiagnostics.FromEnvironment.LogSetting(logger);
+            HttpClientParameters http = new(httpClient, "", null, logger, lifetime.Token)
+            {
+                RetryDelayAsync = retryDelayAsync,
+                Diagnostics = MatrixDiagnostics.FromEnvironment,
+            };
+            // The caller's token only cancels connecting. Afterwards, the client runs until it is disposed.
+            using (cancellationToken.Register(static state => ((CancellationTokenSource)state!).Cancel(), lifetime))
+            {
+                return await startAsync(http, lifetime).ConfigureAwait(false);
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            encryptionStore?.Dispose();
-            sessionStore?.Dispose();
+            if (ex is not PasswordRequiredException and not SessionEndedException and not OperationCanceledException and not ArgumentException)
+                logger.LogError(ex, "Connecting to Matrix failed.");
+            httpClient.Dispose();
+            lifetime.Dispose();
             throw;
         }
     }
 
-    private static async Task<MatrixClient> ConnectAsync(MatrixId userId, string password, string deviceId,
-        IHttpClientFactory httpClientFactory, CancellationToken cancellationToken, ILogger logger,
-        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, EncryptionStore? encryptionStore, SessionStore? sessionStore,
-        EncryptionOptions? encryption)
+    private static async Task<MatrixClient> LoginCoreAsync(HttpClientParameters http, CancellationTokenSource lifetime,
+        string userId, string password, string? deviceId, string? deviceDisplayName, string? storeDirectory, Uri? homeserver,
+        string? recoveryKey)
     {
-        HttpClientParameters http = new(httpClientFactory, "", null, logger, cancellationToken)
-        {
-            RetryDelayAsync = retryDelayAsync
-        };
+        var requestedUserId = ParseUserId(userId);
+        ArgumentException.ThrowIfNullOrEmpty(password);
+        if (deviceId != null && string.IsNullOrWhiteSpace(deviceId))
+            throw new ArgumentException("Device ID cannot be empty.", nameof(deviceId));
+        if (deviceId == null && storeDirectory == null)
+            throw new ArgumentException("Without a store directory, the device ID is required. Otherwise every start creates another device on the account.", nameof(deviceId));
+        if (homeserver != null && (!homeserver.IsAbsoluteUri || (homeserver.Scheme != Uri.UriSchemeHttps && homeserver.Scheme != Uri.UriSchemeHttp)))
+            throw new ArgumentException("The homeserver must be an absolute http or https URL, like https://matrix.example.org.", nameof(homeserver));
 
-        string? syncToken = null;
-        if (sessionStore?.Session is { } stored)
+        // Fail on a busy store before creating a session on the server.
+        var store = storeDirectory != null ? SessionStore.Open(storeDirectory, requestedUserId.Full) : null;
+        try
         {
-            logger.LogInformation("Resuming the stored session at {Url}", stored.Homeserver);
+            // Without a session that worked before, a failure here is more likely a wrong configuration
+            // than an outage, so it is reported right away instead of retried.
+            http.BaseUri = homeserver != null ? ToBaseUri(homeserver) : await DiscoverHomeserverAsync(http, requestedUserId).ConfigureAwait(false);
+            // Logged out first, so a login with the same device ID creates the device anew instead of taking over its keys.
+            if (store?.Session is { } previous)
+                await TryLogOutAsync(http with { BaseUri = previous.Homeserver, BearerToken = previous.AccessToken }, previous.DeviceId).ConfigureAwait(false);
+
+            var login = await PasswordLoginAsync(http, requestedUserId, password, deviceId, deviceDisplayName ?? "RSMatrix", retry: false).ConfigureAwait(false);
+            if (!UserId.TryParse(login.UserId, out var confirmedUserId) || confirmedUserId == null)
+                throw new InvalidOperationException($"The server confirmed the login with an invalid user ID: {login.UserId}");
+
+            // The server may spell the user ID differently than it was given, for example with other letter cases.
+            if (store != null && confirmedUserId.Full != store.UserId)
+            {
+                store.Dispose();
+                store = null;
+                try
+                {
+                    store = SessionStore.Open(storeDirectory!, confirmedUserId.Full);
+                }
+                catch
+                {
+                    await TryLogOutAsync(http, login.DeviceId).ConfigureAwait(false);
+                    throw;
+                }
+                if (store.Session is { } previousOfConfirmed && previousOfConfirmed.DeviceId != login.DeviceId)
+                    await TryLogOutAsync(http with { BaseUri = previousOfConfirmed.Homeserver, BearerToken = previousOfConfirmed.AccessToken },
+                        previousOfConfirmed.DeviceId).ConfigureAwait(false);
+            }
+
+            EncryptionStore? encryptionStore = null;
+            if (store != null)
+            {
+                encryptionStore = EncryptionStore.Create(store.Directory, confirmedUserId.Full, login.DeviceId);
+                store.Save(CreateSessionData(http, confirmedUserId, login.DeviceId, syncToken: null));
+            }
+            return await CreateClientAsync(http, lifetime, confirmedUserId, login.DeviceId, password, recoveryKey, store,
+                encryptionStore, syncToken: null).ConfigureAwait(false);
+        }
+        catch
+        {
+            store?.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task<MatrixClient> ResumeCoreAsync(HttpClientParameters http, CancellationTokenSource lifetime,
+        StoredSession session, string? password, string? recoveryKey)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (string.IsNullOrEmpty(password))
+            password = null;
+        var userId = ParseUserId(session.UserId);
+        var store = SessionStore.Open(session.StoreDirectory, session.UserId);
+        try
+        {
+            var stored = store.Session;
+            if (stored == null || stored.DeviceId != session.DeviceId)
+                throw new InvalidOperationException($"The store no longer holds the session of {session.UserId} with device {session.DeviceId}.");
+            var deviceId = stored.DeviceId;
             http.BaseUri = stored.Homeserver;
             http.BearerToken = stored.AccessToken;
+            http.Logger.LogInformation("Resuming the stored session at {Url}", http.BaseUri);
             try
             {
                 var whoAmI = await MatrixRetry.ExecuteAsync(http, "Checking the stored session",
@@ -248,24 +372,54 @@ public sealed class MatrixClient
                 if (whoAmI.UserId != userId.Full || (whoAmI.DeviceId != null && whoAmI.DeviceId != deviceId))
                     throw new InvalidOperationException(
                         $"The stored session belongs to {whoAmI.UserId} with device {whoAmI.DeviceId}, not {userId.Full} with device {deviceId}.");
-                syncToken = stored.SyncToken;
             }
             catch (MatrixResponseException ex) when (ex.ErrorCode == "M_UNKNOWN_TOKEN")
             {
                 http.BearerToken = null;
-                syncToken = SyncTokenAfterLogout(ex, stored.SyncToken, encryptionStore != null, logger);
-                await LoginAsync(http, userId, password, deviceId, retry: true).ConfigureAwait(false);
+                ThrowIfSessionEnded(ex, store);
+                if (password == null)
+                    throw new PasswordRequiredException("The server ended the stored session, so logging in again needs the password. Resume with the password.", ex);
+                http.Logger.LogWarning("The server ended the stored session but allows logging in again (soft logout). Logging in with the same device.");
+                await PasswordLoginAsync(http, userId, password, deviceId, deviceDisplayName: null, retry: true).ConfigureAwait(false);
             }
+            store.Save(CreateSessionData(http, userId, deviceId, stored.SyncToken));
+            var encryptionStore = EncryptionStore.Open(store.Directory, userId.Full, deviceId);
+            return await CreateClientAsync(http, lifetime, userId, deviceId, password, recoveryKey, store, encryptionStore,
+                stored.SyncToken).ConfigureAwait(false);
         }
-        else
+        catch
         {
-            // Without a session that worked before, a failure here is more likely a wrong configuration
-            // than an outage, so it is reported right away instead of retried.
-            http.BaseUri = await DiscoverHomeserverAsync(http, userId).ConfigureAwait(false);
-            await LoginAsync(http, userId, password, deviceId, retry: false).ConfigureAwait(false);
+            store.Dispose();
+            throw;
         }
-        sessionStore?.Save(CreateStoredSession(http, userId, deviceId, syncToken));
+    }
 
+    private static MatrixId ParseUserId(string userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new ArgumentException("User ID cannot be null or empty.", nameof(userId));
+        if (!UserId.TryParse(userId, out var parsedUserId) || parsedUserId == null)
+            throw new ArgumentException("The user id seems invalid, it should look like: '@user:example.org'.", nameof(userId));
+        return parsedUserId;
+    }
+
+    /// <summary>
+    /// Throws <see cref="SessionEndedException"/> if the server deleted the device, after discarding the stored session
+    /// and encryption keys, as the spec requires.
+    /// </summary>
+    private static void ThrowIfSessionEnded(MatrixResponseException error, SessionStore? store)
+    {
+        if (error.SoftLogout)
+            return;
+        store?.Delete();
+        throw new SessionEndedException("The server logged out this device and deleted it. Log in again, which creates a new device.", error);
+    }
+
+    private static async Task<MatrixClient> CreateClientAsync(HttpClientParameters http, CancellationTokenSource lifetime,
+        MatrixId userId, string deviceId, string? password, string? recoveryKey, SessionStore? sessionStore,
+        EncryptionStore? encryptionStore, string? syncToken)
+    {
+        var logger = http.Logger;
         var versions = await MatrixRetry.ExecuteAsync(http, "Fetching spec versions",
             () => MatrixHelper.FetchSupportedSpecVersionsAsync(http)).ConfigureAwait(false);
         if (versions.Versions == null || versions.Versions.Count == 0)
@@ -290,13 +444,32 @@ public sealed class MatrixClient
             _deviceId = deviceId,
             _sessionStore = sessionStore,
             _resumeSyncToken = syncToken,
+            _lifetime = lifetime,
         };
         if (encryptionStore != null)
-            client.Encryption = await EncryptionEngine.StartAsync(encryptionStore, client, encryption!, password).ConfigureAwait(false);
+            client.Encryption = await EncryptionEngine.StartAsync(encryptionStore, client, recoveryKey).ConfigureAwait(false);
         await MatrixRetry.ExecuteAsync(http, "Initializing Matrix", client.InitAsync).ConfigureAwait(false);
         client.IsSyncing = true;
-        _ = client.SyncAsync();
+        client._syncTask = client.SyncAsync();
         return client;
+    }
+
+    private static string ToBaseUri(Uri homeserver) => homeserver.AbsoluteUri.TrimEnd('/');
+
+    /// <summary>
+    /// Stops syncing and waits until the client has stopped: running requests are cancelled, the session and keys
+    /// are saved, <see cref="Messages"/> and <see cref="Issues"/> complete, and the store directory is released.
+    /// Doesn't log out; <see cref="ResumeAsync"/> continues the stored session.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+        HttpClientParameters.IsDisposed = true;
+        _lifetime?.Cancel();
+        if (_syncTask != null)
+            await _syncTask.ConfigureAwait(false);
+        HttpClientParameters.HttpClient.Dispose();
     }
 
     private static async Task<string> DiscoverHomeserverAsync(HttpClientParameters http, MatrixId userId)
@@ -333,7 +506,8 @@ public sealed class MatrixClient
     /// Logs in with the password and sets the new access token. Transient failures are only retried
     /// when <paramref name="retry"/> is set, i.e. when this server and these credentials worked before.
     /// </summary>
-    private static async Task LoginAsync(HttpClientParameters http, MatrixId userId, string password, string deviceId, bool retry)
+    private static async Task<LoginResponse> PasswordLoginAsync(HttpClientParameters http, MatrixId userId, string password,
+        string? deviceId, string? deviceDisplayName, bool retry)
     {
         var logger = http.Logger;
         Task<T> SendAsync<T>(string operation, Func<Task<T>> action)
@@ -349,37 +523,32 @@ public sealed class MatrixClient
         }
 
         var loginResponse = await SendAsync("Logging in",
-            () => MatrixHelper.PasswordLoginAsync(http, userId.Full, password, deviceId)).ConfigureAwait(false);
-        if (string.IsNullOrEmpty(loginResponse.AccessToken))
+            () => MatrixHelper.PasswordLoginAsync(http, userId.Full, password, deviceId, deviceDisplayName)).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(loginResponse.AccessToken) || string.IsNullOrEmpty(loginResponse.DeviceId))
         {
             logger.LogError("Failed to login to server.");
             throw new InvalidOperationException("Failed to login to server.");
         }
         http.BearerToken = loginResponse.AccessToken;
-        logger.LogInformation("Logged in as {UserId} with device {DeviceId}", userId.Full, deviceId);
+        logger.LogInformation("Logged in as {UserId} with device {DeviceId}", loginResponse.UserId, loginResponse.DeviceId);
+        return loginResponse;
     }
 
-    /// <summary>
-    /// Decides how to continue after the server rejected our access token. Returns the sync token to continue from.
-    /// </summary>
-    private static string? SyncTokenAfterLogout(MatrixResponseException error, string? syncToken, bool isEncryptionEnabled, ILogger logger)
+    /// <summary>Logs out a device we no longer use, so devices don't pile up on the account. Failures are only logged.</summary>
+    private static async Task TryLogOutAsync(HttpClientParameters http, string deviceId)
     {
-        if (error.SoftLogout)
+        try
         {
-            logger.LogWarning("The server ended the session but allows logging in again (soft logout). Logging in with the same device.");
-            return syncToken;
+            await MatrixHelper.LogoutAsync(http).ConfigureAwait(false);
+            http.Logger.LogInformation("Logged out device {DeviceId}.", deviceId);
         }
-
-        // Without soft_logout, the spec requires discarding all state kept for this device, including its keys.
-        if (isEncryptionEnabled)
-            throw new InvalidOperationException(
-                "The server logged out this device, so its encryption keys must not be used anymore. " +
-                "Use a new device ID and a new encryption store directory.", error);
-        logger.LogWarning("The server logged out this device. Logging in again and syncing from scratch.");
-        return null;
+        catch (Exception ex) when (!http.CancellationToken.IsCancellationRequested)
+        {
+            http.Logger.LogWarning(ex, "Could not log out device {DeviceId}.", deviceId);
+        }
     }
 
-    private static StoredSession CreateStoredSession(HttpClientParameters http, MatrixId userId, string deviceId, string? syncToken) => new()
+    private static SessionData CreateSessionData(HttpClientParameters http, MatrixId userId, string deviceId, string? syncToken) => new()
     {
         UserId = userId.Full,
         DeviceId = deviceId,
@@ -474,7 +643,7 @@ public sealed class MatrixClient
                             $"Sync with the server failed, retrying until it works again: {ex.Message}", exception: ex)).ConfigureAwait(false);
                 }
                 // A token rejected right after logging in again won't get better with another login.
-                catch (MatrixResponseException ex) when (ex.ErrorCode == "M_UNKNOWN_TOKEN" && _password != null && !loggedInSinceLastSync)
+                catch (MatrixResponseException ex) when (ex.ErrorCode == "M_UNKNOWN_TOKEN" && !loggedInSinceLastSync)
                 {
                     await LoginAgainAsync(ex, request).ConfigureAwait(false);
                     loggedInSinceLastSync = true;
@@ -510,7 +679,6 @@ public sealed class MatrixClient
         finally
         {
             IsSyncing = false;
-            Encryption?.Dispose();
             _sessionStore?.Dispose();
             if (!MessageChannel.Writer.TryComplete(failure))
                 Logger.LogError("Sync ended, but failed to complete message channel.");
@@ -521,10 +689,11 @@ public sealed class MatrixClient
     private async Task LoginAgainAsync(MatrixResponseException error, SyncParameters request)
     {
         HttpClientParameters.BearerToken = null;
-        request.Since = SyncTokenAfterLogout(error, request.Since, Encryption != null, Logger);
-        if (request.Since == null)
-            request.FullState = false;
-        await LoginAsync(HttpClientParameters, CurrentUser, _password!, _deviceId!, retry: true).ConfigureAwait(false);
+        ThrowIfSessionEnded(error, _sessionStore);
+        if (_password == null)
+            throw new PasswordRequiredException("The server ended the session, so logging in again needs the password. Resume with the password.", error);
+        Logger.LogWarning("The server ended the session but allows logging in again (soft logout). Logging in with the same device.");
+        await PasswordLoginAsync(HttpClientParameters, CurrentUser, _password, _deviceId!, deviceDisplayName: null, retry: true).ConfigureAwait(false);
         SaveSession(request.Since);
     }
 
@@ -535,34 +704,8 @@ public sealed class MatrixClient
         var stored = _sessionStore.Session;
         if (stored != null && stored.SyncToken == syncToken && stored.AccessToken == HttpClientParameters.BearerToken)
             return;
-        _sessionStore.Save(CreateStoredSession(HttpClientParameters, CurrentUser, _deviceId!, syncToken));
+        _sessionStore.Save(CreateSessionData(HttpClientParameters, CurrentUser, _deviceId!, syncToken));
     }
-
-    private async Task WriteSyncResponseToFileAsync(SyncResponse response)
-    {
-        if(response == null)
-            return;
-
-        if(response.AccountData?.Events?.Count == 0 &&
-            response.Presence?.Events?.Count == 0 &&
-            response.Rooms?.Joined?.Count == 0)
-            return; // do not log boring empty syncs
-
-        try
-        {
-            var directory = Path.Combine(Path.GetTempPath(), "matrix");
-            Directory.CreateDirectory(directory);
-            var path = Path.Combine(directory, $"sync_{DateTime.Now:yyyyMMdd_HHmmss_fff}.json");
-            using var stream = File.OpenWrite(path);
-            await JsonSerializer.SerializeAsync(stream, response).ConfigureAwait(false);
-            Logger.LogInformation("Sync response written to {Path}", path);
-        }
-        catch(Exception ex)
-        {
-            Logger.LogError(ex, "Error writing sync response to file.");
-        }
-    }
-
 
     private LeakyBucket _receiptRateLimiter = new LeakyBucket(1, 30);
 
@@ -573,8 +716,6 @@ public sealed class MatrixClient
 
         var cancellationToken = HttpClientParameters.CancellationToken;
         cancellationToken.ThrowIfCancellationRequested();
-        if (DebugMode)
-            await WriteSyncResponseToFileAsync(response).ConfigureAwait(false);
 
         // Room keys arrive as to-device messages and must be stored before decrypting the timeline.
         if (Encryption != null)
@@ -634,6 +775,11 @@ public sealed class MatrixClient
             }
         }
 
+        if (response.Rooms?.Leaves is { Count: > 0 } leaves)
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.SyncSection, "rooms.leave", leaves.First().Value);
+        if (response.Rooms?.Knocks is { Count: > 0 } knocks)
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.SyncSection, "rooms.knock", knocks.First().Value);
+
         foreach (var room in _rooms.Values)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -689,7 +835,7 @@ public sealed class MatrixClient
             }
             if(ev.Type != "m.presence")
             {
-                Logger.LogWarning("Received event of type {Type} in presence events.", ev.Type);
+                Diagnostics.ReportUnhandled(Logger, UnhandledKind.PresenceEvent, ev.Type, ev);
                 continue;
             }
 
@@ -710,7 +856,7 @@ public sealed class MatrixClient
             PresenceEvent? parsedPresence;
             try
             {
-                parsedPresence = JsonSerializer.Deserialize<PresenceEvent>(ev.Content.Value);
+                parsedPresence = ParseContent<PresenceEvent>(ev.Content.Value);
             }
             catch (JsonException ex)
             {
@@ -750,11 +896,8 @@ public sealed class MatrixClient
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(events, nameof(events));
-        foreach(var e in events.Where(ev => ev != null && ev.Type != "m.typing" && ev.Type != "m.receipt"))
-        {
-            // Just track these for now. We are not interested in typing and receipt events
-            Logger.LogWarning("Received unknown Ephemeral event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
-        }
+        foreach (var e in events.Where(ev => ev != null))
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.EphemeralEvent, e.Type, e);
     }
 
     
@@ -807,7 +950,7 @@ public sealed class MatrixClient
                 HandleRoomMemberEvent(room, e);
                 break;
             case "m.room.name":
-                var nameEvent = JsonSerializer.Deserialize<RoomNameEvent>(e.Content!.Value);
+                var nameEvent = ParseContent<RoomNameEvent>(e.Content!.Value);
                 if (nameEvent == null)
                 {
                     Logger.LogWarning("Received m.room.name event deserialize returned null in room {RoomId}.", roomId.Full);
@@ -820,7 +963,7 @@ public sealed class MatrixClient
                 }
                 break;
             case "m.room.canonical_alias":
-                var parsed = JsonSerializer.Deserialize<CanonicalAliasEvent>(e.Content!.Value);
+                var parsed = ParseContent<CanonicalAliasEvent>(e.Content!.Value);
                 RoomAlias.TryParse(parsed?.Alias, out MatrixId? alias);
                 var altAliases = parsed?.AltAliases?.Select(a => RoomAlias.TryParse(a, out MatrixId? id) ? id : null).Where(id => id != null).Select(id => id!).ToList();
                 lock (room)
@@ -834,30 +977,16 @@ public sealed class MatrixClient
                 if (e.StateKey == "")
                     HandleRoomEncryptionEvent(room, e.Content);
                 break;
-            case "m.room.power_levels":
-            case "m.room.join_rules":
-            case "m.room.topic":
-            case "m.room.avatar":
-            case "m.room.create":
-            case "m.room.pinned_events":
-            case "m.room.tombstone":
-            case "m.room.retention":
-            case "m.room.related_groups":
-            case "m.room.history_visibility":
-            case "m.room.guest_access":
-                // Retained as raw state, but not projected onto other Room properties.
-                break;
             default:
-                // Custom and future event types are normal in Matrix. Preserve
-                // their content without requiring a built-in model or vendor allowlist.
-                Logger.LogDebug("Retained unhandled state event type in room {RoomId}: {Type}.", roomId.Full, e.Type);
+                // Room.StateEvents keeps the raw content of every state event.
+                Diagnostics.ReportUnhandled(Logger, UnhandledKind.StateEvent, e.Type, e);
                 break;
         }
     }
 
     private void HandleRoomMemberEvent(Room room, ClientEventWithoutRoomID e)
     {
-        var roomMember = JsonSerializer.Deserialize<RoomMemberEvent>((JsonElement)e.Content!);
+        var roomMember = ParseContent<RoomMemberEvent>((JsonElement)e.Content!);
         if (roomMember == null || !Enum.IsDefined(roomMember.Membership))
         {
             Logger.LogWarning("Received invalid m.room.member content in room {RoomId}.", room.RoomId.Full);
@@ -931,11 +1060,13 @@ public sealed class MatrixClient
         {
             foreach (var ev in invitedRoom.InviteState.Events)
             {
+                if (ev != null && ev.Type is not "m.room.member" and not "m.room.encryption")
+                    Diagnostics.ReportUnhandled(Logger, UnhandledKind.InviteStateEvent, ev.Type, ev);
                 if (ev?.Type == "m.room.member" && ev.StateKey == CurrentUser.Full)
                 {
                     try
                     {
-                        var memberEvent = JsonSerializer.Deserialize<RoomMemberEvent>(ev.Content);
+                        var memberEvent = ParseContent<RoomMemberEvent>(ev.Content);
                         if (memberEvent?.IsDirect == true)
                             isDirect = true;
                         inviterUserId = ev.Sender;
@@ -1001,7 +1132,7 @@ public sealed class MatrixClient
                 else if (e.Type == "m.room.encrypted")
                     HandleEncryptedEvent(room, e, messages);
                 else
-                    Logger.LogDebug("Ignoring unhandled timeline event type {Type} in room {RoomId}.", e.Type, roomId.Full);
+                    Diagnostics.ReportUnhandled(Logger, UnhandledKind.TimelineEvent, e.Type, e);
             }
             catch (Exception ex) when (ex is JsonException or ArgumentOutOfRangeException)
             {
@@ -1016,7 +1147,7 @@ public sealed class MatrixClient
         if (decrypted?.Type == "m.room.message")
             HandleMessageReceived(room.RoomId, messages, room, decrypted, isEncrypted: true);
         else if (decrypted != null)
-            Logger.LogDebug("Ignoring decrypted event type {Type} in room {RoomId}.", decrypted.Type, room.RoomId.Full);
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.TimelineEvent, decrypted.Type);
     }
 
     /// <summary>Decrypts an m.room.encrypted event, or reports why it can't and returns null.</summary>
@@ -1070,7 +1201,7 @@ public sealed class MatrixClient
             return;
         }
 
-        var encryptionEvent = JsonSerializer.Deserialize<RoomEncryptionEvent>(content.Value);
+        var encryptionEvent = ParseContent<RoomEncryptionEvent>(content.Value);
         if(encryptionEvent == null)
         {
             Logger.LogWarning("Received m.room.encryption event deserialize returned null in room {RoomId}.", room.RoomId.Full);
@@ -1100,7 +1231,8 @@ public sealed class MatrixClient
             return;
         }
 
-        var messageEvent = JsonSerializer.Deserialize<RoomMessageEvent>((JsonElement)e.Content);
+        // Decrypted content stays out of the logs.
+        var messageEvent = ParseContent<RoomMessageEvent>((JsonElement)e.Content, withExamples: !isEncrypted);
         if (messageEvent == null)
         {
             Logger.LogWarning("Received m.room.message event deserialize returned null in room {RoomId}.", roomId.Full);
@@ -1115,8 +1247,10 @@ public sealed class MatrixClient
         if (messageEvent.MsgType is not "m.text" and not "m.notice")
         {
             Logger.LogInformation("Ignoring m.room.message event with non-text message type {MsgType} in room {RoomId}.", messageEvent.MsgType, roomId.Full);
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.MsgType, messageEvent.MsgType, isEncrypted ? null : e);
             return;
         }
+        ReportUnhandledRelation(messageEvent.RelatesTo, isEncrypted ? null : e);
 
         var serverTs = DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs);
 
@@ -1178,11 +1312,33 @@ public sealed class MatrixClient
 
     private void HandleAccountDataReceived(MatrixId? roomId, List<MatrixEvent> accountData)
     {
-        // Sadly, we don't have any account data events we're interested in
-        foreach(var ev in accountData)
+        var kind = roomId == null ? UnhandledKind.AccountData : UnhandledKind.RoomAccountData;
+        foreach (var ev in accountData)
         {
-            Logger.LogDebug("Received account data event: {Event} in Room {Room}", ev?.Type, roomId?.Full ?? "(global)");
+            if (ev != null)
+                Diagnostics.ReportUnhandled(Logger, kind, ev.Type, ev);
         }
+    }
+
+    // Threads are handled; replies and every other relation type are not delivered yet.
+    private void ReportUnhandledRelation(RoomMessageRelatesTo? relatesTo, ClientEventWithoutRoomID? example)
+    {
+        if (relatesTo == null)
+            return;
+        if (relatesTo.RelType is { } relType && relType != "m.thread")
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.Relation, relType, example);
+        // A thread message carries the reply as a fallback for clients without threads.
+        if (relatesTo.InReplyTo != null && !(relatesTo.RelType == "m.thread" && relatesTo.IsFallingBack == true))
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.Relation, "m.in_reply_to", example);
+    }
+
+    private MatrixDiagnostics Diagnostics => HttpClientParameters.Diagnostics;
+
+    private T? ParseContent<T>(JsonElement content, bool withExamples = true)
+    {
+        var parsed = JsonSerializer.Deserialize<T>(content);
+        Diagnostics.ReportUnknownFields<T>(Logger, content, withExamples);
+        return parsed;
     }
 }
 

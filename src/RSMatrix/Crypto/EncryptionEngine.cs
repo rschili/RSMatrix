@@ -37,7 +37,7 @@ internal sealed class OutboundGroupSession
 /// Follows the spec's recommendation to only trust devices that their owner cross-signed:
 /// other devices get no room keys, and messages from them are not decrypted.
 /// </remarks>
-internal sealed class EncryptionEngine : IDisposable
+internal sealed class EncryptionEngine
 {
     internal const string OlmAlgorithm = "m.olm.v1.curve25519-aes-sha2";
     internal const string MegolmAlgorithm = "m.megolm.v1.aes-sha2";
@@ -51,8 +51,7 @@ internal sealed class EncryptionEngine : IDisposable
 
     private readonly EncryptionStore _store;
     private readonly MatrixClient _client;
-    private readonly EncryptionOptions _options;
-    private readonly string _password;
+    private readonly string? _recoveryKey;
     private readonly HttpClientParameters _http;
     private readonly string _userId;
     private readonly string _deviceId;
@@ -72,13 +71,13 @@ internal sealed class EncryptionEngine : IDisposable
     private readonly ConcurrentDictionary<string, string> _withheldSessions = new();
     /// <summary>Our published device keys including the cross-signature, once the device is cross-signed.</summary>
     private JsonObject? _crossSignedDeviceKeys;
+    private bool _accountHasIdentity;
 
-    private EncryptionEngine(EncryptionStore store, MatrixClient client, EncryptionOptions options, string password)
+    private EncryptionEngine(EncryptionStore store, MatrixClient client, string? recoveryKey)
     {
         _store = store;
         _client = client;
-        _options = options;
-        _password = password;
+        _recoveryKey = recoveryKey;
         _http = client.HttpClientParameters;
         _userId = store.Data.UserId;
         _deviceId = store.Data.DeviceId;
@@ -88,24 +87,21 @@ internal sealed class EncryptionEngine : IDisposable
     private string IdentityKey => CryptoPrimitives.ToBase64(Account.IdentityKey);
     private string SigningKey => CryptoPrimitives.ToBase64(Account.SigningKey);
 
-    /// <summary>Opens the store before logging in, so a wrong directory fails before creating a session.</summary>
-    public static EncryptionStore OpenStore(string directory, string userId, string deviceId)
-        => EncryptionStore.Open(directory, userId, deviceId);
-
     /// <summary>
-    /// Publishes our device keys on first use, checks that the server agrees with the store,
-    /// and makes sure the device is cross-signed, as <see cref="EncryptionOptions"/> describes.
+    /// Publishes our device keys on first use, checks that the server agrees with the store, and signs the device
+    /// with the account's cross-signing keys if it isn't signed yet and the recovery key unlocks them.
+    /// Never creates or changes the account's identity.
     /// </summary>
-    /// <param name="password">The account password, for servers that ask for it before accepting new signing keys.</param>
-    public static async Task<EncryptionEngine> StartAsync(EncryptionStore store, MatrixClient client, EncryptionOptions options, string password)
+    public static async Task<EncryptionEngine> StartAsync(EncryptionStore store, MatrixClient client, string? recoveryKey)
     {
-        var engine = new EncryptionEngine(store, client, options, password);
+        var engine = new EncryptionEngine(store, client, recoveryKey);
         await engine.PublishDeviceKeysAsync().ConfigureAwait(false);
-        await engine.SetUpCrossSigningAsync().ConfigureAwait(false);
+        await engine.SignDeviceIfNeededAsync().ConfigureAwait(false);
         return engine;
     }
 
-    public void Dispose() => _store.Dispose();
+    public EncryptionState State => _crossSignedDeviceKeys != null ? EncryptionState.Ready
+        : _accountHasIdentity ? EncryptionState.DeviceNotSigned : EncryptionState.NoIdentity;
 
     private async Task PublishDeviceKeysAsync()
     {
@@ -118,7 +114,7 @@ internal sealed class EncryptionEngine : IDisposable
             if (keys?.Ed25519 != SigningKey || keys.Curve25519 != IdentityKey)
                 throw new InvalidOperationException(
                     $"The server already has different encryption keys for device {_deviceId}. The encryption store " +
-                    "does not belong to that device. Use a new device ID, or delete the device from the account.");
+                    "does not belong to that device. Log in with another device ID, or delete the device from the account.");
             if (!_store.Data.DeviceKeysUploaded)
             {
                 _store.Data.DeviceKeysUploaded = true;
@@ -130,7 +126,7 @@ internal sealed class EncryptionEngine : IDisposable
         if (_store.Data.DeviceKeysUploaded)
             throw new InvalidOperationException(
                 $"The server has no encryption keys for device {_deviceId}, although this store published them. " +
-                "The device was probably deleted. Use a new device ID and a new store directory.");
+                "The device was probably deleted. Log in again.");
 
         Account.GenerateOneTimeKeys(OneTimeKeyTarget);
         Account.GenerateFallbackKey();
@@ -140,18 +136,19 @@ internal sealed class EncryptionEngine : IDisposable
         Logger.LogInformation("Published encryption keys for device {DeviceId}.", _deviceId);
     }
 
-    /// <summary>Makes sure the account's cross-signing keys signed this device. See <see cref="EncryptionOptions"/> for the cases.</summary>
-    private async Task SetUpCrossSigningAsync()
+    /// <summary>Signs this device with the account's cross-signing keys, unlocked with the recovery key, unless it is signed already.</summary>
+    private async Task SignDeviceIfNeededAsync()
     {
         var (identity, ownDevice, hasInvalidIdentity) = await QueryOwnIdentityAsync().ConfigureAwait(false);
+        _accountHasIdentity = identity != null || hasInvalidIdentity;
         if (hasInvalidIdentity)
         {
-            ReportNotCrossSigned("the account's published master key is invalid. MatrixClient.ResetCrossSigningAsync replaces it");
+            ReportNotCrossSigned("the account's published master key is invalid. MatrixClient.SetUpCrossSigningAsync replaces it");
             return;
         }
         if (identity == null)
         {
-            await CreateIdentityAsync(ownDevice).ConfigureAwait(false);
+            Logger.LogInformation("The account has no cross-signing identity, so device {DeviceId} is not cross-signed.", _deviceId);
             return;
         }
 
@@ -166,23 +163,22 @@ internal sealed class EncryptionEngine : IDisposable
         if (await ReadStoredSelfSigningKeyAsync().ConfigureAwait(false) is not { } stored)
         {
             ReportNotCrossSigned("the account's signing keys are not in secret storage, so a recovery key can't unlock them. " +
-                "MatrixClient.ResetCrossSigningAsync creates new ones");
+                "MatrixClient.SetUpCrossSigningAsync creates new ones");
             return;
         }
-        var recoveryKeyText = await _options.GetRecoveryKeyAsync(_http.CancellationToken).ConfigureAwait(false);
-        if (recoveryKeyText == null)
+        if (_recoveryKey == null)
         {
-            ReportNotCrossSigned("signing it needs the account's recovery key, and none was given");
+            ReportNotCrossSigned("signing it needs the account's recovery key, and none was given. Resume or log in once with the recovery key");
             return;
         }
         byte[] recoveryKey;
         try
         {
-            recoveryKey = SecretStorage.DecodeRecoveryKey(recoveryKeyText);
+            recoveryKey = SecretStorage.DecodeRecoveryKey(_recoveryKey);
         }
         catch (FormatException ex)
         {
-            throw new ArgumentException($"The recovery key from {nameof(EncryptionOptions.GetRecoveryKeyAsync)} is invalid: {ex.Message}", ex);
+            throw new ArgumentException($"The recovery key is invalid: {ex.Message}", "recoveryKey", ex);
         }
         if (!SecretStorage.MatchesKeyDescription(recoveryKey, stored.KeyDescription))
             throw new InvalidOperationException("The recovery key does not match the account's secret storage.");
@@ -199,24 +195,25 @@ internal sealed class EncryptionEngine : IDisposable
         if (CryptoPrimitives.ToBase64(selfSigningKey.PublicKey) != identity.SelfSigningKey)
         {
             ReportNotCrossSigned("the signing keys in secret storage don't match the published ones. " +
-                "MatrixClient.ResetCrossSigningAsync creates new ones");
+                "MatrixClient.SetUpCrossSigningAsync creates new ones");
             return;
         }
         await SignOwnDeviceAsync(selfSigningKey, ownDevice).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Replaces the account's signing keys and recovery key, and signs this device. Other devices of the account
-    /// lose their cross-signature.
+    /// Creates new signing keys and a new recovery key, replacing existing ones, and signs this device.
+    /// Other devices of the account lose their cross-signature. Returns the recovery key.
     /// </summary>
-    public async Task ResetCrossSigningAsync()
+    public async Task<string> SetUpCrossSigningAsync(string password)
     {
         await _lock.WaitAsync(_http.CancellationToken).ConfigureAwait(false);
         try
         {
             var (_, ownDevice, _) = await QueryOwnIdentityAsync().ConfigureAwait(false);
-            await CreateIdentityAsync(ownDevice).ConfigureAwait(false);
+            var recoveryKey = await CreateIdentityAsync(ownDevice, password).ConfigureAwait(false);
             ForgetDevices(_userId);
+            return recoveryKey;
         }
         finally
         {
@@ -238,12 +235,11 @@ internal sealed class EncryptionEngine : IDisposable
 
     /// <summary>
     /// Creates new signing keys and a new recovery key, stores the private keys in secret storage under it,
-    /// publishes the keys and signs this device. The caller saves the recovery key before anything changes on the server.
+    /// publishes the keys and signs this device. Returns the encoded recovery key.
     /// </summary>
-    private async Task CreateIdentityAsync(JsonElement? ownDevice)
+    private async Task<string> CreateIdentityAsync(JsonElement? ownDevice, string password)
     {
         var recoveryKey = RandomNumberGenerator.GetBytes(32);
-        await _options.SaveRecoveryKeyAsync(SecretStorage.EncodeRecoveryKey(recoveryKey), _http.CancellationToken).ConfigureAwait(false);
 
         var master = Ed25519KeyPair.Generate();
         var selfSigning = Ed25519KeyPair.Generate();
@@ -265,19 +261,21 @@ internal sealed class EncryptionEngine : IDisposable
             ["self_signing_key"] = CrossSigning.CreateKey(_userId, CrossSigning.SelfSigning, selfSigning, master),
             ["user_signing_key"] = CrossSigning.CreateKey(_userId, CrossSigning.UserSigning, userSigning, master)
         };
-        await UploadCrossSigningKeysAsync(body).ConfigureAwait(false);
+        await UploadCrossSigningKeysAsync(body, password).ConfigureAwait(false);
+        _accountHasIdentity = true;
         // We created this identity, so a change of the pinned key is expected and not reported.
         _store.Data.PinnedMasterKeys[_userId] = CryptoPrimitives.ToBase64(master.PublicKey);
         _store.Save();
         Logger.LogInformation("Created new cross-signing keys for {UserId}.", _userId);
         await SignOwnDeviceAsync(selfSigning, ownDevice).ConfigureAwait(false);
+        return SecretStorage.EncodeRecoveryKey(recoveryKey);
     }
 
     /// <summary>
     /// Since v1.11 servers accept the first upload without authentication. Replacing existing keys needs the password,
     /// through user-interactive authentication.
     /// </summary>
-    private async Task UploadCrossSigningKeysAsync(JsonObject body)
+    private async Task UploadCrossSigningKeysAsync(JsonObject body, string password)
     {
         const string path = "/_matrix/client/v3/keys/device_signing/upload";
         string? session;
@@ -303,7 +301,7 @@ internal sealed class EncryptionEngine : IDisposable
         {
             ["type"] = "m.login.password",
             ["identifier"] = new JsonObject { ["type"] = "m.id.user", ["user"] = _userId },
-            ["password"] = _password,
+            ["password"] = password,
             ["session"] = session
         };
         await RequestAsync("Uploading cross-signing keys with the password", path, HttpMethod.Post, body, retry: true).ConfigureAwait(false);
@@ -406,6 +404,8 @@ internal sealed class EncryptionEngine : IDisposable
                     changed |= await HandleEncryptedToDeviceAsync(ev.Sender, content).ConfigureAwait(false);
                 else if (ev.Type == "m.room_key.withheld")
                     HandleWithheld(ev.Sender, content);
+                else
+                    _http.Diagnostics.ReportUnhandled(Logger, UnhandledKind.ToDeviceEvent, ev.Type, ev);
             }
             if (response.DeviceLists?.Changed is { Count: > 0 } changedUsers)
                 changed |= await RecheckUntrustedSessionsAsync(changedUsers).ConfigureAwait(false);
@@ -580,7 +580,7 @@ internal sealed class EncryptionEngine : IDisposable
         if (eventType == "m.room_key" && payload.TryGetProperty("content", out var roomKey))
             HandleRoomKey(sender, senderKey, roomKey, device.IsCrossSigned);
         else if (eventType != "m.dummy")
-            Logger.LogDebug("Ignoring encrypted to-device event {Type} from {Sender}.", eventType, sender);
+            _http.Diagnostics.ReportUnhandled(Logger, UnhandledKind.EncryptedToDeviceEvent, eventType);
         return true;
     }
 
@@ -742,7 +742,7 @@ internal sealed class EncryptionEngine : IDisposable
         if (!_store.Data.InboundGroupSessions.TryGetValue(sessionId, out var record))
         {
             failure = _withheldSessions.TryGetValue(sessionId, out var code)
-                ? $"the sender withheld the key from this device ({DescribeWithheldCode(code)})"
+                ? $"the sender withheld the key from this device ({DescribeWithheldCode(code)}){(code == UnverifiedCode && State == EncryptionState.NoIdentity ? ". The account has no cross-signing identity; MatrixClient.SetUpCrossSigningAsync creates one" : "")}"
                 : "the sender has not shared the key for it with this device";
             Logger.LogWarning("Cannot decrypt event {EventId} in {RoomId}: no key for session {SessionId}.", encrypted.EventId, roomId, sessionId);
             return null;

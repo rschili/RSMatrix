@@ -13,7 +13,7 @@ internal static class MatrixHelper
 {
     /// <summary>
     /// Fetches the well-known URI from the server
-    /// This is a low level method, it is implicitly called by ConnectAsync
+    /// This is a low level method, it is implicitly called by LoginAsync
     /// </summary>
     public static async Task<WellKnownUriResponse> FetchWellKnownUriAsync(HttpClientParameters parameters)
     {
@@ -34,12 +34,14 @@ internal static class MatrixHelper
         return await HttpClientHelper.SendAsync<AuthFlowsResponse>(parameters, "/_matrix/client/v3/login").ConfigureAwait(false);
     }
 
-    public static async Task<LoginResponse> PasswordLoginAsync(HttpClientParameters parameters, string userId, string password, string deviceId)
+    /// <param name="deviceId">Null lets the server create a new device ID.</param>
+    /// <param name="deviceDisplayName">Only used when the login creates a new device.</param>
+    public static async Task<LoginResponse> PasswordLoginAsync(HttpClientParameters parameters, string userId, string password,
+        string? deviceId, string? deviceDisplayName)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentException.ThrowIfNullOrEmpty(userId, nameof(userId));
         ArgumentException.ThrowIfNullOrEmpty(password, nameof(password));
-        ArgumentException.ThrowIfNullOrEmpty(deviceId, nameof(deviceId));
         var request = new LoginRequest
         {
             Identifier = new Identifier
@@ -49,11 +51,18 @@ internal static class MatrixHelper
             },
             Password = password,
             DeviceId = deviceId,
-            InitialDeviceDisplayName = "RSMatrix Device",
+            InitialDeviceDisplayName = deviceDisplayName,
             Type = "m.login.password"
         };
-        var content = JsonContent.Create(request);
+        var content = JsonContent.Create(request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
         return await HttpClientHelper.SendAsync<LoginResponse>(parameters, "/_matrix/client/v3/login", HttpMethod.Post, content).ConfigureAwait(false);
+    }
+
+    /// <summary>Invalidates the access token and deletes its device.</summary>
+    internal static Task LogoutAsync(HttpClientParameters parameters)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        return HttpClientHelper.SendAsync(parameters, "/_matrix/client/v3/logout", HttpMethod.Post, JsonContent.Create(new { }));
     }
 
     internal static async Task<WhoAmIResponse> GetWhoAmIAsync(HttpClientParameters parameters)

@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using RSFlowControl;
 using RSMatrix.Http;
 using RSMatrix.Models;
@@ -19,11 +18,8 @@ public class SyncHandlerTests
 
     public SyncHandlerTests()
     {
-        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
-        httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>()))
-            .Returns(() => new HttpClient(new ReceiptHandler()));
         var parameters = new HttpClientParameters(
-            httpClientFactoryMock.Object,
+            new HttpClient(new ReceiptHandler()),
             "https://example.org",
             "test_token",
             NullLogger<SyncHandlerTests>.Instance,

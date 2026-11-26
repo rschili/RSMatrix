@@ -9,8 +9,10 @@ using RSMatrix.Models;
 
 namespace RSMatrix.Desktop.Matrix;
 
-/// <param name="RecoveryKeyFile">Where the recovery key is read from and saved to. Defaults to the account's data directory.</param>
-public sealed record MatrixLogin(string UserId, string Password, Uri? Homeserver, string? RecoveryKeyFile = null);
+/// <param name="Password">Needed to log in. Resuming a stored session only needs it after the server ended the session.</param>
+/// <param name="Homeserver">Only used to log in; a stored session knows its homeserver.</param>
+/// <param name="RecoveryKeyFile">Where the recovery key is read from, when a new device needs it. Defaults to the account's data directory.</param>
+public sealed record MatrixLogin(string UserId, string? Password, Uri? Homeserver, string? RecoveryKeyFile = null);
 
 /// <summary>
 /// Connects the UI to a homeserver through <see cref="MatrixClient"/>.
@@ -23,8 +25,7 @@ public sealed class MatrixChatSession : IChatSession
     private static readonly TimeSpan SyncSilenceLimit = TimeSpan.FromSeconds(90);
 
     private readonly MatrixClient _client;
-    private readonly CancellationTokenSource _lifetime;
-    private readonly DesktopHttpClientFactory _httpClientFactory;
+    private readonly CancellationTokenSource _lifetime = new();
     private readonly ILogger _logger;
     private readonly Channel<ChatEvent> _events = Channel.CreateUnbounded<ChatEvent>(new() { SingleReader = true });
     private readonly Task _pumps;
@@ -36,12 +37,9 @@ public sealed class MatrixChatSession : IChatSession
     private readonly ConcurrentDictionary<(string RoomId, string TargetEventId, string Key), string> _sentReactionIds = new();
     private long _syncInterruptedAtUnixMilliseconds;
 
-    private MatrixChatSession(MatrixClient client, CancellationTokenSource lifetime,
-        DesktopHttpClientFactory httpClientFactory, ILogger logger)
+    private MatrixChatSession(MatrixClient client, ILogger logger)
     {
         _client = client;
-        _lifetime = lifetime;
-        _httpClientFactory = httpClientFactory;
         _logger = logger;
         CurrentUser = new ChatUser(client.CurrentUser.Full, client.CurrentUser.Localpart.ToString());
         ServerName = client.CurrentUser.Domain.ToString();
@@ -52,49 +50,37 @@ public sealed class MatrixChatSession : IChatSession
 
     public string ServerName { get; }
 
-    public static async Task<MatrixChatSession> ConnectAsync(MatrixLogin login, AccountData account,
+    /// <summary>
+    /// Resumes the account's stored session, or logs in with the password if there is none or the server deleted
+    /// the device.
+    /// </summary>
+    public static async Task<MatrixChatSession> ConnectAsync(MatrixLogin login, LocalData localData,
         ILoggerFactory loggerFactory, CancellationToken cancellationToken)
     {
-        // RSMatrix uses one token for connecting and for the lifetime of the client.
-        // The caller's token only cancels the connect attempt.
-        var lifetime = new CancellationTokenSource();
-        var httpClientFactory = new DesktopHttpClientFactory(login.Homeserver);
-        try
-        {
-            MatrixClient client;
-            await using (cancellationToken.Register(lifetime.Cancel))
-            {
-                client = await MatrixClient.ConnectAsync(login.UserId, login.Password, account.DeviceId,
-                    httpClientFactory, lifetime.Token, loggerFactory.CreateLogger<MatrixClient>(),
-                    sessionStoreDirectory: account.SessionDirectory,
-                    encryption: CreateEncryptionOptions(account, login.RecoveryKeyFile ?? account.RecoveryKeyPath)).ConfigureAwait(false);
-            }
-            return new MatrixChatSession(client, lifetime, httpClientFactory, loggerFactory.CreateLogger<MatrixChatSession>());
-        }
-        catch
-        {
-            await lifetime.CancelAsync().ConfigureAwait(false);
-            lifetime.Dispose();
-            httpClientFactory.Dispose();
-            throw;
-        }
-    }
-
-    // The app has no screen for the recovery key yet, so it keeps it in a file.
-    private static EncryptionOptions CreateEncryptionOptions(AccountData account, string recoveryKeyFile) => new()
-    {
-        StoreDirectory = account.EncryptionDirectory,
-        GetRecoveryKeyAsync = async cancellationToken => File.Exists(recoveryKeyFile)
+        // The app has no screen for the recovery key yet, so it reads it from a file.
+        var recoveryKeyFile = login.RecoveryKeyFile ?? localData.GetRecoveryKeyPath(login.UserId);
+        var recoveryKey = File.Exists(recoveryKeyFile)
             ? (await File.ReadAllTextAsync(recoveryKeyFile, cancellationToken).ConfigureAwait(false)).Trim()
-            : null,
-        SaveRecoveryKeyAsync = async (recoveryKey, cancellationToken) =>
+            : null;
+        var logger = loggerFactory.CreateLogger<MatrixClient>();
+        MatrixClient? client = null;
+        if (MatrixClient.GetStoredSession(localData.StoreDirectory, login.UserId) is { } stored)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(recoveryKeyFile))!);
-            await File.WriteAllTextAsync(recoveryKeyFile, recoveryKey, cancellationToken).ConfigureAwait(false);
-            if (!OperatingSystem.IsWindows())
-                File.SetUnixFileMode(recoveryKeyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        },
-    };
+            try
+            {
+                client = await MatrixClient.ResumeAsync(stored, cancellationToken, login.Password, logger, recoveryKey).ConfigureAwait(false);
+            }
+            catch (SessionEndedException) when (login.Password != null)
+            {
+                // Logging in below creates a new device.
+            }
+        }
+        client ??= await MatrixClient.LoginAsync(login.UserId,
+            login.Password ?? throw new InvalidOperationException("Enter the password to sign in."), cancellationToken,
+            storeDirectory: localData.StoreDirectory, homeserver: login.Homeserver, logger: logger,
+            recoveryKey: recoveryKey).ConfigureAwait(false);
+        return new MatrixChatSession(client, loggerFactory.CreateLogger<MatrixChatSession>());
+    }
 
     public IAsyncEnumerable<ChatEvent> ReadEventsAsync(CancellationToken cancellationToken)
         => _events.Reader.ReadAllAsync(cancellationToken);
@@ -146,7 +132,8 @@ public sealed class MatrixChatSession : IChatSession
 
     public async ValueTask DisposeAsync()
     {
-        // Cancelling stops the sync. RSMatrix has no logout, so the device stays signed in and resumes next time.
+        // RSMatrix has no logout yet, so the device stays signed in and resumes on the next start.
+        await _client.DisposeAsync().ConfigureAwait(false);
         await _lifetime.CancelAsync().ConfigureAwait(false);
         try
         {
@@ -156,7 +143,6 @@ public sealed class MatrixChatSession : IChatSession
         {
         }
         _lifetime.Dispose();
-        _httpClientFactory.Dispose();
     }
 
     private Room GetRoom(string roomId)

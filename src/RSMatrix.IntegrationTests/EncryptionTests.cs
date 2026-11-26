@@ -16,12 +16,9 @@ public class EncryptionTests
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}",
-                Path.Combine(storeRoot, "bob"), server.CancellationToken);
-            var carolDevice = $"CAROL{Guid.NewGuid():N}";
+            var bob = await server.LoginClientAsync(bobUser, Path.Combine(storeRoot, "bob"));
             var carolStore = Path.Combine(storeRoot, "carol");
-            using var carolLifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken);
-            var carol = await server.ConnectAsync(carolUser, carolDevice, carolStore, carolLifetime.Token);
+            var carol = await server.LoginClientAsync(carolUser, carolStore);
             bob.AutoJoinOnInvite = true;
             carol.AutoJoinOnInvite = true;
 
@@ -46,7 +43,7 @@ public class EncryptionTests
             var bobPing = await ReceiveAsync(bob, pingId, server.CancellationToken);
             var bobRoom = bobPing.Room;
             await ReceiveAsync(carol, pingId, server.CancellationToken);
-            await Assert.That(bob.IsEncryptionEnabled).IsTrue();
+            await Assert.That(bob.EncryptionState).IsEqualTo(EncryptionState.Ready);
             await Assert.That(bobRoom.IsEncrypted).IsTrue();
             await Assert.That(bobPing.IsEncrypted).IsFalse();
 
@@ -83,9 +80,8 @@ public class EncryptionTests
             await Assert.That(history.Messages.Any(m => m.EventId == replyId && m.Body == "reply body")).IsTrue();
 
             // Restart Carol with the same device and store: old sessions must still work both ways.
-            await carolLifetime.CancelAsync();
-            await foreach (var unused in carol.Messages.ReadAllAsync(server.CancellationToken)) { }
-            var restarted = await server.ConnectAsync(carolUser, carolDevice, carolStore, server.CancellationToken);
+            await carol.DisposeAsync();
+            var restarted = await server.ResumeClientAsync(carolUser, carolStore);
             restarted.AutoJoinOnInvite = true;
 
             var afterRestartId = await bobRoom.SendTextMessageAsync("after restart", null, null);
@@ -104,21 +100,27 @@ public class EncryptionTests
     }
 
     [Test]
-    public async Task StoreForAnotherDevice_IsRejectedBeforeLogin()
+    public async Task LoginAgain_ReplacesStoredSession_AndLogsOutOldDevice()
     {
         await using var server = new LocalHomeserver();
         var bobUser = await server.RegisterUserAsync("bob");
+        var bobId = $"@{bobUser}:localhost";
         var store = Path.Combine(Path.GetTempPath(), $"rsmatrix-e2ee-{Guid.NewGuid():N}");
         try
         {
-            using (var lifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken))
-            {
-                var first = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", store, lifetime.Token);
-                await lifetime.CancelAsync();
-                await foreach (var unused in first.Messages.ReadAllAsync(server.CancellationToken)) { }
-            }
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", store, server.CancellationToken));
+            var observer = await server.LoginAsync("alice");
+            var first = await server.LoginClientAsync(bobUser, store);
+            await first.DisposeAsync();
+            var firstDevice = MatrixClient.GetStoredSession(store, bobId)!.DeviceId;
+
+            await server.LoginClientAsync(bobUser, store);
+            var secondDevice = MatrixClient.GetStoredSession(store, bobId)!.DeviceId;
+            await Assert.That(secondDevice).IsNotEqualTo(firstDevice);
+            var devices = (await LocalHomeserver.RequestAsync(observer, "/_matrix/client/v3/keys/query", HttpMethod.Post,
+                new Dictionary<string, object> { ["device_keys"] = new Dictionary<string, string[]> { [bobId] = [] } }))
+                .GetProperty("device_keys").GetProperty(bobId);
+            await Assert.That(devices.TryGetProperty(firstDevice, out _)).IsFalse();
+            await Assert.That(devices.TryGetProperty(secondDevice, out _)).IsTrue();
         }
         finally
         {
@@ -136,8 +138,8 @@ public class EncryptionTests
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", Path.Combine(storeRoot, "bob"), server.CancellationToken);
-            var carol = await server.ConnectAsync(carolUser, $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol"), server.CancellationToken);
+            var bob = await server.LoginClientAsync(bobUser, Path.Combine(storeRoot, "bob"));
+            var carol = await server.LoginClientAsync(carolUser, Path.Combine(storeRoot, "carol"));
             var (roomPath, bobRoom) = await CreateEncryptedRoomAsync(alice, bob, [carol],
                 new { algorithm = "m.megolm.v1.aes-sha2", rotation_period_msgs = 2 }, server.CancellationToken);
 
@@ -168,8 +170,8 @@ public class EncryptionTests
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", Path.Combine(storeRoot, "bob"), server.CancellationToken);
-            var carol = await server.ConnectAsync(carolUser, $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol"), server.CancellationToken);
+            var bob = await server.LoginClientAsync(bobUser, Path.Combine(storeRoot, "bob"));
+            var carol = await server.LoginClientAsync(carolUser, Path.Combine(storeRoot, "carol"));
             var (roomPath, bobRoom) = await CreateEncryptedRoomAsync(alice, bob, [carol],
                 new { algorithm = "m.megolm.v1.aes-sha2" }, server.CancellationToken);
 
@@ -178,7 +180,7 @@ public class EncryptionTests
             var firstSession = await GetSessionIdAsync(alice, roomPath, beforeId);
 
             // Carol adds a second device. A later plaintext ping shows that Bob has synced past its device list change.
-            var carolPhone = await server.ConnectAsync(carolUser, $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol-phone"), server.CancellationToken);
+            var carolPhone = await server.LoginClientAsync(carolUser, Path.Combine(storeRoot, "carol-phone"));
             var pingId = await SendPlaintextAsync(alice, roomPath, "ping");
             await ReceiveAsync(bob, pingId, server.CancellationToken);
             await ReceiveAsync(carolPhone, pingId, server.CancellationToken);

@@ -11,13 +11,13 @@ public class LoginTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task Connect_RetriesWithinSession_AndLogsInAgainOnlyAfterSoftLogout(bool failInitialization)
+    public async Task Login_RetriesWithinSession_AndLogsInAgainOnlyAfterSoftLogout(bool failInitialization)
     {
         using var handler = new LoginHandler(failInitialization);
         using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var delays = new List<TimeSpan>();
-        var client = await MatrixClient.ConnectAsync("@bot:example.org", "test-password", "fixed-device",
-            new ClientFactory(handler), lifetime.Token, NullLogger.Instance, (delay, token) =>
+        await using var client = await MatrixClient.LoginAsync("@bot:example.org", "test-password", lifetime.Token,
+            "fixed-device", null, null, null, NullLogger.Instance, null, new HttpClient(handler, disposeHandler: false), (delay, token) =>
             {
                 token.ThrowIfCancellationRequested();
                 delays.Add(delay);
@@ -46,11 +46,7 @@ public class LoginTests
         await Assert.That(login.RootElement.GetProperty("type").GetString()).IsEqualTo("m.login.password");
         await Assert.That(login.RootElement.GetProperty("identifier").GetProperty("user").GetString()).IsEqualTo("@bot:example.org");
         await Assert.That(login.RootElement.GetProperty("device_id").GetString()).IsEqualTo("fixed-device");
-    }
-
-    private sealed class ClientFactory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+        await Assert.That(login.RootElement.GetProperty("initial_device_display_name").GetString()).IsEqualTo("RSMatrix");
     }
 
     private sealed class LoginHandler(bool failInitialization) : HttpMessageHandler
@@ -74,7 +70,7 @@ public class LoginTests
             if (path == "/_matrix/client/v3/login" && request.Method == HttpMethod.Post)
             {
                 LoginCount++;
-                LoginBody = await request.Content!.ReadAsStringAsync(cancellationToken);
+                LoginBody ??= await request.Content!.ReadAsStringAsync(cancellationToken);
                 return Json("""{"access_token":"session-token","device_id":"fixed-device","user_id":"@bot:example.org"}""");
             }
 

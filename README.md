@@ -20,11 +20,14 @@ Check the github repository for a minimalistic [console example](https://github.
 Here is the basic usage:
 
 ```cs
-MatrixClient client = await MatrixClient.ConnectAsync(userid, password, device,
-    httpClientFactory, cancellationToken, logger);
+await using MatrixClient client = await MatrixClient.LoginAsync(userId, password, cancellationToken,
+    deviceId: "MYBOT");
 ```
 
-and to handle messages:
+Without a `homeserver` URL, the client looks it up through the `.well-known` file of the user ID's domain.
+The client immediately starts syncing after login or resume.
+
+To handle messages:
 
 ```cs
 await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
@@ -36,26 +39,31 @@ await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
 }
 ```
 
-Room and user information is cached and updated on the client object. Associated rooms and users are included in the message given to the handler.
+The cancellation token cancels logging in or resuming.
+To stop the sync, dispose the client. That stops sync, waits until it has ended and completes `client.Messages`.
 
 ## Reconnecting and resuming
 
-Once the client has logged in, it retries network errors, unavailable servers and rate limits until the cancellation token is cancelled. Before the first login, `ConnectAsync` throws on these errors instead, because they more likely point to a wrong configuration.
+Once the client has logged in, it retries network errors, unavailable servers and rate limits until it is disposed. Before the login, `LoginAsync` throws on these errors instead, because they more likely point to a wrong configuration.
 
-Pass a directory for sessions to resume after a restart instead of logging in and syncing from scratch:
+Instead of logging in every time and replacine the earlier sessions, you probably want to resume instead.
+To do that, a storage for the session data is needed:
 
 ```cs
-MatrixClient client = await MatrixClient.ConnectAsync(userid, password, device,
-    httpClientFactory, cancellationToken, logger,
-    sessionStoreDirectory: "/var/lib/mybot/matrix-session");
+const string store = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "mybot", "matrix");
+var session = MatrixClient.GetStoredSession(store, userId);
+await using MatrixClient client = session != null
+    ? await MatrixClient.ResumeAsync(session, cancellationToken)
+    : await MatrixClient.LoginAsync(userId, password, cancellationToken, storeDirectory: store);
 ```
 
-The directory keeps one session per user and device ID, with the access token and the sync position.
-The files contain the access token unencrypted, so protect the directory as necessary. It can be the same directory as the encryption store.
+`ResumeAsync` continues at the stored sync position, so messages sent while the client was offline are delivered after resuming.
+The store holds one session per user: the access token, the sync position and the device's encryption keys, as unencrypted files, protect the directory like a password file.
 
 ## Issues and health
 
-`client.Issues` reports problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, a device that could not be cross-signed, changed identities of other users, failed auto-joins and interrupted syncs. Reading it is optional. It buffers the latest 100 issues.
+`client.Issues` reports problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, a device the account's identity hasn't signed, changed identities of other users, failed auto-joins and interrupted syncs. Reading it is optional. It buffers the latest 100 issues.
 
 ```cs
 _ = Task.Run(async () =>
@@ -65,30 +73,31 @@ _ = Task.Run(async () =>
 });
 ```
 
+For troubleshooting, set the environment variable `RSMATRIX_DIAGNOSTICS` before starting the client:
+
+- `Unhandled`: logs a warning, once per run, for each kind of event, message type or field the client receives but doesn't handle. The first example goes to the debug level.
+- `Verbose`: also logs every request and response body at the debug level. Passwords and tokens are removed.
+
 ## End-to-end encryption
 
-Pass `EncryptionOptions` to turn on encryption. Without them, nothing changes: encrypted messages are ignored and sending to encrypted rooms throws.
+Encryption is on when the client has a store directory. Without one, encrypted messages are ignored and sending to encrypted rooms throws. On its own, encryption only publishes keys for this device and never changes the account, so a store costs nothing for bots in unencrypted rooms.
 
-```cs
-MatrixClient client = await MatrixClient.ConnectAsync(userid, password, device,
-    httpClientFactory, cancellationToken, logger,
-    encryption: new EncryptionOptions
-    {
-        StoreDirectory = "/var/lib/mybot/matrix-encryption",
-        // Asked once per new device, when the account already has cross-signing keys.
-        GetRecoveryKeyAsync = _ => Task.FromResult(Environment.GetEnvironmentVariable("MATRIX_RECOVERY_KEY")),
-        // Called once with a new key, when RSMatrix sets up cross-signing for the account.
-        SaveRecoveryKeyAsync = (key, _) => File.WriteAllTextAsync("/var/lib/mybot/matrix-recovery-key", key),
-    });
-```
+Encrypted rooms only work between devices the account vouches for, called cross-signed devices. As the spec recommends, RSMatrix only shares keys with cross-signed devices and only shows encrypted messages from them, and other clients increasingly do the same. Logging in or resuming never creates or changes the account's cross-signing identity:
 
-The store directory holds this device's private keys and must survive restarts.
+- If the account has an identity, pass its recovery key once per new device, and the client signs the device with it:
 
-Encrypted rooms only work between devices the account vouches for, called cross-signed devices. As the spec recommends, RSMatrix only shares keys with cross-signed devices and only shows encrypted messages from them, and other clients increasingly do the same. RSMatrix cross-signs its own device while connecting:
+  ```cs
+  await using MatrixClient client = await MatrixClient.LoginAsync(userId, password, cancellationToken,
+      storeDirectory: store, recoveryKey: Environment.GetEnvironmentVariable("MATRIX_RECOVERY_KEY"));
+  ```
 
-- On an account without cross-signing keys, it creates them and a recovery key, which goes to `SaveRecoveryKeyAsync`. The keys are kept on the server, encrypted with the recovery key.
-- On a new device of an account that has them, it asks `GetRecoveryKeyAsync` for the recovery key, once. Return null if you don't have it: the device then works unsigned, and `client.Issues` reports `DeviceNotCrossSigned`.
-- If the recovery key is lost, `client.ResetCrossSigningAsync()` creates new keys and a new recovery key. Other devices of the account then need the new key once.
+- If the account has none, or its recovery key is lost, `SetUpCrossSigningAsync` creates a new identity, replacing the existing one, and returns its recovery key. Save the key somewhere safe, apart from the store; other devices of the account need it once.
+
+  ```cs
+  string recoveryKey = await client.SetUpCrossSigningAsync(password);
+  ```
+
+`client.EncryptionState` shows where the client stands: `Off` without a store, `NoIdentity`, `DeviceNotSigned` (also reported on `client.Issues` as `DeviceNotCrossSigned`, with the reason) or `Ready`.
 
 > [!WARNING]
 > The encryption code was written by AI, from the Matrix specification. It has been tested locally against a synapse server, but I have not done any real-world testing yet.

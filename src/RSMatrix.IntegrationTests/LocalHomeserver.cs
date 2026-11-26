@@ -6,11 +6,12 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using RSMatrix.Http;
+using RSMatrix.Models;
 
 namespace RSMatrix.IntegrationTests;
 
 /// <summary>Real HTTP fixture, restricted to the explicitly selected local server.</summary>
-internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
+internal sealed class LocalHomeserver : IAsyncDisposable
 {
     internal const string Password = "rsmatrix-test-password";
     /// <summary>Matches registration_shared_secret in Homeserver/homeserver.yaml.</summary>
@@ -18,7 +19,7 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
     private readonly CancellationTokenSource _lifetime;
     private readonly ConcurrentBag<string> _tokens = [];
     private readonly List<MatrixClient> _clients = [];
-    /// <summary>The recovery key each user's first encrypted client created, by user localpart.</summary>
+    /// <summary>The recovery key of each user's cross-signing identity, by user localpart.</summary>
     internal ConcurrentDictionary<string, string> RecoveryKeys { get; } = new();
     private readonly LocalTransport _transport;
     internal Uri BaseUri { get; }
@@ -50,7 +51,7 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
         return uri;
     }
 
-    public HttpClient CreateClient(string name) => new(_transport, disposeHandler: false)
+    private HttpClient CreateHttpClient() => new(_transport, disposeHandler: false)
     {
         // Synapse long-polls /sync for up to 60 seconds. The fixture's lifetime
         // token is the overall deadline; do not accidentally time out each poll.
@@ -58,14 +59,14 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
     };
 
     internal HttpClientParameters Parameters(string? token = null, CancellationToken? cancellationToken = null)
-        => new(this, BaseUri.AbsoluteUri.TrimEnd('/'), token, NullLogger.Instance,
+        => new(CreateHttpClient(), BaseUri.AbsoluteUri.TrimEnd('/'), token, NullLogger.Instance,
             cancellationToken ?? CancellationToken);
 
     internal async Task<HttpClientParameters> LoginAsync(string user)
     {
         var parameters = Parameters();
         var login = await MatrixHelper.PasswordLoginAsync(parameters, $"@{user}:localhost",
-            Password, $"RSMATRIX-{Guid.NewGuid():N}");
+            Password, $"RSMATRIX-{Guid.NewGuid():N}", null);
         parameters.BearerToken = login.AccessToken
             ?? throw new InvalidOperationException("Synapse returned no access token.");
         return parameters;
@@ -89,31 +90,46 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
         return localpart;
     }
 
-    internal Task<MatrixClient> ConnectAsync(string user)
-        => ConnectAsync(user, $"RSMATRIX-{Guid.NewGuid():N}", null, CancellationToken);
+    /// <summary>Logs in a client without a store, which the fixture disposes at the end.</summary>
+    internal Task<MatrixClient> LoginClientAsync(string user)
+        => LoginClientAsync(user, null, deviceId: $"RSMATRIX-{Guid.NewGuid():N}");
 
     /// <summary>
-    /// The lifetime token may end before the fixture's, to restart a client. With encryption, a new recovery key
-    /// goes to <see cref="RecoveryKeys"/>, and the client gets it from there unless <paramref name="getRecoveryKey"/> is given.
+    /// Logs in a client, which the fixture disposes at the end. With a store and <paramref name="crossSign"/>, the device
+    /// gets signed: with the user's key from <see cref="RecoveryKeys"/>, or by setting up an identity for a user without one.
     /// </summary>
-    internal async Task<MatrixClient> ConnectAsync(string user, string deviceId,
-        string? encryptionStoreDirectory, CancellationToken lifetime, string? sessionStoreDirectory = null,
-        Func<string?>? getRecoveryKey = null)
+    internal async Task<MatrixClient> LoginClientAsync(string user, string? storeDirectory, string? deviceId = null,
+        bool crossSign = true, string? recoveryKey = null)
     {
-        var encryption = encryptionStoreDirectory == null ? null : new EncryptionOptions
-        {
-            StoreDirectory = encryptionStoreDirectory,
-            GetRecoveryKeyAsync = _ => Task.FromResult(getRecoveryKey != null ? getRecoveryKey() : RecoveryKeys.GetValueOrDefault(user)),
-            SaveRecoveryKeyAsync = (key, _) =>
-            {
-                RecoveryKeys[user] = key;
-                return Task.CompletedTask;
-            }
-        };
-        var client = await MatrixClient.ConnectAsync($"@{user}:localhost", Password,
-            deviceId, this, lifetime, TestLogger.Create($"{user}/{deviceId[..Math.Min(8, deviceId.Length)]}"),
-            sessionStoreDirectory: sessionStoreDirectory, encryption: encryption);
+        if (crossSign)
+            recoveryKey ??= RecoveryKeys.GetValueOrDefault(user);
+        var client = await MatrixClient.LoginAsync($"@{user}:localhost", Password, CancellationToken, deviceId, null,
+            storeDirectory, BaseUri, CreateLogger(user, deviceId ?? "new"), recoveryKey, CreateHttpClient(),
+            (delay, token) => Task.Delay(delay, token));
+        return await TrackAsync(user, client, crossSign);
+    }
+
+    /// <summary>Resumes the user's session from the store. Signs the device like <see cref="LoginClientAsync(string, string?, string?, bool, string?)"/>.</summary>
+    internal async Task<MatrixClient> ResumeClientAsync(string user, string storeDirectory, bool crossSign = true,
+        string? recoveryKey = null, string? password = null)
+    {
+        if (crossSign)
+            recoveryKey ??= RecoveryKeys.GetValueOrDefault(user);
+        var session = MatrixClient.GetStoredSession(storeDirectory, $"@{user}:localhost")
+            ?? throw new InvalidOperationException($"{storeDirectory} holds no session of {user}.");
+        var client = await MatrixClient.ResumeAsync(session, CancellationToken, password,
+            CreateLogger(user, session.DeviceId), recoveryKey, CreateHttpClient(), (delay, token) => Task.Delay(delay, token));
+        return await TrackAsync(user, client, crossSign);
+    }
+
+    private static ILogger? CreateLogger(string user, string deviceId)
+        => TestLogger.Create($"{user}/{deviceId[..Math.Min(8, deviceId.Length)]}");
+
+    private async Task<MatrixClient> TrackAsync(string user, MatrixClient client, bool crossSign)
+    {
         _clients.Add(client);
+        if (crossSign && client.EncryptionState == EncryptionState.NoIdentity)
+            RecoveryKeys[user] = await client.SetUpCrossSigningAsync(Password);
         return client;
     }
 
@@ -124,21 +140,19 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _lifetime.CancelAsync();
-        // Cancellation stops sync but intentionally does not log out a real client.
-        // Drain buffered events so ChannelReader.Completion can actually complete.
+        // Disposing stops sync but intentionally does not log out a real client.
         foreach (var client in _clients)
         {
             try
             {
-                using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await foreach (var unused in client.Messages.ReadAllAsync(shutdown.Token)) { }
+                await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Sync cleanup: {ex.GetType().Name}: {ex.Message}");
             }
         }
+        await _lifetime.CancelAsync();
         // Cleanup uses a new token, independent of the cancelled sync lifetime.
         foreach (var token in _tokens.Distinct())
         {
@@ -184,15 +198,6 @@ internal sealed class LocalHomeserver : IHttpClientFactory, IAsyncDisposable
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            // v1.4 has no explicit homeserver-URL overload and begins discovery at
-            // https://<user-domain>. Redirect ONLY that request to real Synapse;
-            // no API responses are faked and TLS verification is never disabled.
-            if (request.Method == HttpMethod.Get &&
-                request.RequestUri?.AbsoluteUri == "https://localhost/.well-known/matrix/client")
-            {
-                request.RequestUri = new Uri(baseUri, "/.well-known/matrix/client");
-            }
-
             if (request.RequestUri is not { } uri ||
                 uri.GetLeftPart(UriPartial.Authority) != baseUri.GetLeftPart(UriPartial.Authority))
                 throw new InvalidOperationException("Integration tests refuse non-fixture HTTP destinations.");

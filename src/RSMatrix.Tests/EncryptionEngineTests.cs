@@ -60,12 +60,12 @@ public class EncryptionEngineTests
     }
 
     [Test]
-    public async Task FirstDevice_CreatesSigningKeysAndRecoveryKey_AndSignsItself()
+    public async Task SetUpCrossSigning_CreatesSigningKeysAndRecoveryKey_AndSignsItself()
     {
         using var fixture = await EncryptedRoomFixture.StartAsync();
 
         var recoveryKey = SecretStorage.DecodeRecoveryKey(fixture.SavedRecoveryKeys.Single());
-        await Assert.That(fixture.RecoveryKeyRequests).IsEqualTo(0);
+        await Assert.That(fixture.Context.Client.EncryptionState).IsEqualTo(EncryptionState.Ready);
         var upload = JsonNode.Parse(fixture.Context.Requests.Single(r => r.Path.EndsWith("/keys/device_signing/upload")).Body)!;
         var master = SingleKey(upload["master_key"]!);
         var selfSigning = SingleKey(upload["self_signing_key"]!);
@@ -94,12 +94,14 @@ public class EncryptionEngineTests
     }
 
     [Test]
-    public async Task FailingSaveCallback_StopsBeforeTheServerChanges()
+    public async Task NoIdentity_IsNotReported_AndConnectingCreatesNone()
     {
-        EncryptedRoomFixture? started = null;
-        await Assert.That(async () => started = await EncryptedRoomFixture.StartAsync(f => f.SaveFails = true))
-            .Throws<IOException>();
-        await Assert.That(started).IsNull();
+        using var fixture = await EncryptedRoomFixture.StartAsync(f => f.SetUpCrossSigning = false);
+
+        await Assert.That(fixture.Context.Client.EncryptionState).IsEqualTo(EncryptionState.NoIdentity);
+        await Assert.That(fixture.Context.Requests.Any(r => r.Path.Contains("/keys/device_signing/") ||
+            r.Path.Contains("/keys/signatures/") || r.Path.Contains("/account_data/"))).IsFalse();
+        await Assert.That(ClientIssueTests.ReadAll(fixture.Context.Client).Count).IsEqualTo(0);
     }
 
     [Test]
@@ -113,7 +115,7 @@ public class EncryptionEngineTests
             f.StoreSecret(recoveryKey, "m.cross_signing.self_signing", CryptoPrimitives.ToBase64(identity.SelfSigning.Seed));
         });
 
-        await Assert.That(fixture.RecoveryKeyRequests).IsEqualTo(1);
+        await Assert.That(fixture.Context.Client.EncryptionState).IsEqualTo(EncryptionState.DeviceNotSigned);
         await Assert.That(fixture.Context.Requests.Any(r => r.Path.Contains("/keys/device_signing/") || r.Path.Contains("/keys/signatures/"))).IsFalse();
         var issue = ClientIssueTests.ReadAll(fixture.Context.Client).Single();
         await Assert.That(issue.Kind).IsEqualTo(ClientIssueKind.DeviceNotCrossSigned);
@@ -121,14 +123,17 @@ public class EncryptionEngineTests
     }
 
     [Test]
-    public async Task ExistingIdentity_WithoutSecretStorage_DoesNotAskForTheKey()
+    public async Task ExistingIdentity_WithoutSecretStorage_IsReported()
     {
-        using var fixture = await EncryptedRoomFixture.StartAsync(f => f.OwnIdentity = new TestIdentity());
+        using var fixture = await EncryptedRoomFixture.StartAsync(f =>
+        {
+            f.OwnIdentity = new TestIdentity();
+            f.GivenRecoveryKey = SecretStorage.CreateRecoveryKey();
+        });
 
-        await Assert.That(fixture.RecoveryKeyRequests).IsEqualTo(0);
         var issue = ClientIssueTests.ReadAll(fixture.Context.Client).Single();
         await Assert.That(issue.Kind).IsEqualTo(ClientIssueKind.DeviceNotCrossSigned);
-        await Assert.That(issue.Message.Contains("ResetCrossSigningAsync")).IsTrue();
+        await Assert.That(issue.Message.Contains("SetUpCrossSigningAsync")).IsTrue();
     }
 
     [Test]
@@ -164,7 +169,7 @@ public class EncryptionEngineTests
     }
 
     [Test]
-    public async Task Reset_ReplacesTheKeys_ConfirmedWithThePassword()
+    public async Task SetUpCrossSigning_ReplacesExistingKeys_ConfirmedWithThePassword()
     {
         var identity = new TestIdentity();
         using var fixture = await EncryptedRoomFixture.StartAsync(f =>
@@ -174,7 +179,7 @@ public class EncryptionEngineTests
         });
         ClientIssueTests.ReadAll(fixture.Context.Client);
 
-        await fixture.Context.Client.ResetCrossSigningAsync();
+        var newRecoveryKey = await fixture.Context.Client.SetUpCrossSigningAsync(EncryptedRoomFixture.Password);
 
         var uploads = fixture.Context.Requests.Where(r => r.Path.EndsWith("/keys/device_signing/upload")).ToList();
         await Assert.That(uploads.Count).IsEqualTo(2);
@@ -184,7 +189,10 @@ public class EncryptionEngineTests
         await Assert.That(auth["session"]!.GetValue<string>()).IsEqualTo("uia-session");
         var master = SingleKey(JsonNode.Parse(uploads[1].Body)!["master_key"]!);
         await Assert.That(master).IsNotEqualTo(CryptoPrimitives.ToBase64(identity.Master.PublicKey));
-        await Assert.That(fixture.SavedRecoveryKeys.Count).IsEqualTo(1);
+        await Assert.That(SecretStorage.MatchesKeyDescription(SecretStorage.DecodeRecoveryKey(newRecoveryKey),
+            JsonSerializer.Deserialize<JsonElement>(fixture.AccountData[SecretStorage.KeyType(
+                JsonNode.Parse(fixture.AccountData[SecretStorage.DefaultKeyType])!["key"]!.GetValue<string>())]))).IsTrue();
+        await Assert.That(fixture.Context.Client.EncryptionState).IsEqualTo(EncryptionState.Ready);
         await Assert.That(fixture.Context.Requests.Any(r => r.Path.EndsWith("/keys/signatures/upload"))).IsTrue();
         // A deliberate reset is not reported as a changed identity.
         await Assert.That(ClientIssueTests.ReadAll(fixture.Context.Client).Count).IsEqualTo(0);
@@ -253,9 +261,11 @@ public class EncryptionEngineTests
     }
 
     [Test]
-    public async Task WithheldKey_ExplainsUndecryptableMessage()
+    [Arguments(true)]
+    [Arguments(false)]
+    public async Task WithheldKey_ExplainsUndecryptableMessage(bool hasIdentity)
     {
-        using var fixture = await EncryptedRoomFixture.StartAsync();
+        using var fixture = await EncryptedRoomFixture.StartAsync(f => f.SetUpCrossSigning = hasIdentity);
         await fixture.Context.Process("""
             {"next_batch":"next","to_device":{"events":[{"type":"m.room_key.withheld","sender":"@alice:example.org",
               "content":{"algorithm":"m.megolm.v1.aes-sha2","room_id":"!room:example.org","session_id":"withheld",
@@ -267,6 +277,7 @@ public class EncryptionEngineTests
         var issue = ClientIssueTests.ReadAll(fixture.Context.Client).Single();
         await Assert.That(issue.Message.Contains("withheld the key")).IsTrue();
         await Assert.That(issue.Message.Contains("m.unverified")).IsTrue();
+        await Assert.That(issue.Message.Contains("SetUpCrossSigningAsync")).IsEqualTo(!hasIdentity);
     }
 
     [Test]
@@ -327,11 +338,11 @@ public class EncryptionEngineTests
         private int _sentCount;
 
         public const string Password = "bot-password";
-        /// <summary>What the recovery key callback returns.</summary>
+        /// <summary>The recovery key given when connecting.</summary>
         public string? GivenRecoveryKey { get; set; }
-        public int RecoveryKeyRequests { get; private set; }
+        /// <summary>Whether to create an identity after connecting, when the account has none.</summary>
+        public bool SetUpCrossSigning { get; set; } = true;
         public List<string> SavedRecoveryKeys { get; } = [];
-        public bool SaveFails { get; set; }
         /// <summary>The server asks for the password before accepting signing keys, as when they replace existing ones.</summary>
         public bool RequirePasswordForSigningKeys { get; set; }
 
@@ -340,26 +351,16 @@ public class EncryptionEngineTests
             var fixture = new EncryptedRoomFixture();
             configure?.Invoke(fixture);
             fixture.Context.Send = (request, _) => Task.FromResult(fixture.Respond(request));
-            fixture.Store = EncryptionEngine.OpenStore(fixture._directory, BotUser, "BOT");
-            var options = new EncryptionOptions
-            {
-                StoreDirectory = fixture._directory,
-                GetRecoveryKeyAsync = _ =>
-                {
-                    fixture.RecoveryKeyRequests++;
-                    return Task.FromResult(fixture.GivenRecoveryKey);
-                },
-                SaveRecoveryKeyAsync = (key, _) =>
-                {
-                    if (fixture.SaveFails)
-                        throw new IOException("Disk full");
-                    fixture.SavedRecoveryKeys.Add(key);
-                    return Task.CompletedTask;
-                }
-            };
+            fixture.Store = EncryptionStore.Open(fixture._directory, BotUser, "BOT");
             try
             {
-                fixture.Context.Client.Encryption = await EncryptionEngine.StartAsync(fixture.Store, fixture.Context.Client, options, Password);
+                fixture.Context.Client.Encryption = await EncryptionEngine.StartAsync(fixture.Store, fixture.Context.Client, fixture.GivenRecoveryKey);
+                if (fixture.OwnIdentity == null && fixture.SetUpCrossSigning)
+                {
+                    // Connecting reported the missing identity; the explicit setup resolves it.
+                    ClientIssueTests.ReadAll(fixture.Context.Client);
+                    fixture.SavedRecoveryKeys.Add(await fixture.Context.Client.SetUpCrossSigningAsync(Password));
+                }
             }
             catch
             {
@@ -483,8 +484,6 @@ public class EncryptionEngineTests
 
         public void Dispose()
         {
-            Context.Client.Encryption?.Dispose();
-            Store?.Dispose();
             Context.Dispose();
             if (Directory.Exists(_directory))
                 Directory.Delete(_directory, true);

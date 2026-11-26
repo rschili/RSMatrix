@@ -116,7 +116,7 @@ public class RoomEncryptionTests
     public async Task WithoutEncryption_PlaintextIsMarkedUnencrypted_AndEncryptedEventsAreSkipped()
     {
         using var context = new MatrixTestContext();
-        await Assert.That(context.Client.IsEncryptionEnabled).IsFalse();
+        await Assert.That(context.Client.EncryptionState).IsEqualTo(EncryptionState.Off);
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""");
         await context.Process("""
         {"next_batch":"next","rooms":{"join":{"!room:example.org":{"timeline":{"events":[

@@ -41,66 +41,50 @@ internal sealed class InboundGroupSession
 }
 
 /// <summary>
-/// One JSON file in a caller-chosen directory. A lock file prevents two processes
-/// from using the same device keys at once.
+/// One JSON file in the user's folder of the store directory. The session store's lock keeps other clients away.
 /// </summary>
-internal sealed class EncryptionStore : IDisposable
+internal sealed class EncryptionStore
 {
-    private const string StoreFileName = "rsmatrix-encryption.json";
-    private const string LockFileName = "rsmatrix-encryption.lock";
+    private const string StoreFileName = "encryption.json";
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly string _path;
-    private readonly FileStream _lock;
 
     public EncryptionStoreData Data { get; }
-    /// <summary>True if the store was created now, rather than loaded from disk.</summary>
-    public bool IsNew { get; }
 
-    private EncryptionStore(string path, FileStream fileLock, EncryptionStoreData data, bool isNew)
+    private EncryptionStore(string path, EncryptionStoreData data)
     {
         _path = path;
-        _lock = fileLock;
         Data = data;
-        IsNew = isNew;
     }
 
-    /// <summary>Opens or creates the store. Throws if it belongs to another user or device, or is in use.</summary>
-    public static EncryptionStore Open(string directory, string userId, string deviceId)
+    /// <summary>Creates a store with a new account, replacing what the directory held before.</summary>
+    public static EncryptionStore Create(string directory, string userId, string deviceId)
     {
         PrivateFiles.CreateDirectory(directory);
-        var fileLock = PrivateFiles.Lock(Path.Combine(directory, LockFileName),
-            $"The encryption store in {directory} is already in use by another client.");
-
-        try
-        {
-            var path = Path.Combine(directory, StoreFileName);
-            if (!File.Exists(path))
-            {
-                var created = new EncryptionStoreData { UserId = userId, DeviceId = deviceId, Account = OlmAccount.Create() };
-                var store = new EncryptionStore(path, fileLock, created, isNew: true);
-                store.Save();
-                return store;
-            }
-
-            var data = JsonSerializer.Deserialize<EncryptionStoreData>(File.ReadAllText(path), JsonOptions)
-                ?? throw new InvalidOperationException($"The encryption store {path} is empty.");
-            if (data.Version != 1)
-                throw new InvalidOperationException($"The encryption store {path} has unsupported version {data.Version}.");
-            if (data.UserId != userId || data.DeviceId != deviceId)
-                throw new InvalidOperationException(
-                    $"The encryption store {path} belongs to {data.UserId} with device {data.DeviceId}. " +
-                    "Use that device ID, or a different directory for a new device.");
-            return new EncryptionStore(path, fileLock, data, isNew: false);
-        }
-        catch
-        {
-            fileLock.Dispose();
-            throw;
-        }
+        var store = new EncryptionStore(Path.Combine(directory, StoreFileName),
+            new EncryptionStoreData { UserId = userId, DeviceId = deviceId, Account = OlmAccount.Create() });
+        store.Save();
+        return store;
     }
 
-    public void Save() => PrivateFiles.WriteAtomically(_path, stream => JsonSerializer.Serialize(stream, Data, JsonOptions));
+    /// <summary>Loads the store, or creates it if there is none. Throws if it belongs to another user or device.</summary>
+    public static EncryptionStore Open(string directory, string userId, string deviceId)
+    {
+        var path = Path.Combine(directory, StoreFileName);
+        if (!File.Exists(path))
+            return Create(directory, userId, deviceId);
 
-    public void Dispose() => _lock.Dispose();
+        var data = JsonSerializer.Deserialize<EncryptionStoreData>(File.ReadAllText(path), JsonOptions)
+            ?? throw new InvalidOperationException($"The encryption store {path} is empty.");
+        if (data.Version != 1)
+            throw new InvalidOperationException($"The encryption store {path} has unsupported version {data.Version}.");
+        if (data.UserId != userId || data.DeviceId != deviceId)
+            throw new InvalidOperationException($"The encryption store {path} belongs to {data.UserId} with device {data.DeviceId}.");
+        return new EncryptionStore(path, data);
+    }
+
+    public static void Delete(string directory) => File.Delete(Path.Combine(directory, StoreFileName));
+
+    public void Save() => PrivateFiles.WriteAtomically(_path, stream => JsonSerializer.Serialize(stream, Data, JsonOptions));
 }

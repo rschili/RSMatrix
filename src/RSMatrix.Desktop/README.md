@@ -15,7 +15,7 @@ make desktop DESKTOP_USER=bob       # a second instance, e.g. to try encryption
 
 `make desktop` starts with fresh local data each time, because a recreated server no longer knows the old device. Run the project without arguments to use the normal data directory and the sign-in dialog.
 
-Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`, `--homeserver URL`, `--recovery-key-file PATH`, `--verbose`. The app keeps the account's recovery key in that file, by default in the account's data directory: RSMatrix saves a new key there when it sets up cross-signing, and reads it when a new device needs it. `make desktop` keeps it next to the data directory, so it survives the fresh start. With a password, the app signs in right away. Logs go to the console.
+Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`, `--homeserver URL`, `--recovery-key-file PATH`, `--verbose`. The app reads the account's recovery key from that file, by default in the account's data directory, when a new device needs it to be cross-signed. `make desktop` keeps it next to the data directory, so it survives the fresh start. The app doesn't set up cross-signing for an account without it yet. With a password, the app signs in right away. Without one, it resumes the stored session of the last account and only asks for the password if the server ended the session. Logs go to the console.
 
 ## Settings
 
@@ -44,8 +44,6 @@ The app works around these, and each would make it simpler or better:
 - **Room names**: no computed display name. The app follows the spec's order, but without the member counts from the room summary.
 - **Formatted messages**: `ReceivedTextMessage` has `Body` only, so `formatted_body` is lost.
 - **Images and other media**: `m.image` events are dropped, and there is no media download.
-- **Homeserver URL**: discovery always starts at `https://<user domain>`. A message handler answers the well-known request instead.
-- **Resuming**: a stored session still needs the password, so the app can't sign in on start.
 - **Sign out**: there is no logout, so disconnecting leaves the device signed in.
 - **Connection state**: `IsSyncing` and `LastSyncAt` have no change notifications, so they are polled.
 - **Read state**: no unread counts or read markers from the server. Only messages after the initial sync count as unread.

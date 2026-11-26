@@ -45,20 +45,17 @@ public sealed partial class LoginViewModel : ObservableObject
     [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
 
-    /// <summary>
-    /// Shown after a failed sign-in. The server may have dropped this device, for example when a local
-    /// test server was recreated, and then only a new device helps.
-    /// </summary>
+    /// <summary>True while signing in or resuming the stored session.</summary>
     [ObservableProperty]
-    public partial bool CanResetDevice { get; private set; }
+    [NotifyCanExecuteChangedFor(nameof(SignInCommand))]
+    public partial bool IsConnecting { get; private set; }
 
-    private bool CanSignIn() => !string.IsNullOrWhiteSpace(UserId) && !string.IsNullOrEmpty(Password);
+    private bool CanSignIn() => !string.IsNullOrWhiteSpace(UserId) && !string.IsNullOrEmpty(Password) && !IsConnecting;
 
     [RelayCommand(CanExecute = nameof(CanSignIn), IncludeCancelCommand = true)]
     private async Task SignInAsync(CancellationToken cancellationToken)
     {
         ErrorMessage = null;
-        CanResetDevice = false;
         var userId = UserId.Trim();
         if (!userId.StartsWith('@') || !userId.Contains(':'))
         {
@@ -78,29 +75,56 @@ public sealed partial class LoginViewModel : ObservableObject
         settings.LastUserId = userId;
         settings.LastHomeserver = homeserver?.ToString();
         _localData.SaveSettings(settings);
+        await ConnectAsync(new MatrixLogin(userId, Password, homeserver, RecoveryKeyFile), cancellationToken);
+    }
+
+    /// <summary>Continues the stored session of the user in the form, if there is one, without asking for the password.</summary>
+    public void ResumeStoredSession()
+    {
         try
         {
-            var account = _localData.GetAccount(userId);
-            var session = await MatrixChatSession.ConnectAsync(new MatrixLogin(userId, Password, homeserver, RecoveryKeyFile), account,
-                _loggerFactory, cancellationToken);
+            var userId = UserId.Trim();
+            if (userId.Length > 0 && MatrixClient.GetStoredSession(_localData.StoreDirectory, userId) != null)
+                ResumeCommand.Execute(null);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    [RelayCommand(IncludeCancelCommand = true)]
+    private Task ResumeAsync(CancellationToken cancellationToken)
+        => ConnectAsync(new MatrixLogin(UserId.Trim(), null, null, RecoveryKeyFile), cancellationToken);
+
+    private async Task ConnectAsync(MatrixLogin login, CancellationToken cancellationToken)
+    {
+        IsConnecting = true;
+        try
+        {
+            var session = await MatrixChatSession.ConnectAsync(login, _localData, _loggerFactory, cancellationToken);
+            // The server may spell the user ID differently, and the stored session is kept under its spelling.
+            var settings = _localData.LoadSettings();
+            settings.LastUserId = session.CurrentUser.UserId;
+            _localData.SaveSettings(settings);
             Password = "";
             _onConnected(session);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+        catch (PasswordRequiredException)
+        {
+            ErrorMessage = "The server ended the session. Enter the password to continue.";
+        }
         catch (Exception ex)
         {
             ErrorMessage = ex.Message;
-            CanResetDevice = true;
         }
-    }
-
-    [RelayCommand]
-    private async Task ResetDeviceAsync()
-    {
-        _localData.ResetAccount(UserId.Trim());
-        await SignInCommand.ExecuteAsync(null);
+        finally
+        {
+            IsConnecting = false;
+        }
     }
 
     [RelayCommand]
@@ -112,6 +136,8 @@ public sealed partial class LoginViewModel : ObservableObject
     {
         if (SignInCommand.IsRunning)
             SignInCommand.Cancel();
+        if (ResumeCommand.IsRunning)
+            ResumeCommand.Cancel();
         _onCancelled();
     }
 

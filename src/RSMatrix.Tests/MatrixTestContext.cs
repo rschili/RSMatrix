@@ -15,7 +15,7 @@ internal sealed class MatrixTestContext : IDisposable
     public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? Send { get; set; }
     private readonly Handler _handler;
 
-    public MatrixTestContext(ILogger? logger = null)
+    public MatrixTestContext(ILogger? logger = null, MatrixDiagnostics? diagnostics = null)
     {
         _handler = new Handler(async (request, token) =>
         {
@@ -25,8 +25,8 @@ internal sealed class MatrixTestContext : IDisposable
         });
         UserId.TryParse("@bot:example.org", out var user);
         Client = MatrixClient.CreateForTesting(new HttpClientParameters(
-            new Factory(_handler), "https://example.org", "token", logger ?? new RecordingLogger(Logs), Lifetime.Token)
-            { RetryDelayAsync = (_, _) => Task.CompletedTask }, user!);
+            new HttpClient(_handler, disposeHandler: false), "https://example.org", "token", logger ?? new RecordingLogger(Logs), Lifetime.Token)
+            { RetryDelayAsync = (_, _) => Task.CompletedTask, Diagnostics = diagnostics ?? MatrixDiagnostics.Off }, user!);
     }
 
     public Room Room(string id = "!room:example.org")
@@ -44,11 +44,6 @@ internal sealed class MatrixTestContext : IDisposable
     {
         Lifetime.Dispose();
         _handler.Dispose();
-    }
-
-    private sealed class Factory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler

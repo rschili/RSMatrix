@@ -39,7 +39,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     public partial SettingsViewModel? Settings { get; private set; }
 
-    /// <summary>Applies command line options: sample mode, or a prefilled login that signs in right away.</summary>
+    /// <summary>
+    /// Applies command line options: sample mode, or a prefilled login that signs in right away. Otherwise resumes the
+    /// stored session of the last user.
+    /// </summary>
     public void Start(StartupOptions options)
     {
         if (options.UseSample)
@@ -58,6 +61,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             login.Password = options.Password;
             login.SignInCommand.Execute(null);
+        }
+        else
+        {
+            login.ResumeStoredSession();
         }
     }
 

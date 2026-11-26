@@ -12,14 +12,14 @@ public class SessionTests
     {
         await using var server = new LocalHomeserver();
         var store = NewDirectory();
-        var device = $"ALICE{Guid.NewGuid():N}";
         try
         {
             // Alice is the only test user no other test connects with the client. Each connect sets
             // presence, which Synapse rate-limits per user.
             var bob = await server.LoginAsync("bob");
-            using var firstLifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken);
-            var first = await server.ConnectAsync("alice", device, null, firstLifetime.Token, store);
+            // Alice is a shared test user, so the test must not give her a cross-signing identity.
+            // The server creates the device ID, and the store keeps it.
+            var first = await server.LoginClientAsync("alice", store, crossSign: false);
             first.AutoJoinOnInvite = true;
 
             var created = await LocalHomeserver.RequestAsync(bob, "/_matrix/client/v3/createRoom", HttpMethod.Post,
@@ -27,11 +27,12 @@ public class SessionTests
             var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(created.GetProperty("room_id").GetString()!)}";
             var online = await SendTextAsync(bob, roomPath, "before restart");
             await ReceiveAsync(first, online, server.CancellationToken);
-            await StopAsync(first, firstLifetime);
-            var tokenBefore = ReadSession(store, device).AccessToken;
+            await first.DisposeAsync();
+            var tokenBefore = ReadSession(store).AccessToken;
 
             var offline = await SendTextAsync(bob, roomPath, "while offline");
-            var restarted = await server.ConnectAsync("alice", device, null, server.CancellationToken, store);
+            // An intact store resumes the session without the password.
+            var restarted = await server.ResumeClientAsync("alice", store, crossSign: false);
             var received = await ReceiveAsync(restarted, offline, server.CancellationToken);
             await Assert.That(received.Body).IsEqualTo("while offline");
             await Assert.That(received.Room.Users.ContainsKey("@bob:localhost")).IsTrue();
@@ -48,18 +49,16 @@ public class SessionTests
     {
         await using var server = new LocalHomeserver();
         var store = NewDirectory();
-        var device = $"ALICE{Guid.NewGuid():N}";
         try
         {
-            using var firstLifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken);
-            var first = await server.ConnectAsync("alice", device, null, firstLifetime.Token, store);
+            var first = await server.LoginClientAsync("alice", store, crossSign: false);
             await WaitForSyncAsync(first, server.CancellationToken);
-            await StopAsync(first, firstLifetime);
+            await first.DisposeAsync();
 
-            using (var session = SessionStore.Open(store, "@alice:localhost", device))
+            using (var session = SessionStore.Open(store, "@alice:localhost"))
             {
                 var stored = session.Session!;
-                session.Save(new StoredSession
+                session.Save(new SessionData
                 {
                     UserId = stored.UserId,
                     DeviceId = stored.DeviceId,
@@ -69,11 +68,10 @@ public class SessionTests
                 });
             }
 
-            using var secondLifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken);
-            var restarted = await server.ConnectAsync("alice", device, null, secondLifetime.Token, store);
+            var restarted = await server.ResumeClientAsync("alice", store, crossSign: false);
             await WaitForSyncAsync(restarted, server.CancellationToken);
-            await StopAsync(restarted, secondLifetime);
-            var syncToken = ReadSession(store, device).SyncToken;
+            await restarted.DisposeAsync();
+            var syncToken = ReadSession(store).SyncToken;
             await Assert.That(syncToken).IsNotNull();
             await Assert.That(syncToken).IsNotEqualTo("m1234~5.6");
         }
@@ -83,11 +81,7 @@ public class SessionTests
         }
     }
 
-    private static StoredSession ReadSession(string store, string device)
-    {
-        using var session = SessionStore.Open(store, "@alice:localhost", device);
-        return session.Session!;
-    }
+    private static SessionData ReadSession(string store) => SessionStore.Read(store, "@alice:localhost")!;
 
     private static async Task<string> SendTextAsync(HttpClientParameters sender, string roomPath, string body)
     {
@@ -104,13 +98,6 @@ public class SessionTests
                 await client.Messages.Completion; // surfaces a sync failure
             await Task.Delay(100, cancellationToken);
         }
-    }
-
-    /// <summary>Stops the client and waits until its session file is released.</summary>
-    private static async Task StopAsync(MatrixClient client, CancellationTokenSource lifetime)
-    {
-        await lifetime.CancelAsync();
-        await foreach (var unused in client.Messages.ReadAllAsync(CancellationToken.None)) { }
     }
 
     private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, string eventId,

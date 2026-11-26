@@ -9,7 +9,7 @@ namespace RSMatrix.IntegrationTests;
 public class CrossSigningTests
 {
     [Test]
-    public async Task SigningKeys_AreCreatedOnce_AndEveryDeviceWithTheRecoveryKeyIsSigned()
+    public async Task LoggingInCreatesNoIdentity_SetUpOnce_AndEveryDeviceWithTheRecoveryKeyIsSigned()
     {
         await using var server = new LocalHomeserver();
         var user = await server.RegisterUserAsync("dana");
@@ -19,38 +19,38 @@ public class CrossSigningTests
         {
             var observer = await server.LoginAsync("alice");
             var firstDevice = $"FIRST{Guid.NewGuid():N}";
-            using (var firstLifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken))
-            {
-                var first = await server.ConnectAsync(user, firstDevice, Path.Combine(storeRoot, "first"), firstLifetime.Token,
-                    getRecoveryKey: () => throw new InvalidOperationException("A new account must not ask for a recovery key."));
-                await Assert.That(ReadIssues(first).Count).IsEqualTo(0);
-                await firstLifetime.CancelAsync();
-                await foreach (var unused in first.Messages.ReadAllAsync(server.CancellationToken)) { }
-            }
-            await Assert.That(server.RecoveryKeys.ContainsKey(user)).IsTrue();
+            var firstStore = Path.Combine(storeRoot, "first");
+            var first = await server.LoginClientAsync(user, firstStore, firstDevice, crossSign: false);
+            await Assert.That(ReadIssues(first).Count).IsEqualTo(0);
+            await Assert.That(first.EncryptionState).IsEqualTo(EncryptionState.NoIdentity);
+            await Assert.That(CrossSigning.ReadIdentity(await QueryKeysAsync(observer, userId), userId)).IsNull();
+
+            server.RecoveryKeys[user] = await first.SetUpCrossSigningAsync(LocalHomeserver.Password);
+            await Assert.That(first.EncryptionState).IsEqualTo(EncryptionState.Ready);
+            await first.DisposeAsync();
             var identity = await QueryIdentityAsync(observer, userId);
             await Assert.That(await IsCrossSignedAsync(observer, userId, firstDevice)).IsTrue();
 
-            // A signed device restarts without being asked for the key.
-            var restarted = await server.ConnectAsync(user, firstDevice, Path.Combine(storeRoot, "first"), server.CancellationToken,
-                getRecoveryKey: () => throw new InvalidOperationException("A signed device must not ask for a recovery key."));
+            // A signed device restarts without needing the key.
+            var restarted = await server.ResumeClientAsync(user, firstStore, crossSign: false);
             await Assert.That(ReadIssues(restarted).Count).IsEqualTo(0);
+            await Assert.That(restarted.EncryptionState).IsEqualTo(EncryptionState.Ready);
 
             var secondDevice = $"SECOND{Guid.NewGuid():N}";
-            var second = await server.ConnectAsync(user, secondDevice, Path.Combine(storeRoot, "second"), server.CancellationToken);
+            var second = await server.LoginClientAsync(user, Path.Combine(storeRoot, "second"), secondDevice);
             await Assert.That(ReadIssues(second).Count).IsEqualTo(0);
             await Assert.That(await IsCrossSignedAsync(observer, userId, secondDevice)).IsTrue();
             await Assert.That((await QueryIdentityAsync(observer, userId)).MasterKey).IsEqualTo(identity.MasterKey);
 
             var thirdDevice = $"THIRD{Guid.NewGuid():N}";
-            var third = await server.ConnectAsync(user, thirdDevice, Path.Combine(storeRoot, "third"), server.CancellationToken,
-                getRecoveryKey: () => null);
+            var third = await server.LoginClientAsync(user, Path.Combine(storeRoot, "third"), thirdDevice, crossSign: false);
             await Assert.That(ReadIssues(third).Single().Kind).IsEqualTo(ClientIssueKind.DeviceNotCrossSigned);
+            await Assert.That(third.EncryptionState).IsEqualTo(EncryptionState.DeviceNotSigned);
             await Assert.That(await IsCrossSignedAsync(observer, userId, thirdDevice)).IsFalse();
 
             var wrongKey = SecretStorage.CreateRecoveryKey();
-            await Assert.That(async () => await server.ConnectAsync(user, $"FOURTH{Guid.NewGuid():N}", Path.Combine(storeRoot, "fourth"),
-                server.CancellationToken, getRecoveryKey: () => wrongKey))
+            await Assert.That(async () => await server.LoginClientAsync(user, Path.Combine(storeRoot, "fourth"),
+                recoveryKey: wrongKey))
                 .Throws<InvalidOperationException>().WithMessageContaining("does not match");
         }
         finally
@@ -61,7 +61,7 @@ public class CrossSigningTests
     }
 
     [Test]
-    public async Task Reset_ReplacesLostRecoveryKey_AndOtherDevicesNeedTheNewOne()
+    public async Task SetUp_ReplacesLostRecoveryKey_AndOtherDevicesNeedTheNewOne()
     {
         await using var server = new LocalHomeserver();
         var user = await server.RegisterUserAsync("erin");
@@ -72,29 +72,24 @@ public class CrossSigningTests
             var observer = await server.LoginAsync("alice");
             var firstDevice = $"FIRST{Guid.NewGuid():N}";
             var firstStore = Path.Combine(storeRoot, "first");
-            using (var firstLifetime = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken))
-            {
-                var first = await server.ConnectAsync(user, firstDevice, firstStore, firstLifetime.Token);
-                await firstLifetime.CancelAsync();
-                await foreach (var unused in first.Messages.ReadAllAsync(server.CancellationToken)) { }
-            }
+            var first = await server.LoginClientAsync(user, firstStore, firstDevice);
+            await first.DisposeAsync();
             var firstKey = server.RecoveryKeys[user];
             var oldMaster = (await QueryIdentityAsync(observer, userId)).MasterKey;
 
-            // The key got lost: a new device can't sign itself and resets instead.
+            // The key got lost: a new device can't sign itself and sets up a new identity instead.
             var secondDevice = $"SECOND{Guid.NewGuid():N}";
-            var second = await server.ConnectAsync(user, secondDevice, Path.Combine(storeRoot, "second"), server.CancellationToken,
-                getRecoveryKey: () => null);
+            var second = await server.LoginClientAsync(user, Path.Combine(storeRoot, "second"), secondDevice, crossSign: false);
             await Assert.That(await IsCrossSignedAsync(observer, userId, secondDevice)).IsFalse();
-            await second.ResetCrossSigningAsync();
+            server.RecoveryKeys[user] = await second.SetUpCrossSigningAsync(LocalHomeserver.Password);
 
             await Assert.That(server.RecoveryKeys[user]).IsNotEqualTo(firstKey);
             await Assert.That((await QueryIdentityAsync(observer, userId)).MasterKey).IsNotEqualTo(oldMaster);
             await Assert.That(await IsCrossSignedAsync(observer, userId, secondDevice)).IsTrue();
             await Assert.That(await IsCrossSignedAsync(observer, userId, firstDevice)).IsFalse();
 
-            // The first device is signed again when it connects with the new key.
-            var restarted = await server.ConnectAsync(user, firstDevice, firstStore, server.CancellationToken);
+            // The first device is signed again when it resumes with the new key.
+            var restarted = await server.ResumeClientAsync(user, firstStore);
             await Assert.That(ReadIssues(restarted).Single().Kind).IsEqualTo(ClientIssueKind.IdentityChanged);
             await Assert.That(await IsCrossSignedAsync(observer, userId, firstDevice)).IsTrue();
         }
@@ -115,11 +110,11 @@ public class CrossSigningTests
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}", Path.Combine(storeRoot, "bob"), server.CancellationToken);
-            var carol = await server.ConnectAsync(carolUser, $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol"), server.CancellationToken);
+            var bob = await server.LoginClientAsync(bobUser, Path.Combine(storeRoot, "bob"));
+            var carol = await server.LoginClientAsync(carolUser, Path.Combine(storeRoot, "carol"));
             // Carol's second device has no recovery key, so it stays unsigned.
-            var carolUnsigned = await server.ConnectAsync(carolUser, $"CAROL{Guid.NewGuid():N}", Path.Combine(storeRoot, "carol-unsigned"),
-                server.CancellationToken, getRecoveryKey: () => null);
+            var carolUnsigned = await server.LoginClientAsync(carolUser, Path.Combine(storeRoot, "carol-unsigned"),
+                crossSign: false);
             await Assert.That(ReadIssues(carolUnsigned).Single().Kind).IsEqualTo(ClientIssueKind.DeviceNotCrossSigned);
             var (roomPath, bobRoom) = await CreateEncryptedRoomAsync(alice, bob, [carol, carolUnsigned],
                 new { algorithm = "m.megolm.v1.aes-sha2" }, server.CancellationToken);

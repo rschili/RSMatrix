@@ -8,13 +8,18 @@ using RSFlowControl;
 namespace RSMatrix.Http;
 internal record HttpClientParameters
 {
-    public IHttpClientFactory Factory { get; init; }
+    public HttpClient HttpClient { get; init; }
     public string BaseUri { get; set; }
     public string? BearerToken { get; set; }
     public ILogger Logger { get; init; }
     public LeakyBucket? RateLimiter { get; set; }
 
     public CancellationToken CancellationToken { get; init; }
+
+    /// <summary>Set when the owning client is disposed; new requests throw <see cref="ObjectDisposedException"/>.</summary>
+    public bool IsDisposed { get; set; }
+
+    public MatrixDiagnostics Diagnostics { get; init; } = MatrixDiagnostics.Off;
 
     // Per-client test seam: production delays are cancellable, tests need not sleep.
     internal Func<TimeSpan, CancellationToken, Task> RetryDelayAsync { get; init; }
@@ -27,9 +32,9 @@ internal record HttpClientParameters
 
     internal string NextTransactionId() => $"{_txnPrefix}-{Interlocked.Increment(ref _txnId)}";
 
-    public HttpClientParameters(IHttpClientFactory factory, string baseUri, string? bearerToken, ILogger logger, CancellationToken cancellationToken)
+    public HttpClientParameters(HttpClient httpClient, string baseUri, string? bearerToken, ILogger logger, CancellationToken cancellationToken)
     {
-        Factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        HttpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         BaseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
         CancellationToken = cancellationToken;
@@ -43,8 +48,24 @@ internal static class HttpClientHelper
     public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
     {
         using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit).ConfigureAwait(false);
-        using var contentStream = await response.Content.ReadAsStreamAsync(parameters.CancellationToken).ConfigureAwait(false);
-        var result = await JsonSerializer.DeserializeAsync<TResponse>(contentStream, cancellationToken: parameters.CancellationToken).ConfigureAwait(false);
+        TResponse? result;
+        var diagnostics = parameters.Diagnostics;
+        if (diagnostics.Mode == DiagnosticsMode.Off)
+        {
+            using var contentStream = await response.Content.ReadAsStreamAsync(parameters.CancellationToken).ConfigureAwait(false);
+            result = await JsonSerializer.DeserializeAsync<TResponse>(contentStream, cancellationToken: parameters.CancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var body = await response.Content.ReadAsByteArrayAsync(parameters.CancellationToken).ConfigureAwait(false);
+            diagnostics.LogBody(parameters.Logger, "Response", path, body);
+            result = JsonSerializer.Deserialize<TResponse>(body);
+            if (result != null)
+            {
+                using var document = JsonDocument.Parse(body);
+                diagnostics.ReportUnknownFields<TResponse>(parameters.Logger, document.RootElement);
+            }
+        }
         if (result != null)
             return result;
 
@@ -55,12 +76,18 @@ internal static class HttpClientHelper
     public static async Task SendAsync(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
     {
         using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit).ConfigureAwait(false);
+        if (parameters.Diagnostics.Mode == DiagnosticsMode.Verbose)
+        {
+            var body = await response.Content.ReadAsByteArrayAsync(parameters.CancellationToken).ConfigureAwait(false);
+            parameters.Diagnostics.LogBody(parameters.Logger, "Response", path, body);
+        }
     }
 
     private static async Task<HttpResponseMessage> SendRequestAsync(HttpClientParameters parameters, string relativePath, HttpMethod? method, HttpContent? content, bool ignoreRateLimit)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentException.ThrowIfNullOrEmpty(relativePath);
+        ObjectDisposedException.ThrowIf(parameters.IsDisposed, typeof(MatrixClient));
         var fullPath = string.Concat(parameters.BaseUri, relativePath);
         var requestMethod = method ?? HttpMethod.Get;
         var debugPath = $"{requestMethod} {fullPath}";
@@ -71,8 +98,9 @@ internal static class HttpClientHelper
         using var originalContent = content;
         var body = content == null ? null : await content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
         var contentHeaders = content?.Headers.Select(h => KeyValuePair.Create(h.Key, h.Value.ToArray())).ToArray();
-        using var client = parameters.Factory.CreateClient("MatrixClient");
-        client.MaxResponseContentBufferSize = 1024 * 1024 * 2; // 2 MB
+        if (body != null)
+            parameters.Diagnostics.LogBody(parameters.Logger, "Request", debugPath, body);
+        var client = parameters.HttpClient;
         var rateLimitCount = 0;
 
         while (true)

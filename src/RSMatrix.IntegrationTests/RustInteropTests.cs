@@ -26,8 +26,7 @@ public class RustInteropTests
         try
         {
             var alice = await server.LoginAsync("alice");
-            var bob = await server.ConnectAsync(bobUser, $"BOB{Guid.NewGuid():N}",
-                Path.Combine(storeRoot, "bob"), server.CancellationToken);
+            var bob = await server.LoginClientAsync(bobUser, Path.Combine(storeRoot, "bob"));
             bob.AutoJoinOnInvite = true;
 
             var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new

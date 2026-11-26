@@ -115,15 +115,10 @@ public class HttpRetryTests
     }
 
     private static HttpClientParameters Parameters(HttpMessageHandler handler)
-        => new(new Factory(handler), "https://example.org", "test-token", NullLogger.Instance, CancellationToken.None);
+        => new(new HttpClient(handler, disposeHandler: false), "https://example.org", "test-token", NullLogger.Instance, CancellationToken.None);
 
     private static HttpResponseMessage Json(HttpStatusCode status, string body)
         => new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
-
-    private sealed class Factory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
-    }
 
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {

@@ -146,16 +146,11 @@ public class StateEventTests
     {
         var logger = new RecordingLogger();
         UserId.TryParse("@bot:example.org", out var user);
-        var parameters = new HttpClientParameters(new StubFactory(), "https://example.org", "token", logger, CancellationToken.None);
+        var parameters = new HttpClientParameters(new HttpClient(new StubHandler()), "https://example.org", "token", logger, CancellationToken.None);
         return (MatrixClient.CreateForTesting(parameters, user!), logger);
     }
 
     // Receipts must never reach a real server during these tests.
-    private sealed class StubFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(new StubHandler());
-    }
-
     private sealed class StubHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

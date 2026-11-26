@@ -13,7 +13,7 @@ public class HomeserverTests
         await using var server = new LocalHomeserver();
         var invalid = await Assert.ThrowsAsync<MatrixResponseException>(() =>
             MatrixHelper.PasswordLoginAsync(server.Parameters(), "@alice:localhost",
-                "not-the-test-password", $"RSMATRIX-{Guid.NewGuid():N}"));
+                "not-the-test-password", $"RSMATRIX-{Guid.NewGuid():N}", null));
         await Assert.That(invalid!.ErrorCode).IsEqualTo("M_FORBIDDEN");
         await Assert.That(invalid.StatusCode).IsEqualTo(HttpStatusCode.Forbidden);
 
@@ -21,9 +21,7 @@ public class HomeserverTests
         var who = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/account/whoami", HttpMethod.Get);
         await Assert.That(who.GetProperty("user_id").GetString()).IsEqualTo("@alice:localhost");
 
-        // No logout API exists in v1.4; use the public low-level HTTP helper.
-        await HttpClientHelper.SendAsync(alice, "/_matrix/client/v3/logout",
-            HttpMethod.Post, JsonContent.Create(new { }));
+        await MatrixHelper.LogoutAsync(alice);
         var revoked = await Assert.ThrowsAsync<MatrixResponseException>(() =>
             LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/account/whoami", HttpMethod.Get));
         await Assert.That(revoked!.ErrorCode).IsEqualTo("M_UNKNOWN_TOKEN");
@@ -35,7 +33,7 @@ public class HomeserverTests
     {
         await using var server = new LocalHomeserver();
         var alice = await server.LoginAsync("alice");
-        var bob = await server.ConnectAsync("bob");
+        var bob = await server.LoginClientAsync("bob");
         bob.AutoJoinOnInvite = true;
 
         var marker = Guid.NewGuid().ToString("N");

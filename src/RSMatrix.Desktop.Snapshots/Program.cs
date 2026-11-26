@@ -134,8 +134,7 @@ void RenderSettings(ChatViewModel chat)
 
 async Task RenderLiveAsync(string userId, string password, string homeserver)
 {
-    var account = localData.GetAccount(userId);
-    var connecting = MatrixChatSession.ConnectAsync(new MatrixLogin(userId, password, new Uri(homeserver)), account,
+    var connecting = MatrixChatSession.ConnectAsync(new MatrixLogin(userId, password, new Uri(homeserver)), localData,
         NullLoggerFactory.Instance, CancellationToken.None);
     while (!connecting.IsCompleted)
         Pump(TimeSpan.FromMilliseconds(100));

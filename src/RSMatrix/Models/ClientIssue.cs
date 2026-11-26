@@ -15,8 +15,8 @@ public enum ClientIssueKind
     SyncInterrupted,
 
     /// <summary>
-    /// This device could not be cross-signed, for example because the account already has a cross-signing
-    /// identity and no recovery key was given. Clients that follow the spec won't share keys with it.
+    /// The account has a cross-signing identity, but this device is not signed by it, for example because no recovery key
+    /// was given. Clients that follow the spec won't share keys with it. See <see cref="MatrixClient.EncryptionState"/>.
     /// </summary>
     DeviceNotCrossSigned,
 

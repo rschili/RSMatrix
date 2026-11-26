@@ -113,22 +113,22 @@ public class SyncResilienceTests
     [Test]
     public async Task UnexpectedProcessingFailure_FaultsSyncInsteadOfAdvancing()
     {
-        using var context = new MatrixTestContext(new ThrowOnAccountDataLogger());
+        using var context = new MatrixTestContext(new ThrowOnPresenceLogger());
         context.Send = (_, _) => Task.FromResult(MatrixTestContext.Json("""
-            {"next_batch":"must_not_advance","account_data":{"events":[{"type":"com.example.test","content":{}}]}}
+            {"next_batch":"must_not_advance","presence":{"events":[{"type":"m.presence","sender":"@alice:example.org"}]}}
             """));
         await context.Client.SyncAsync();
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await context.Client.Messages.Completion);
         await Assert.That(context.Requests.Count).IsEqualTo(1);
     }
 
-    private sealed class ThrowOnAccountDataLogger : ILogger
+    private sealed class ThrowOnPresenceLogger : ILogger
     {
         public bool IsEnabled(LogLevel level) => true;
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public void Log<TState>(LogLevel level, EventId id, TState state, Exception? error, Func<TState, Exception?, string> formatter)
         {
-            if (formatter(state, error).StartsWith("Received account data event:"))
+            if (formatter(state, error).StartsWith("Received presence event without object content"))
                 throw new InvalidOperationException("Simulated unexpected processing failure");
         }
     }

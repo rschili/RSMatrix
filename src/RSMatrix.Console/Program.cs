@@ -1,39 +1,35 @@
 ﻿using RSMatrix;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RSMatrix.Models;
 
 // load environment variables or a .env file
 DotNetEnv.Env.TraversePath().Load();
 var userid = Environment.GetEnvironmentVariable("MATRIX_USER_ID");
-var password = Environment.GetEnvironmentVariable("MATRIX_PASSWORD");
+// Optional with a store, where the server creates the device ID and the store keeps it.
 var device = Environment.GetEnvironmentVariable("MATRIX_DEVICE_ID");
-// Optional. Enables end-to-end encryption; keep the directory between runs.
-var encryptionStore = Environment.GetEnvironmentVariable("MATRIX_ENCRYPTION_STORE");
+// Needed to log in. With a store, later runs resume the session and only need it if the server ended the session.
+var password = Environment.GetEnvironmentVariable("MATRIX_PASSWORD");
+// Optional. Keeps the session and the encryption keys between runs and enables end-to-end encryption.
+var store = Environment.GetEnvironmentVariable("MATRIX_STORE");
+// Optional. Skips the homeserver lookup through the user ID's domain.
+var homeserver = Environment.GetEnvironmentVariable("MATRIX_HOMESERVER");
 // Needed once per new device if the account already has cross-signing keys.
 var recoveryKey = Environment.GetEnvironmentVariable("MATRIX_RECOVERY_KEY");
-// Optional. Resumes the session on the next run instead of logging in and syncing from scratch.
-var sessionStore = Environment.GetEnvironmentVariable("MATRIX_SESSION_STORE");
-if (string.IsNullOrWhiteSpace(userid) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(device))
-{
-    throw new ArgumentException("Please provide the required environment variables: MATRIX_USER_ID, MATRIX_PASSWORD, MATRIX_DEVICE_ID");
-}
+if (string.IsNullOrWhiteSpace(userid))
+    throw new ArgumentException("Please provide the required environment variable MATRIX_USER_ID.");
+if (string.IsNullOrWhiteSpace(store) && string.IsNullOrWhiteSpace(device))
+    throw new ArgumentException("Please provide MATRIX_DEVICE_ID, or MATRIX_STORE to keep the session between runs.");
 
-//set up dependency injection
-var services = new ServiceCollection()
-    .AddHttpClient()
-    .AddLogging(logging =>
+using var loggerFactory = LoggerFactory.Create(logging =>
+{
+    logging.AddSimpleConsole(options =>
     {
-        logging.AddSimpleConsole(options =>
-        {
-            options.IncludeScopes = true;
-            options.SingleLine = true;
-            options.TimestampFormat = "hh:mm:ss ";
-        });
-        logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning); // Filter logs from HttpClient
-        logging.SetMinimumLevel(LogLevel.Information); // Set minimum log level to Warning
-    })
-    .BuildServiceProvider();
+        options.IncludeScopes = true;
+        options.SingleLine = true;
+        options.TimestampFormat = "hh:mm:ss ";
+    });
+    logging.SetMinimumLevel(LogLevel.Information);
+});
 
 //Using CancellationToken as a shutdown mechanism
 var cancellationTokenSource = new CancellationTokenSource();
@@ -45,20 +41,21 @@ Console.CancelKeyPress += (sender, e) =>
 
 try
 {
-    var client = await MatrixClient.ConnectAsync(userid, password, device,
-        services.GetRequiredService<IHttpClientFactory>(), cancellationTokenSource.Token,
-        services.GetRequiredService<ILogger<MatrixClient>>(),
-        string.IsNullOrWhiteSpace(sessionStore) ? null : sessionStore,
-        string.IsNullOrWhiteSpace(encryptionStore) ? null : new EncryptionOptions
-        {
-            StoreDirectory = encryptionStore,
-            GetRecoveryKeyAsync = _ => Task.FromResult(string.IsNullOrWhiteSpace(recoveryKey) ? null : recoveryKey),
-            SaveRecoveryKeyAsync = (key, _) =>
-            {
-                Console.WriteLine($"New recovery key, set it as MATRIX_RECOVERY_KEY for new devices: {key}");
-                return Task.CompletedTask;
-            }
-        });
+    var logger = loggerFactory.CreateLogger<MatrixClient>();
+    var session = string.IsNullOrWhiteSpace(store) ? null : MatrixClient.GetStoredSession(store, userid);
+    if (session == null && string.IsNullOrWhiteSpace(password))
+        throw new ArgumentException("Please provide MATRIX_PASSWORD to log in.");
+    await using var client = session != null
+        ? await MatrixClient.ResumeAsync(session, cancellationTokenSource.Token,
+            password: string.IsNullOrWhiteSpace(password) ? null : password,
+            logger: logger,
+            recoveryKey: string.IsNullOrWhiteSpace(recoveryKey) ? null : recoveryKey)
+        : await MatrixClient.LoginAsync(userid, password!, cancellationTokenSource.Token,
+            deviceId: string.IsNullOrWhiteSpace(device) ? null : device,
+            storeDirectory: string.IsNullOrWhiteSpace(store) ? null : store,
+            homeserver: string.IsNullOrWhiteSpace(homeserver) ? null : new Uri(homeserver),
+            logger: logger,
+            recoveryKey: string.IsNullOrWhiteSpace(recoveryKey) ? null : recoveryKey);
 
     await foreach (var message in client.Messages.ReadAllAsync(cancellationTokenSource.Token))
     {
@@ -73,10 +70,6 @@ catch (OperationCanceledException)
 catch (Exception ex)
 {
     Console.WriteLine(ex.Message);
-}
-finally
-{
-    await services.DisposeAsync();
 }
 Console.WriteLine("Goodbye!");
 

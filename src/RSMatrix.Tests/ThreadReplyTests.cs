@@ -170,7 +170,7 @@ public class ThreadReplyTests
 
     private static ReceivedTextMessage CreateMessage(HttpMessageHandler handler, bool threaded)
     {
-        var parameters = new HttpClientParameters(new Factory(handler), "https://example.org", "test-token",
+        var parameters = new HttpClientParameters(new HttpClient(handler, disposeHandler: false), "https://example.org", "test-token",
             NullLogger.Instance, CancellationToken.None);
         var client = MatrixClient.CreateForTesting(parameters, ParseUserId("@bot:example.org"));
         RoomId.TryParse("!room:example.org", out var roomId);
@@ -194,11 +194,6 @@ public class ThreadReplyTests
         await Assert.That(Uri.UnescapeDataString(request.Path).StartsWith(
             "/_matrix/client/v3/rooms/!room:example.org/send/m.room.message/", StringComparison.Ordinal)).IsTrue();
         return JsonDocument.Parse(request.Body);
-    }
-
-    private sealed class Factory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
     private sealed class CaptureHandler : HttpMessageHandler

@@ -7,7 +7,7 @@ namespace RSMatrix.Models;
 
 /// <summary>A room observed by the client.</summary>
 /// <remarks>Messages, notices, edits and reactions are encrypted automatically in encrypted rooms
-/// when the client was connected with an encryption store. Without one, they throw
+/// when the client was logged in with a store directory. Without one, they throw
 /// <see cref="NotSupportedException"/> once encryption has been observed.</remarks>
 public class Room
 {
@@ -264,7 +264,7 @@ public class Room
         {
             if (Client.Encryption == null)
                 throw new NotSupportedException($"Cannot send plaintext messages to encrypted room {RoomId.Full}: " +
-                    "connect with an encryption store directory to enable end-to-end encryption.");
+                    "log in with a store directory to enable end-to-end encryption.");
             json = await Client.Encryption.EncryptRoomEventAsync(room, eventType, json).ConfigureAwait(false);
             eventType = "m.room.encrypted";
         }
