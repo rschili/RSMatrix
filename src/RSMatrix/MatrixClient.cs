@@ -823,7 +823,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandlePresenceReceived(List<MatrixEvent> events)
+    private void HandlePresenceReceived(List<BasicEvent> events)
     {
         ArgumentNullException.ThrowIfNull(events, nameof(events));
         foreach(var ev in events)
@@ -853,10 +853,10 @@ public sealed class MatrixClient : IAsyncDisposable
             }
             var user = GetOrAddUser(userId);
 
-            PresenceEvent? parsedPresence;
+            PresenceContent? parsedPresence;
             try
             {
-                parsedPresence = ParseContent<PresenceEvent>(ev.Content.Value);
+                parsedPresence = ParseContent<PresenceContent>(ev.Content.Value);
             }
             catch (JsonException ex)
             {
@@ -892,7 +892,7 @@ public sealed class MatrixClient : IAsyncDisposable
     }
 
     
-    private void HandleEphemeralReceived(MatrixId roomId, List<MatrixEvent> events)
+    private void HandleEphemeralReceived(MatrixId roomId, List<BasicEvent> events)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(events, nameof(events));
@@ -901,7 +901,7 @@ public sealed class MatrixClient : IAsyncDisposable
     }
 
     
-    private void HandleStateReceived(MatrixId roomId, List<ClientEventWithoutRoomID> events)
+    private void HandleStateReceived(MatrixId roomId, List<RoomEvent> events)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(events, nameof(events));
@@ -941,7 +941,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void ApplyStateEvent(Room room, ClientEventWithoutRoomID e)
+    private void ApplyStateEvent(Room room, RoomEvent e)
     {
         var roomId = room.RoomId;
         switch (e.Type)
@@ -950,7 +950,7 @@ public sealed class MatrixClient : IAsyncDisposable
                 HandleRoomMemberEvent(room, e);
                 break;
             case "m.room.name":
-                var nameEvent = ParseContent<RoomNameEvent>(e.Content!.Value);
+                var nameEvent = ParseContent<RoomNameContent>(e.Content!.Value);
                 if (nameEvent == null)
                 {
                     Logger.LogWarning("Received m.room.name event deserialize returned null in room {RoomId}.", roomId.Full);
@@ -963,7 +963,7 @@ public sealed class MatrixClient : IAsyncDisposable
                 }
                 break;
             case "m.room.canonical_alias":
-                var parsed = ParseContent<CanonicalAliasEvent>(e.Content!.Value);
+                var parsed = ParseContent<CanonicalAliasContent>(e.Content!.Value);
                 RoomAlias.TryParse(parsed?.Alias, out MatrixId? alias);
                 var altAliases = parsed?.AltAliases?.Select(a => RoomAlias.TryParse(a, out MatrixId? id) ? id : null).Where(id => id != null).Select(id => id!).ToList();
                 lock (room)
@@ -984,9 +984,9 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleRoomMemberEvent(Room room, ClientEventWithoutRoomID e)
+    private void HandleRoomMemberEvent(Room room, RoomEvent e)
     {
-        var roomMember = ParseContent<RoomMemberEvent>((JsonElement)e.Content!);
+        var roomMember = ParseContent<RoomMemberContent>((JsonElement)e.Content!);
         if (roomMember == null || !Enum.IsDefined(roomMember.Membership))
         {
             Logger.LogWarning("Received invalid m.room.member content in room {RoomId}.", room.RoomId.Full);
@@ -1020,7 +1020,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleInviteEncryptionState(string roomIdString, InvitedRoomEvents? invitedRoom)
+    private void HandleInviteEncryptionState(string roomIdString, SyncInvitedRoom? invitedRoom)
     {
         if (invitedRoom?.InviteState?.Events is not { } events ||
             !RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
@@ -1045,7 +1045,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private async Task HandleInviteReceivedAsync(string roomIdString, InvitedRoomEvents? invitedRoom)
+    private async Task HandleInviteReceivedAsync(string roomIdString, SyncInvitedRoom? invitedRoom)
     {
         if (invitedRoom == null || !RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
         {
@@ -1066,7 +1066,7 @@ public sealed class MatrixClient : IAsyncDisposable
                 {
                     try
                     {
-                        var memberEvent = ParseContent<RoomMemberEvent>(ev.Content);
+                        var memberEvent = ParseContent<RoomMemberContent>(ev.Content);
                         if (memberEvent?.IsDirect == true)
                             isDirect = true;
                         inviterUserId = ev.Sender;
@@ -1107,7 +1107,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleTimelineReceived(MatrixId roomId, List<ClientEventWithoutRoomID> events, List<ReceivedTextMessage> messages)
+    private void HandleTimelineReceived(MatrixId roomId, List<RoomEvent> events, List<ReceivedTextMessage> messages)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(events, nameof(events));
@@ -1141,7 +1141,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleEncryptedEvent(Room room, ClientEventWithoutRoomID e, List<ReceivedTextMessage> messages)
+    private void HandleEncryptedEvent(Room room, RoomEvent e, List<ReceivedTextMessage> messages)
     {
         var decrypted = DecryptRoomEvent(room, e);
         if (decrypted?.Type == "m.room.message")
@@ -1151,7 +1151,7 @@ public sealed class MatrixClient : IAsyncDisposable
     }
 
     /// <summary>Decrypts an m.room.encrypted event, or reports why it can't and returns null.</summary>
-    internal ClientEventWithoutRoomID? DecryptRoomEvent(Room room, ClientEventWithoutRoomID e)
+    internal RoomEvent? DecryptRoomEvent(Room room, RoomEvent e)
     {
         string failure;
         if (Encryption == null)
@@ -1178,7 +1178,7 @@ public sealed class MatrixClient : IAsyncDisposable
         return null;
     }
 
-    private static bool IsAnnotation(ClientEventWithoutRoomID e)
+    private static bool IsAnnotation(RoomEvent e)
         => e.Content is { ValueKind: JsonValueKind.Object } content &&
            content.TryGetProperty("m.relates_to", out var relatesTo) && relatesTo.ValueKind == JsonValueKind.Object &&
            relatesTo.TryGetProperty("rel_type", out var relType) && relType.ValueKind == JsonValueKind.String &&
@@ -1201,7 +1201,7 @@ public sealed class MatrixClient : IAsyncDisposable
             return;
         }
 
-        var encryptionEvent = ParseContent<RoomEncryptionEvent>(content.Value);
+        var encryptionEvent = ParseContent<RoomEncryptionContent>(content.Value);
         if(encryptionEvent == null)
         {
             Logger.LogWarning("Received m.room.encryption event deserialize returned null in room {RoomId}.", room.RoomId.Full);
@@ -1222,7 +1222,7 @@ public sealed class MatrixClient : IAsyncDisposable
             Logger.LogWarning("Received unknown encryption algorithm {Algorithm} in room {RoomId}.", encryptionEvent.Algorithm, room.RoomId.Full);
     }
 
-    private void HandleMessageReceived(MatrixId roomId, List<ReceivedTextMessage> messages, Room room, ClientEventWithoutRoomID e,
+    private void HandleMessageReceived(MatrixId roomId, List<ReceivedTextMessage> messages, Room room, RoomEvent e,
         bool isEncrypted = false)
     {
         if (e.Content == null)
@@ -1232,7 +1232,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
 
         // Decrypted content stays out of the logs.
-        var messageEvent = ParseContent<RoomMessageEvent>((JsonElement)e.Content, withExamples: !isEncrypted);
+        var messageEvent = ParseContent<RoomMessageContent>((JsonElement)e.Content, withExamples: !isEncrypted);
         if (messageEvent == null)
         {
             Logger.LogWarning("Received m.room.message event deserialize returned null in room {RoomId}.", roomId.Full);
@@ -1310,7 +1310,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleAccountDataReceived(MatrixId? roomId, List<MatrixEvent> accountData)
+    private void HandleAccountDataReceived(MatrixId? roomId, List<BasicEvent> accountData)
     {
         var kind = roomId == null ? UnhandledKind.AccountData : UnhandledKind.RoomAccountData;
         foreach (var ev in accountData)
@@ -1321,7 +1321,7 @@ public sealed class MatrixClient : IAsyncDisposable
     }
 
     // Threads are handled; replies and every other relation type are not delivered yet.
-    private void ReportUnhandledRelation(RoomMessageRelatesTo? relatesTo, ClientEventWithoutRoomID? example)
+    private void ReportUnhandledRelation(RelatesTo? relatesTo, RoomEvent? example)
     {
         if (relatesTo == null)
             return;

@@ -84,15 +84,15 @@ public class Room
     internal async Task<string> SendMessageInternalAsync(string msgType, string body, (string Format, string FormattedBody)? formatted,
         string? inReplyTo, IList<MatrixId>? mentions, string? threadRootId, string? threadFallbackEventId)
     {
-        RoomMessageMention? roomMessageMention = null;
+        Mentions? mentionContent = null;
         if (mentions != null)
         {
-            roomMessageMention = new RoomMessageMention { UserIds = mentions.Select(m => m.Full).ToList() };
+            mentionContent = new Mentions { UserIds = mentions.Select(m => m.Full).ToList() };
         }
-        RoomMessageRelatesTo? relatesTo = null;
+        RelatesTo? relatesTo = null;
         if (threadRootId != null)
         {
-            relatesTo = new RoomMessageRelatesTo
+            relatesTo = new RelatesTo
             {
                 RelType = "m.thread",
                 EventId = threadRootId,
@@ -104,17 +104,17 @@ public class Room
         var replyTarget = inReplyTo ?? (threadRootId != null ? threadFallbackEventId : null);
         if (replyTarget != null)
         {
-            relatesTo ??= new RoomMessageRelatesTo();
-            relatesTo.InReplyTo = new RoomMessageInReplyTo { EventId = replyTarget };
+            relatesTo ??= new RelatesTo();
+            relatesTo.InReplyTo = new InReplyTo { EventId = replyTarget };
         }
 
-        var messageRequest = new MessageRequest { MsgType = msgType, Body = body, Mentions = roomMessageMention, RelatesTo = relatesTo };
+        var messageContent = new RoomMessageContent { MsgType = msgType, Body = body, Mentions = mentionContent, RelatesTo = relatesTo };
         if (formatted.HasValue)
         {
-            messageRequest.Format = formatted.Value.Format;
-            messageRequest.FormattedBody = formatted.Value.FormattedBody;
+            messageContent.Format = formatted.Value.Format;
+            messageContent.FormattedBody = formatted.Value.FormattedBody;
         }
-        return await SendRoomEventAsync("m.room.message", messageRequest).ConfigureAwait(false);
+        return await SendRoomEventAsync("m.room.message", messageContent).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -137,26 +137,26 @@ public class Room
     private async Task<string> EditMessageInternalAsync(string originalEventId, string msgType, string newBody,
         (string Format, string FormattedBody)? formatted, IList<MatrixId>? mentions)
     {
-        RoomMessageMention? roomMessageMention = null;
+        Mentions? mentionContent = null;
         if (mentions != null)
         {
-            roomMessageMention = new RoomMessageMention { UserIds = mentions.Select(m => m.Full).ToList() };
+            mentionContent = new Mentions { UserIds = mentions.Select(m => m.Full).ToList() };
         }
 
-        var newContent = new MessageNewContent { MsgType = msgType, Body = newBody, Mentions = roomMessageMention };
+        var newContent = new NewMessageContent { MsgType = msgType, Body = newBody, Mentions = mentionContent };
         if (formatted.HasValue)
         {
             newContent.Format = formatted.Value.Format;
             newContent.FormattedBody = formatted.Value.FormattedBody;
         }
 
-        var messageRequest = new MessageRequest
+        var messageContent = new RoomMessageContent
         {
             MsgType = msgType,
             Body = $"* {newBody}",
-            Mentions = roomMessageMention,
+            Mentions = mentionContent,
             NewContent = newContent,
-            RelatesTo = new RoomMessageRelatesTo
+            RelatesTo = new RelatesTo
             {
                 RelType = "m.replace",
                 EventId = originalEventId
@@ -165,11 +165,11 @@ public class Room
 
         if (formatted.HasValue)
         {
-            messageRequest.Format = formatted.Value.Format;
-            messageRequest.FormattedBody = $"* {formatted.Value.FormattedBody}";
+            messageContent.Format = formatted.Value.Format;
+            messageContent.FormattedBody = $"* {formatted.Value.FormattedBody}";
         }
 
-        return await SendRoomEventAsync("m.room.message", messageRequest).ConfigureAwait(false);
+        return await SendRoomEventAsync("m.room.message", messageContent).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -222,14 +222,14 @@ public class Room
         {
             foreach (var chunkEvent in response.Chunk)
             {
-                ClientEventWithoutRoomID? e = chunkEvent;
+                RoomEvent? e = chunkEvent;
                 var isEncrypted = e.Type == "m.room.encrypted";
                 if (isEncrypted)
                     e = Client.DecryptRoomEvent(this, e);
                 if (e?.Type != "m.room.message" || e.Content == null)
                     continue;
 
-                var messageEvent = JsonSerializer.Deserialize<RoomMessageEvent>((JsonElement)e.Content);
+                var messageEvent = JsonSerializer.Deserialize<RoomMessageContent>((JsonElement)e.Content);
                 if (messageEvent == null || (messageEvent.MsgType != "m.text" && messageEvent.MsgType != "m.notice"))
                     continue;
 

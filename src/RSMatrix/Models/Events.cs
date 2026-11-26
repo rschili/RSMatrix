@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace RSMatrix.Models;
 
-internal class MatrixEvent
+internal class BasicEvent
 {
     [JsonPropertyName("content")]
     public JsonElement? Content { get; set; }
@@ -16,7 +16,7 @@ internal class MatrixEvent
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
 
-internal class ClientEventWithoutRoomID
+internal class RoomEvent
 {
     [JsonPropertyName("content")]
     public required JsonElement? Content { get; set; }
@@ -42,17 +42,14 @@ internal class ClientEventWithoutRoomID
     [JsonPropertyName("unsigned")]
     public UnsignedData? Unsigned { get; set; }
 
+    [JsonPropertyName("room_id")]
+    public string? RoomId { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
 
-internal class ClientEvent : ClientEventWithoutRoomID
-{
-    [JsonPropertyName("room_id")]
-    public required string RoomId { get; set; }
-}
-
-internal class CanonicalAliasEvent
+internal class CanonicalAliasContent
 {
     [JsonPropertyName("alias")]
     public string? Alias { get; set; }
@@ -61,7 +58,7 @@ internal class CanonicalAliasEvent
     public List<string>? AltAliases { get; set; }
 }
 
-internal class RoomNameEvent
+internal class RoomNameContent
 {
     [JsonPropertyName("name")]
     public required string Name { get; set; }
@@ -87,7 +84,7 @@ internal class PresenceRequest
     public string? StatusMsg { get; set; }
 }
 
-internal class PresenceEvent
+internal class PresenceContent
 {
     [JsonPropertyName("avatar_url")]
     public string? AvatarUrl { get; set; }
@@ -123,7 +120,7 @@ public enum Membership
     Ban
 }
 
-internal class RoomMemberEvent
+internal class RoomMemberContent
 {
     [JsonPropertyName("avatar_url")]
     public string? AvatarUrl { get; set; }
@@ -186,13 +183,13 @@ internal class UnsignedData
 
 
 
-internal class RoomMessageEvent
+internal class RoomMessageContent
 {
-    [JsonPropertyName("body")]
-    public required string Body { get; set; }
-
     [JsonPropertyName("msgtype")]
     public required string MsgType { get; set; }
+
+    [JsonPropertyName("body")]
+    public required string Body { get; set; }
 
     /// <summary>
     /// The format used in the formatted_body. Currently only org.matrix.custom.html is supported.
@@ -202,15 +199,18 @@ internal class RoomMessageEvent
 
     [JsonPropertyName("formatted_body")]
     public string? FormattedBody { get; set; }
-    
+
     [JsonPropertyName("m.mentions")]
-    public RoomMessageMention? Mentions { get; set; }
+    public Mentions? Mentions { get; set; }
 
     [JsonPropertyName("m.relates_to")]
-    public RoomMessageRelatesTo? RelatesTo { get; set; }
+    public RelatesTo? RelatesTo { get; set; }
+
+    [JsonPropertyName("m.new_content")]
+    public NewMessageContent? NewContent { get; set; }
 }
 
-internal class RoomMessageRelatesTo
+internal class RelatesTo
 {
     [JsonPropertyName("event_id")]
     public string? EventId { get; set; }
@@ -219,26 +219,26 @@ internal class RoomMessageRelatesTo
     public string? RelType { get; set; }
 
     [JsonPropertyName("m.in_reply_to")] // Sometimes this is not 
-    public RoomMessageInReplyTo? InReplyTo { get; set; }
+    public InReplyTo? InReplyTo { get; set; }
 
     [JsonPropertyName("is_falling_back")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? IsFallingBack { get; set; }
 }
 
-internal class RoomMessageMention
+internal class Mentions
 {
     [JsonPropertyName("user_ids")]
     public List<string>? UserIds { get; set; }
 }
 
-internal class RoomMessageInReplyTo
+internal class InReplyTo
 {
     [JsonPropertyName("event_id")]
     public required string EventId { get; set; }
 }
 
-internal class RoomEncryptionEvent
+internal class RoomEncryptionContent
 {
     [JsonPropertyName("algorithm")]
     public required string Algorithm { get; set; }
@@ -268,23 +268,4 @@ internal class ReactionRequest
 {
     [JsonPropertyName("m.relates_to")]
     public required ReactionRelatesTo RelatesTo { get; set; }
-}
-
-internal class RoomEncryptedEvent
-{
-    [JsonPropertyName("algorithm")]
-    public required string Algorithm { get; set; }
-
-    [JsonPropertyName("ciphertext")]
-    public required string Ciphertext { get; set; } // may also be a json element with a key of "body" and "type" (olm message type)
-
-    // These are deprecated
-    /*[JsonPropertyName("device_id")]
-    public required string DeviceId { get; set; }
-
-    [JsonPropertyName("sender_key")]
-    public required string SenderKey { get; set; }*/
-
-    [JsonPropertyName("session_id")]
-    public required string SessionId { get; set; }
 }

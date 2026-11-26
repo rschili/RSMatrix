@@ -92,7 +92,7 @@ internal class TypingRequest
     public uint Timeout { get; set; }
 }
 
-internal class MessageRequest
+internal class NewMessageContent
 {
     [JsonPropertyName("msgtype")]
     public required string MsgType { get; set; }
@@ -107,31 +107,7 @@ internal class MessageRequest
     public string? FormattedBody { get; set; }
 
     [JsonPropertyName("m.mentions")]
-    public RoomMessageMention? Mentions { get; set; }
-
-    [JsonPropertyName("m.relates_to")]
-    public RoomMessageRelatesTo? RelatesTo { get; set; }
-
-    [JsonPropertyName("m.new_content")]
-    public MessageNewContent? NewContent { get; set; }
-}
-
-internal class MessageNewContent
-{
-    [JsonPropertyName("msgtype")]
-    public required string MsgType { get; set; }
-
-    [JsonPropertyName("body")]
-    public required string Body { get; set; }
-
-    [JsonPropertyName("format")]
-    public string? Format { get; set; }
-
-    [JsonPropertyName("formatted_body")]
-    public string? FormattedBody { get; set; }
-
-    [JsonPropertyName("m.mentions")]
-    public RoomMessageMention? Mentions { get; set; }
+    public Mentions? Mentions { get; set; }
 }
 
 internal class RedactionRequest

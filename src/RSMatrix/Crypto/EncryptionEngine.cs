@@ -728,7 +728,7 @@ internal sealed class EncryptionEngine
     /// Decrypts a Megolm room event. Returns null, logs a warning and sets <paramref name="failure"/>
     /// if it cannot be decrypted or fails validation.
     /// </summary>
-    public ClientEventWithoutRoomID? DecryptRoomEvent(string roomId, ClientEventWithoutRoomID encrypted, out string? failure)
+    public RoomEvent? DecryptRoomEvent(string roomId, RoomEvent encrypted, out string? failure)
     {
         failure = null;
         if (encrypted.Content is not { ValueKind: JsonValueKind.Object } content ||
@@ -786,7 +786,7 @@ internal sealed class EncryptionEngine
             if (content.TryGetProperty("m.relates_to", out var relatesTo))
                 decryptedContent["m.relates_to"] = JsonNode.Parse(relatesTo.GetRawText());
 
-            return new ClientEventWithoutRoomID
+            return new RoomEvent
             {
                 Type = type,
                 Content = JsonSerializer.SerializeToElement(decryptedContent),

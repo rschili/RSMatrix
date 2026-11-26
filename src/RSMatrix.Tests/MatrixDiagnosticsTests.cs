@@ -32,7 +32,7 @@ public class MatrixDiagnosticsTests
         var found = MatrixDiagnostics.FindUnknownFields(json.RootElement, typeof(SyncResponse))
             .Select(f => $"{f.Owner}.{f.Field}").ToList();
 
-        await Assert.That(found).IsEquivalentTo(["SyncResponse.new_section", "JoinedRoomEvents.unknown_room_field", "UnsignedData.m.relations"]);
+        await Assert.That(found).IsEquivalentTo(["SyncResponse.new_section", "SyncJoinedRoom.unknown_room_field", "UnsignedData.m.relations"]);
     }
 
     [Test]
@@ -97,8 +97,7 @@ public class MatrixDiagnosticsTests
             "Unhandled AccountData: m.push_rules",
             "Unhandled TimelineEvent: m.reaction",
             "Unhandled MsgType: m.image",
-            "Unhandled Field: RoomMessageEvent.url",
-            "Unhandled Field: RoomMessageEvent.m.new_content",
+            "Unhandled Field: RoomMessageContent.url",
             "Unhandled Relation: m.replace",
             "Unhandled StateEvent: m.room.topic",
             "Unhandled SyncSection: rooms.leave",

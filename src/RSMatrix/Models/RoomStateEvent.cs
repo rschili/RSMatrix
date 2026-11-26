@@ -15,7 +15,7 @@ public sealed class RoomStateEvent
     public long OriginServerTs { get; }
     public JsonElement Content { get; }
 
-    internal RoomStateEvent(ClientEventWithoutRoomID source)
+    internal RoomStateEvent(RoomEvent source)
     {
         Type = source.Type;
         StateKey = source.StateKey!;

@@ -174,7 +174,7 @@ internal static class MatrixHelper
         await HttpClientHelper.SendAsync(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
-    internal static async Task<MessageResponse> PutRoomEventAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventType, JsonObject content)
+    internal static async Task<EventIdResponse> PutRoomEventAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventType, JsonObject content)
     {
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
@@ -183,10 +183,10 @@ internal static class MatrixHelper
 
         var txnId = httpClientParameters.NextTransactionId();
         var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/send/{Uri.EscapeDataString(eventType)}/{txnId}";
-        return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, JsonContent.Create(content)).ConfigureAwait(false);
+        return await HttpClientHelper.SendAsync<EventIdResponse>(httpClientParameters, path, HttpMethod.Put, JsonContent.Create(content)).ConfigureAwait(false);
     }
 
-    internal static async Task<MessageResponse> PutRedactionAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, string? reason)
+    internal static async Task<EventIdResponse> PutRedactionAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, string? reason)
     {
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
@@ -199,7 +199,7 @@ internal static class MatrixHelper
             request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
         var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/redact/{Uri.EscapeDataString(eventId)}/{txnId}";
-        return await HttpClientHelper.SendAsync<MessageResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+        return await HttpClientHelper.SendAsync<EventIdResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
     internal static async Task<JoinRoomResponse> PostJoinRoomAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string? reason = null)
@@ -215,7 +215,7 @@ internal static class MatrixHelper
         return await HttpClientHelper.SendAsync<JoinRoomResponse>(httpClientParameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
-    internal static async Task<MessagesResponse> GetMessagesAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessagesParameters parameters)
+    internal static async Task<RoomMessagesResponse> GetMessagesAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessagesParameters parameters)
     {
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
@@ -225,6 +225,6 @@ internal static class MatrixHelper
             $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/messages",
             parameters.GetAsParameters());
 
-        return await HttpClientHelper.SendAsync<MessagesResponse>(httpClientParameters, path).ConfigureAwait(false);
+        return await HttpClientHelper.SendAsync<RoomMessagesResponse>(httpClientParameters, path).ConfigureAwait(false);
     }
 }

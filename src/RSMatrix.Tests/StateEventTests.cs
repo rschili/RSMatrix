@@ -115,18 +115,18 @@ public class StateEventTests
         await Assert.That(log.Levels.Contains(LogLevel.Error)).IsFalse();
     }
 
-    private static ClientEventWithoutRoomID Event(string type, string? key, string content) => new()
+    private static RoomEvent Event(string type, string? key, string content) => new()
     {
         Type = type, StateKey = key, Content = JsonSerializer.Deserialize<JsonElement>(content),
         Sender = "@sender:example.org", EventId = "$event", OriginServerTs = 1700000000000
     };
 
-    private static SyncResponse Sync(List<ClientEventWithoutRoomID>? state = null, List<ClientEventWithoutRoomID>? timeline = null) => new()
+    private static SyncResponse Sync(List<RoomEvent>? state = null, List<RoomEvent>? timeline = null) => new()
     {
         NextBatch = "next",
-        Rooms = new RoomEvents
+        Rooms = new SyncRooms
         {
-            Joined = new Dictionary<string, JoinedRoomEvents>
+            Joined = new Dictionary<string, SyncJoinedRoom>
             {
                 ["!room:example.org"] = new()
                 {

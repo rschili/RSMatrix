@@ -140,19 +140,19 @@ internal class SyncResponse
     public required string NextBatch { get; set; }
 
     [JsonPropertyName("account_data")]
-    public EventResponse? AccountData { get; set; }
+    public BasicEventList? AccountData { get; set; }
 
     /// <summary>
     /// The updates to the presence status of other users.
     /// </summary>
     [JsonPropertyName("presence")]
-    public EventResponse? Presence { get; set; }
+    public BasicEventList? Presence { get; set; }
 
     /// <summary>
     /// Updates to rooms.
     /// </summary>
     [JsonPropertyName("rooms")]
-    public RoomEvents? Rooms { get; set; }
+    public SyncRooms? Rooms { get; set; }
 
     /// <summary>
     /// Users whose devices changed, or with whom we no longer share an encrypted room.
@@ -177,7 +177,7 @@ internal class SyncResponse
     /// Send-to-device messages for this device.
     /// </summary>
     [JsonPropertyName("to_device")]
-    public EventResponse? ToDevice { get; set; }
+    public BasicEventList? ToDevice { get; set; }
 }
 
 internal class DeviceLists
@@ -189,23 +189,23 @@ internal class DeviceLists
     public List<string>? Left { get; set; }
 }
 
-internal class EventResponse
+internal class BasicEventList
 {
     [JsonPropertyName("events")]
-    public List<MatrixEvent>? Events { get; set; }
+    public List<BasicEvent>? Events { get; set; }
 }
 
 
-internal class ClientEventWithoutRoomIdResponse
+internal class RoomEventList
 {
     [JsonPropertyName("events")]
-    public List<ClientEventWithoutRoomID>? Events { get; set; }
+    public List<RoomEvent>? Events { get; set; }
 }
 
-internal class TimelineEventResponse
+internal class SyncTimeline
 {
     [JsonPropertyName("events")]
-    public List<ClientEventWithoutRoomID>? Events { get; set; }
+    public List<RoomEvent>? Events { get; set; }
 
     [JsonPropertyName("limited")]
     public bool? Limited { get; set; }
@@ -214,13 +214,13 @@ internal class TimelineEventResponse
     public string? PrevBatch { get; set; }
 }
 
-internal class RoomEvents
+internal class SyncRooms
 {
     [JsonPropertyName("invite")]
-    public Dictionary<string, InvitedRoomEvents>? Invites { get; set; }
+    public Dictionary<string, SyncInvitedRoom>? Invites { get; set; }
 
     [JsonPropertyName("join")]
-    public Dictionary<string, JoinedRoomEvents>? Joined { get; set; }
+    public Dictionary<string, SyncJoinedRoom>? Joined { get; set; }
 
     [JsonPropertyName("knock")]
     public Dictionary<string, JsonElement>? Knocks { get; set; }
@@ -229,7 +229,7 @@ internal class RoomEvents
     public Dictionary<string, JsonElement>? Leaves { get; set; }
 }
 
-internal class InvitedRoomEvents
+internal class SyncInvitedRoom
 {
     [JsonPropertyName("invite_state")]
     public InviteState? InviteState { get; set; }
@@ -262,7 +262,7 @@ internal class JoinRoomResponse
     public required string RoomId { get; set; }
 }
 
-internal class MessagesResponse
+internal class RoomMessagesResponse
 {
     [JsonPropertyName("start")]
     public required string Start { get; set; }
@@ -271,28 +271,28 @@ internal class MessagesResponse
     public string? End { get; set; }
 
     [JsonPropertyName("chunk")]
-    public required List<ClientEvent> Chunk { get; set; }
+    public required List<RoomEvent> Chunk { get; set; }
 
     [JsonPropertyName("state")]
-    public List<ClientEvent>? State { get; set; }
+    public List<RoomEvent>? State { get; set; }
 }
 
-internal class JoinedRoomEvents
+internal class SyncJoinedRoom
 {
     [JsonPropertyName("summary")]
     public RoomSummary? Summary { get; set; }
 
     [JsonPropertyName("account_data")]
-    public EventResponse? AccountData { get; set; }
+    public BasicEventList? AccountData { get; set; }
 
     [JsonPropertyName("ephemeral")]
-    public EventResponse? Ephemeral { get; set; }
+    public BasicEventList? Ephemeral { get; set; }
 
     [JsonPropertyName("state")]
-    public ClientEventWithoutRoomIdResponse? State { get; set; }
+    public RoomEventList? State { get; set; }
 
     [JsonPropertyName("timeline")]
-    public TimelineEventResponse? Timeline { get; set; }
+    public SyncTimeline? Timeline { get; set; }
 
     [JsonPropertyName("unread_notifications")]
     public UnreadNotifications? UnreadNotifications { get; set; }
@@ -337,7 +337,7 @@ internal class PresenceResponse
     public string? StatusMessage { get; set; }
 }
 
-internal class MessageResponse
+internal class EventIdResponse
 {
     [JsonPropertyName("event_id")]
     public required string EventId { get; set; }
