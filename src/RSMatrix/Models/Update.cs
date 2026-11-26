@@ -1,18 +1,26 @@
 namespace RSMatrix.Models;
 
-/// <summary>
-/// Everything the client receives, as one of a few small records. Each change to a message carries the message as it is
-/// after the change: when <see cref="MessageEdited"/> arrives, its message has the new text. Changes come out for
-/// messages the client holds in memory, which are the recent ones and the ones read recently.
-/// </summary>
-public union Update(NewMessage, MessageEdited, MessageDeleted, ReactionAdded, ReactionRemoved, ClientIssue);
+/// <summary>Everything the client receives, as one of a few small records.</summary>
+public union Update(NewMessage, MessageChanged, ClientIssue);
 
 public sealed record NewMessage(Message Message);
 
-public sealed record MessageEdited(Message Message);
+/// <summary>
+/// Something changed on a message. This comes for every message, also ones the client doesn't hold. The exception is a
+/// deletion of a reaction or an edit the client never saw: the deletion doesn't say which message it belonged to.
+/// </summary>
+/// <param name="Message">
+/// The message right after this change, when the client holds it. Otherwise null, and <see cref="MessageReference.GetAsync"/>
+/// loads it.
+/// </param>
+/// <param name="Change">What changed. Most consumers replace the message they show and don't need it.</param>
+public sealed record MessageChanged(MessageReference Reference, Message? Message, MessageChange Change);
 
-public sealed record MessageDeleted(Message Message, RoomUser DeletedBy);
-
-public sealed record ReactionAdded(Message Message, string Key, RoomUser User);
-
-public sealed record ReactionRemoved(Message Message, string Key, RoomUser User);
+public enum MessageChange
+{
+    Edited,
+    Deleted,
+    Reactions,
+    /// <summary>A thread reply to this message was added, edited or deleted.</summary>
+    Thread,
+}

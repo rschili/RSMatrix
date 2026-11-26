@@ -70,13 +70,16 @@ public class EncryptionTests
             await Assert.That(rawReaction.GetProperty("type").GetString()).IsEqualTo("m.room.encrypted");
             await Assert.That(rawReaction.GetProperty("content").GetProperty("m.relates_to").GetProperty("rel_type")
                 .GetString()).IsEqualTo("m.annotation");
-            var reaction = await ReceiveUpdateAsync<ReactionAdded>(carol, u => u.Message.Id == replyId, server.CancellationToken);
+            var reacted = await ReceiveUpdateAsync<MessageChanged>(carol,
+                u => u.Reference.Id == replyId && u.Change == MessageChange.Reactions, server.CancellationToken);
+            var reaction = reacted.Message!.Reactions.Single();
             await Assert.That(reaction.Key).IsEqualTo("👍");
-            await Assert.That(reaction.User.User.UserId.Full).IsEqualTo($"@{bobUser}:localhost");
+            await Assert.That(reaction.Users.Single().User.UserId.Full).IsEqualTo($"@{bobUser}:localhost");
 
             var editId = await bobRoom.EditMessageAsync(secretId, "edited body");
-            var edited = await ReceiveUpdateAsync<MessageEdited>(carol, u => u.Message.Id == secretId, server.CancellationToken);
-            await Assert.That(edited.Message.Body).IsEqualTo("edited body");
+            var edited = await ReceiveUpdateAsync<MessageChanged>(carol,
+                u => u.Reference.Id == secretId && u.Change == MessageChange.Edited, server.CancellationToken);
+            await Assert.That(edited.Message!.Body).IsEqualTo("edited body");
 
             var history = await secret.Room.GetMessagesAsync(limit: 20);
             await Assert.That(string.Join(",", history.Select(m => m.Id))).IsEqualTo($"{pingId},{secretId},{replyId}");

@@ -62,8 +62,9 @@ public class HistoryTests
 
         // The page joined the room's cache, so live changes to its messages come out.
         await context.Process(Sync(Reaction("$r2", "$3", "🎉")));
-        var added = (ReactionAdded)context.ReadUpdates().Single().Value!;
-        await Assert.That(added.Message.Id).IsEqualTo("$3");
+        var added = (MessageChanged)context.ReadUpdates().Single().Value!;
+        await Assert.That(added.Change).IsEqualTo(MessageChange.Reactions);
+        await Assert.That(added.Message!.Id).IsEqualTo("$3");
         await Assert.That(history.All(m => m.HasAllReactions)).IsTrue();
     }
 
@@ -117,7 +118,7 @@ public class HistoryTests
             Reaction("$r1", "$old", "👍"),
             Reaction("$r2", "$old", "🎉"),
             Redaction("$x", "$r2", sender: "@bob:example.org")));
-        await Assert.That(context.ReadUpdates()).IsEmpty();
+        await Assert.That(context.ReadUpdates().Select(u => ((MessageChanged)u.Value!).Message)).All(m => m == null);
         Serve(context, ("from=p0", Page(null, Text("$old", "old"))));
 
         var old = (await context.Room().GetMessagesAsync(limit: 1)).Single();

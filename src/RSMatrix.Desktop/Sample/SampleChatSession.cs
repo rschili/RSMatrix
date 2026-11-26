@@ -108,6 +108,10 @@ public sealed class SampleChatSession : IChatSession
         return new HistoryPage(messages, page < 2);
     }
 
+    // Sample events always carry their reactions.
+    public Task<IReadOnlyList<ChatReaction>?> GetReactionsAsync(string roomId, string eventId, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<ChatReaction>?>(null);
+
     public async Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken)
     {
         await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken).ConfigureAwait(false);

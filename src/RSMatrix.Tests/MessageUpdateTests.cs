@@ -35,7 +35,29 @@ public class MessageUpdateTests
     }
 
     private static async Task<Message> ReceiveAsync(MatrixTestContext context, string messageEvent)
-        => ((NewMessage)(await ProcessAsync(context, messageEvent)).Single()).Message;
+        => ((NewMessage)(await ProcessAsync(context, messageEvent))[0]).Message;
+
+    /// <summary>The message of a change to a message the client holds.</summary>
+    private static Message Changed(object update, MessageChange expected)
+    {
+        var changed = (MessageChanged)update;
+        if (changed.Change != expected)
+            throw new InvalidOperationException($"Expected {expected}, got {changed.Change}.");
+        if (changed.Message == null || changed.Message.Id != changed.Reference.Id)
+            throw new InvalidOperationException("Expected the change to carry the message.");
+        return changed.Message;
+    }
+
+    /// <summary>The reference of a change to a message the client doesn't hold.</summary>
+    private static MessageReference ChangedElsewhere(object update, MessageChange expected)
+    {
+        var changed = (MessageChanged)update;
+        if (changed.Change != expected)
+            throw new InvalidOperationException($"Expected {expected}, got {changed.Change}.");
+        if (changed.Message != null)
+            throw new InvalidOperationException("Expected the change to come without the message.");
+        return changed.Reference;
+    }
 
     /// <summary>The message as the client has it now, from memory.</summary>
     private static async Task<Message> CurrentAsync(MatrixTestContext context, string id)
@@ -108,7 +130,7 @@ public class MessageUpdateTests
         var message = await ReceiveAsync(context, Text("$m", "helo"));
 
         var updates = await ProcessAsync(context, Edit("$e", "$m", "hello", ts: 1700000005000));
-        var edited = ((MessageEdited)updates.Single()).Message;
+        var edited = Changed(updates.Single(), MessageChange.Edited);
         await Assert.That(edited.Id).IsEqualTo("$m");
         await Assert.That(edited.Body).IsEqualTo("hello");
         await Assert.That(edited.EditedAt).IsEqualTo(DateTimeOffset.FromUnixTimeMilliseconds(1700000005000));
@@ -117,10 +139,34 @@ public class MessageUpdateTests
     }
 
     [Test]
-    public async Task Edit_OfUnknownMessage_IsDropped()
+    public async Task ChangesToMessagesTheClientDoesntHold_ComeWithAReference()
     {
         using var context = new MatrixTestContext();
-        await Assert.That(await ProcessAsync(context, Edit("$e", "$unknown", "hello"))).IsEmpty();
+        var updates = await ProcessAsync(context, Edit("$e", "$old", "hello"), Reaction("$r", "$old", "👍"), Redaction("$x", "$r"),
+            Text("$t", "reply", relatesTo: ""","m.relates_to":{"rel_type":"m.thread","event_id":"$root"}"""));
+        await Assert.That(ChangedElsewhere(updates[0], MessageChange.Edited).Id).IsEqualTo("$old");
+        await Assert.That(ChangedElsewhere(updates[1], MessageChange.Reactions).Id).IsEqualTo("$old");
+        // The reaction is in memory now, so its deletion can be traced to the message.
+        await Assert.That(ChangedElsewhere(updates[2], MessageChange.Reactions).Id).IsEqualTo("$old");
+        await Assert.That(((NewMessage)updates[3]).Message.Id).IsEqualTo("$t");
+        await Assert.That(ChangedElsewhere(updates[4], MessageChange.Thread).Id).IsEqualTo("$root");
+        await Assert.That(updates.Count).IsEqualTo(5);
+    }
+
+    [Test]
+    public async Task DeletingAnEventTheClientNeverSaw_IsDropped()
+    {
+        using var context = new MatrixTestContext();
+        await Assert.That(await ProcessAsync(context, Redaction("$x", "$unknown"))).IsEmpty();
+    }
+
+    [Test]
+    public async Task ReactionsToReactions_AreNoChange()
+    {
+        using var context = new MatrixTestContext();
+        await ReceiveAsync(context, Text("$m", "hello"));
+        await ProcessAsync(context, Reaction("$r", "$m", "👍"));
+        await Assert.That(await ProcessAsync(context, Reaction("$r2", "$r", "😂"), Edit("$e", "$r", "nope"))).IsEmpty();
     }
 
     [Test]
@@ -169,7 +215,7 @@ public class MessageUpdateTests
     {
         using var context = new MatrixTestContext();
         await ReceiveAsync(context, Text("$m", "original"));
-        var edited = ((MessageEdited)(await ProcessAsync(context, Edit("$e", "$m", "notice now", msgType: "m.notice"))).Single()).Message;
+        var edited = Changed((await ProcessAsync(context, Edit("$e", "$m", "notice now", msgType: "m.notice"))).Single(), MessageChange.Edited);
         await Assert.That(edited.Kind).IsEqualTo(MessageKind.Notice);
     }
 
@@ -182,9 +228,9 @@ public class MessageUpdateTests
         await Assert.That((await CurrentAsync(context, "$m")).Body).IsEqualTo("second");
 
         var updates = await ProcessAsync(context, Redaction("$r2", "$e2"));
-        await Assert.That(((MessageEdited)updates.Single()).Message.Body).IsEqualTo("first");
+        await Assert.That(Changed(updates.Single(), MessageChange.Edited).Body).IsEqualTo("first");
 
-        var last = ((MessageEdited)(await ProcessAsync(context, Redaction("$r1", "$e1"))).Single()).Message;
+        var last = Changed((await ProcessAsync(context, Redaction("$r1", "$e1"))).Single(), MessageChange.Edited);
         await Assert.That(last.Body).IsEqualTo("original");
         await Assert.That(last.EditedAt).IsNull();
     }
@@ -195,10 +241,10 @@ public class MessageUpdateTests
         using var context = new MatrixTestContext();
         await ReceiveAsync(context, Text("$m", "hello"));
 
-        var added = (ReactionAdded)(await ProcessAsync(context, Reaction("$r1", "$m", "👍"))).Single();
-        await Assert.That(added.Key).IsEqualTo("👍");
-        await Assert.That(added.User.User.UserId.Full).IsEqualTo("@bob:example.org");
-        await Assert.That(added.Message.Reactions.Single().Key).IsEqualTo("👍");
+        var added = Changed((await ProcessAsync(context, Reaction("$r1", "$m", "👍"))).Single(), MessageChange.Reactions);
+        var reaction = added.Reactions.Single();
+        await Assert.That(reaction.Key).IsEqualTo("👍");
+        await Assert.That(reaction.Users.Single().User.UserId.Full).IsEqualTo("@bob:example.org");
 
         await Assert.That(await ProcessAsync(context, Reaction("$r2", "$m", "👍"))).IsEmpty();
         await Assert.That((await CurrentAsync(context, "$m")).Reactions.Single().Users.Count).IsEqualTo(1);
@@ -206,9 +252,8 @@ public class MessageUpdateTests
         await Assert.That(await ProcessAsync(context, Redaction("$x1", "$r1", sender: "@bob:example.org"))).IsEmpty();
         await Assert.That((await CurrentAsync(context, "$m")).Reactions.Single().Key).IsEqualTo("👍");
 
-        var removed = (ReactionRemoved)(await ProcessAsync(context, Redaction("$x2", "$r2", sender: "@bob:example.org"))).Single();
-        await Assert.That(removed.Key).IsEqualTo("👍");
-        await Assert.That(removed.Message.Reactions).IsEmpty();
+        var removed = Changed((await ProcessAsync(context, Redaction("$x2", "$r2", sender: "@bob:example.org"))).Single(), MessageChange.Reactions);
+        await Assert.That(removed.Reactions).IsEmpty();
     }
 
     [Test]
@@ -217,10 +262,9 @@ public class MessageUpdateTests
         using var context = new MatrixTestContext();
         await ReceiveAsync(context, Text("$m", "oops"));
 
-        var deleted = (MessageDeleted)(await ProcessAsync(context, Redaction("$x", "$m", sender: "@admin:example.org"))).Single();
-        await Assert.That(deleted.DeletedBy.User.UserId.Full).IsEqualTo("@admin:example.org");
-        await Assert.That(deleted.Message.IsDeleted).IsTrue();
-        await Assert.That(deleted.Message.Body).IsEqualTo("");
+        var deleted = Changed((await ProcessAsync(context, Redaction("$x", "$m", sender: "@admin:example.org"))).Single(), MessageChange.Deleted);
+        await Assert.That(deleted.IsDeleted).IsTrue();
+        await Assert.That(deleted.Body).IsEqualTo("");
 
         await Assert.That(await ProcessAsync(context, Reaction("$r", "$m", "👍"), Edit("$e", "$m", "back"))).IsEmpty();
         await Assert.That((await CurrentAsync(context, "$m")).Body).IsEqualTo("");
@@ -232,7 +276,7 @@ public class MessageUpdateTests
         using var context = new MatrixTestContext();
         await ReceiveAsync(context, Text("$m", "oops"));
         var updates = await ProcessAsync(context, Event("$x", "m.room.redaction", "{}", extra: ""","redacts":"$m" """));
-        await Assert.That(((MessageDeleted)updates.Single()).Message.IsDeleted).IsTrue();
+        await Assert.That(Changed(updates.Single(), MessageChange.Deleted).IsDeleted).IsTrue();
     }
 
     [Test]
@@ -242,6 +286,27 @@ public class MessageUpdateTests
         var updates = await ProcessAsync(context, Event("$m", "m.room.message", "{}",
             extra: ""","unsigned":{"redacted_because":{"type":"m.room.redaction"}}"""));
         await Assert.That(updates).IsEmpty();
+    }
+
+    [Test]
+    public async Task ThreadReply_ChangesTheRoot()
+    {
+        using var context = new MatrixTestContext();
+        await ReceiveAsync(context, Text("$root", "root"));
+        const string inThread = ""","m.relates_to":{"rel_type":"m.thread","event_id":"$root"}""";
+
+        var updates = await ProcessAsync(context, Text("$t1", "reply", relatesTo: inThread));
+        await Assert.That(((NewMessage)updates[0]).Message.Id).IsEqualTo("$t1");
+        var root = Changed(updates[1], MessageChange.Thread);
+        await Assert.That(root.Id).IsEqualTo("$root");
+        await Assert.That(root.Thread!.ReplyCount).IsEqualTo(1);
+
+        // Reactions to a reply don't change the thread.
+        await Assert.That((await ProcessAsync(context, Reaction("$r", "$t1", "👍"))).Count).IsEqualTo(1);
+
+        updates = await ProcessAsync(context, Redaction("$x", "$t1"));
+        await Assert.That(Changed(updates[0], MessageChange.Deleted).Id).IsEqualTo("$t1");
+        await Assert.That(Changed(updates[1], MessageChange.Thread).Thread?.ReplyCount ?? 0).IsEqualTo(0);
     }
 
     [Test]

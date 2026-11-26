@@ -5,12 +5,11 @@
 For now this is just a little sideproject to support the matrix.org chat protocol in .NET.
 I tried several libraries and got none of them to work as they were all still in beta or abandoned.
 
-Implementing this using the [Client spec version 1.17](https://spec.matrix.org/v1.17/client-server-api/)
-
 The first goal was to have a simple text client which can retrieve and send text messages for Chatbot development.
-It is slowly getting more comprehensive and moving towards a full client implementation.
+It slowly grows towards a full client implementation.
 
 I'm trying to keep it as simple as possible without sacrificing essential features.
+Trying to find the sweet spot between being too simple, or too complicated. Imho the matrix protocol itself is quite complex and has a ton of things to consider.
 
 RSMatrix is text-only. It does not support voice or video calls, and there are no plans to add them.
 
@@ -42,7 +41,7 @@ await foreach (var update in client.Updates.ReadAllAsync(cancellationToken))
 }
 ```
 
-A `Message` holds the snapshot of a message at the time the event occurred. Edits applied, deletion, reactions arrive as updates like `MessageEdited` or `ReactionAdded`, each with the message in its new state. They come for recent messages and for the ones you read recently.
+A `Message` holds the snapshot of a message at the time the event occurred.
 
 `room.GetMessagesAsync(limit, before)` returns older messages, oldest first. Matrix servers don't send reactions along with a message, so a message loaded on its own, like a reply target, may miss some. `message.HasAllReactions` indicates that state, `message.GetReactionsAsync()` fetches them from the server, which needs an extra request.
 

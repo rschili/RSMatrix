@@ -50,8 +50,7 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
         Source = message.Source;
         IsOwn = message.Sender.UserId == currentUserId;
         RetryCommand = retryCommand;
-        foreach (var reaction in message.Reactions ?? [])
-            Reactions.Add(new ReactionViewModel(reaction.Key, reaction.Users, currentUserId));
+        SetReactions(message.Reactions ?? [], currentUserId);
     }
 
     /// <summary>Empty while a sent message waits for the server.</summary>
@@ -178,6 +177,13 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
             Reactions[index] = new ReactionViewModel(key, senders, currentUserId);
     }
 
+    internal void SetReactions(IReadOnlyList<ChatReaction> reactions, string currentUserId)
+    {
+        Reactions.Clear();
+        foreach (var reaction in reactions)
+            Reactions.Add(new ReactionViewModel(reaction.Key, reaction.Users, currentUserId));
+    }
+
     internal void AddReader(ChatUser user) => ReadBy = [.. ReadBy.Where(u => u.UserId != user.UserId), user];
 
     internal void RemoveReader(string userId) => ReadBy = ReadBy.Where(u => u.UserId != userId).ToList();
@@ -278,6 +284,12 @@ public sealed class RoomMessages(string currentUserId)
     {
         if (_messagesByEventId.TryGetValue(targetEventId, out var message))
             message.RemoveReaction(key, sender.UserId, currentUserId);
+    }
+
+    public void SetReactions(string targetEventId, IReadOnlyList<ChatReaction> reactions)
+    {
+        if (_messagesByEventId.TryGetValue(targetEventId, out var message))
+            message.SetReactions(reactions, currentUserId);
     }
 
     /// <summary>Moves the user's avatar to the message they read last. The current user's receipts are not shown.</summary>

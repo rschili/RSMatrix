@@ -1141,35 +1141,64 @@ public sealed class MatrixClient : IAsyncDisposable
         if (entry is MessageEntry newMessage)
         {
             // A message deleted before we saw it never comes out as new. History shows where it was.
-            if (!newMessage.IsDeleted)
-                updates.Add(new NewMessage(cache.Build(newMessage)));
+            if (newMessage.IsDeleted)
+                return;
+            updates.Add(new NewMessage(cache.Build(newMessage)));
+            AddThreadChange(room, newMessage, updates);
+            return;
+        }
+        if (targetId == null)
+        {
+            Logger.LogDebug("Event {EventId} in room {RoomId} deletes an event the client never saw.", entry.EventId, room.RoomId.Full);
             return;
         }
         if (target == null || before == null)
         {
-            Logger.LogDebug("Event {EventId} in room {RoomId} changes a message that isn't in memory.", entry.EventId, room.RoomId.Full);
+            // Edits and reactions of edits or reactions aren't changes to a message.
+            if (cache.Find(targetId) != null)
+                return;
+            // Without the message, the client can't tell whether the change took effect. It reports it anyway.
+            MessageChange? unknownChange = entry switch
+            {
+                EditEntry => MessageChange.Edited,
+                ReactionEntry => MessageChange.Reactions,
+                RedactionEntry when redacted is EditEntry => MessageChange.Edited,
+                RedactionEntry when redacted is ReactionEntry => MessageChange.Reactions,
+                _ => null,
+            };
+            if (unknownChange != null)
+                updates.Add(new MessageChanged(new MessageReference(room, targetId), null, unknownChange.Value));
             return;
         }
 
-        var after = cache.Build(target);
-        switch (entry)
+        if (entry is EditEntry editEntry && !TimelineCache.IsValidEdit(target, editEntry))
         {
-            case EditEntry edit when !TimelineCache.IsValidEdit(target, edit):
-                Logger.LogDebug("Ignoring invalid edit {EventId} of message {TargetId} in room {RoomId}.", edit.EventId, target.EventId, room.RoomId.Full);
-                break;
-            case EditEntry or RedactionEntry when redacted is not MessageEntry && after.CurrentEditId != before.CurrentEditId:
-                updates.Add(new MessageEdited(after));
-                break;
-            case ReactionEntry reaction when !before.HasReaction(reaction.Key, reaction.User) && after.HasReaction(reaction.Key, reaction.User):
-                updates.Add(new ReactionAdded(after, reaction.Key, reaction.User));
-                break;
-            case RedactionEntry deletion when redacted is MessageEntry && !before.IsDeleted:
-                updates.Add(new MessageDeleted(after, deletion.RedactedBy));
-                break;
-            case RedactionEntry when redacted is ReactionEntry reaction && before.HasReaction(reaction.Key, reaction.User) && !after.HasReaction(reaction.Key, reaction.User):
-                updates.Add(new ReactionRemoved(after, reaction.Key, reaction.User));
-                break;
+            Logger.LogDebug("Ignoring invalid edit {EventId} of message {TargetId} in room {RoomId}.", editEntry.EventId, target.EventId, room.RoomId.Full);
+            return;
         }
+        var after = cache.Build(target);
+        MessageChange? change = entry switch
+        {
+            EditEntry or RedactionEntry when redacted is not MessageEntry && after.CurrentEditId != before.CurrentEditId => MessageChange.Edited,
+            ReactionEntry reaction when !before.HasReaction(reaction.Key, reaction.User) && after.HasReaction(reaction.Key, reaction.User) => MessageChange.Reactions,
+            RedactionEntry when redacted is MessageEntry && !before.IsDeleted => MessageChange.Deleted,
+            RedactionEntry when redacted is ReactionEntry reaction && before.HasReaction(reaction.Key, reaction.User) && !after.HasReaction(reaction.Key, reaction.User) => MessageChange.Reactions,
+            _ => null,
+        };
+        if (change == null)
+            return;
+        updates.Add(new MessageChanged(new MessageReference(room, target.EventId), after, change.Value));
+        if (change != MessageChange.Reactions)
+            AddThreadChange(room, target, updates);
+    }
+
+    /// <summary>Reports the thread root as changed when one of its replies was added, edited or deleted.</summary>
+    private static void AddThreadChange(Room room, MessageEntry reply, List<Update> updates)
+    {
+        if (reply.ThreadRootId is not { } rootId)
+            return;
+        var root = room.Cache.FindMessage(rootId);
+        updates.Add(new MessageChanged(new MessageReference(room, rootId), root == null ? null : room.Cache.Build(root), MessageChange.Thread));
     }
 
     /// <summary>Reads a page of history, newest event first, and returns the entries for a cache in the same order.</summary>

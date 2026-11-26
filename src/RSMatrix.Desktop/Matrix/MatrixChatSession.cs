@@ -6,7 +6,6 @@ using RSMatrix.Desktop.Chat;
 using RSMatrix.Desktop.Content;
 using RSMatrix.Desktop.Storage;
 using RSMatrix.Models;
-using LibraryReactionRemoved = RSMatrix.Models.ReactionRemoved;
 
 namespace RSMatrix.Desktop.Matrix;
 
@@ -112,7 +111,13 @@ public sealed class MatrixChatSession : IChatSession
             throw new InvalidOperationException("Only reactions sent in this session can be removed.");
         await GetRoom(roomId).RedactEventAsync(reactionId).WaitAsync(cancellationToken).ConfigureAwait(false);
         _sentReactionIds.TryRemove((roomId, targetEventId, key), out _);
-        _events.Writer.TryWrite(new RSMatrix.Desktop.Chat.ReactionRemoved(roomId, targetEventId, key, CurrentUser));
+        _events.Writer.TryWrite(new ReactionRemoved(roomId, targetEventId, key, CurrentUser));
+    }
+
+    public async Task<IReadOnlyList<ChatReaction>?> GetReactionsAsync(string roomId, string eventId, CancellationToken cancellationToken)
+    {
+        var message = await GetRoom(roomId).GetMessageAsync(eventId, cancellationToken).ConfigureAwait(false);
+        return message == null ? null : ToChatReactions(await message.GetReactionsAsync(cancellationToken).ConfigureAwait(false));
     }
 
     // The sync lazy-loads members and RSMatrix has no public call for the full list,
@@ -171,19 +176,12 @@ public sealed class MatrixChatSession : IChatSession
                         }
                         _events.Writer.TryWrite(new IssueReported(issue.Message, issue.Room?.RoomId.Full));
                         break;
-                    case ReactionAdded reaction:
-                        _events.Writer.TryWrite(new ReactionReceived(reaction.Message.Room.RoomId.Full, reaction.Message.Id,
-                            reaction.Key, ToChatUser(reaction.User)));
+                    case MessageChanged { Change: MessageChange.Reactions } changed:
+                        _events.Writer.TryWrite(new ReactionsChanged(changed.Reference.Room.RoomId.Full, changed.Reference.Id,
+                            changed.Message is { } current ? ToChatReactions(current.Reactions) : null));
                         break;
-                    case LibraryReactionRemoved reaction:
-                        _events.Writer.TryWrite(new RSMatrix.Desktop.Chat.ReactionRemoved(reaction.Message.Room.RoomId.Full,
-                            reaction.Message.Id, reaction.Key, ToChatUser(reaction.User)));
-                        break;
-                    case MessageEdited:
-                        // The app does not show message edits yet.
-                        break;
-                    case MessageDeleted:
-                        // The app does not show message deletions yet.
+                    case MessageChanged:
+                        // The app does not show edits, deletions or thread changes yet.
                         break;
                 }
             }
@@ -269,8 +267,11 @@ public sealed class MatrixChatSession : IChatSession
         var sender = ToChatUser(message.Sender);
         return new ChatMessage(message.Room.RoomId.Full, message.Id, sender, message.Timestamp, kind,
             message.Body, PlainTextParser.Parse(message.Body), message.IsEncrypted, message.ThreadRootId, message.ReplyToId,
-            Reactions: message.Reactions.Select(r => new ChatReaction(r.Key, r.Users.Select(ToChatUser).ToList())).ToList());
+            Reactions: ToChatReactions(message.Reactions));
     }
+
+    private static List<ChatReaction> ToChatReactions(IReadOnlyList<Reaction> reactions)
+        => reactions.Select(r => new ChatReaction(r.Key, r.Users.Select(ToChatUser).ToList())).ToList();
 
     private static ChatUser ToChatUser(RoomUser user)
         => new(user.User.UserId.Full, user.GetDisplayName());

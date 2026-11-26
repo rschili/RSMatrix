@@ -30,6 +30,9 @@ public interface IChatSession : IAsyncDisposable
     /// <param name="beforeEventId">The oldest message loaded so far, or null to start at the newest message.</param>
     Task<HistoryPage> LoadHistoryAsync(string roomId, string? beforeEventId, int limit, CancellationToken cancellationToken);
 
+    /// <summary>All reactions to a message, or null when the message can't be loaded.</summary>
+    Task<IReadOnlyList<ChatReaction>?> GetReactionsAsync(string roomId, string eventId, CancellationToken cancellationToken);
+
     /// <summary>Joined and invited members of the room, in no particular order.</summary>
     Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken);
 
@@ -93,6 +96,10 @@ public sealed record MessageReceived(ChatRoomInfo Room, ChatMessage Message) : C
 public sealed record ReactionReceived(string RoomId, string TargetEventId, string Key, ChatUser Sender) : ChatEvent;
 
 public sealed record ReactionRemoved(string RoomId, string TargetEventId, string Key, ChatUser Sender) : ChatEvent;
+
+/// <summary>The reactions of a message changed.</summary>
+/// <param name="Reactions">All reactions the message has now, or null when the session doesn't hold the message.</param>
+public sealed record ReactionsChanged(string RoomId, string TargetEventId, IReadOnlyList<ChatReaction>? Reactions) : ChatEvent;
 
 /// <summary>The user has read the room up to this event. Replaces the user's earlier receipt in the room.</summary>
 public sealed record ReceiptReceived(string RoomId, string EventId, ChatUser User) : ChatEvent;

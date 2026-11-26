@@ -144,6 +144,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             case ReactionRemoved reaction when _roomsById.TryGetValue(reaction.RoomId, out var room):
                 room.Timeline.Messages.RemoveReaction(reaction.TargetEventId, reaction.Key, reaction.Sender);
                 break;
+            case ReactionsChanged { Reactions: { } reactions } changed when _roomsById.TryGetValue(changed.RoomId, out var room):
+                room.Timeline.Messages.SetReactions(changed.TargetEventId, reactions);
+                break;
+            case ReactionsChanged changed when _roomsById.TryGetValue(changed.RoomId, out var room) &&
+                                                room.Timeline.Messages.Contains(changed.TargetEventId):
+                _ = ReloadReactionsAsync(room, changed.TargetEventId);
+                break;
             case ReceiptReceived receipt when _roomsById.TryGetValue(receipt.RoomId, out var room):
                 room.Timeline.Messages.ApplyReceipt(receipt.EventId, receipt.User);
                 break;
@@ -198,6 +205,22 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         Members = [];
         if (value)
             _ = LoadMembersAsync();
+    }
+
+    private async Task ReloadReactionsAsync(RoomViewModel room, string eventId)
+    {
+        try
+        {
+            if (await _session.GetReactionsAsync(room.RoomId, eventId, _lifetime.Token) is { } reactions)
+                room.Timeline.Messages.SetReactions(eventId, reactions);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Issue = $"The reactions of a message in {room.Name} could not be loaded: {ex.Message}";
+        }
     }
 
     private async Task LoadMembersAsync()
