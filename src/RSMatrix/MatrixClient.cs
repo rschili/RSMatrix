@@ -733,8 +733,8 @@ public sealed class MatrixClient : IAsyncDisposable
                     HandleEphemeralReceived(roomId, ephemeral);
                 if (roomEvents.State?.Events is { } state)
                     HandleStateReceived(roomId, state);
-                if (roomEvents.Timeline?.Events is { } timeline)
-                    HandleTimelineReceived(roomId, timeline, updates);
+                if (roomEvents.Timeline != null)
+                    HandleTimelineReceived(roomId, roomEvents.Timeline, updates);
             }
         }
 
@@ -1071,56 +1071,95 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleTimelineReceived(MatrixId roomId, List<RoomEvent> events, List<Update> updates)
+    private void HandleTimelineReceived(MatrixId roomId, SyncTimeline timeline, List<Update> updates)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
-        ArgumentNullException.ThrowIfNull(events, nameof(events));
         var room = GetOrAddRoom(roomId);
 
-        foreach (var e in events)
+        lock (room.TimelineLock)
         {
-            if (e == null)
+            var wasEmpty = room.Window.Count == 0;
+            foreach (var e in timeline.Events ?? [])
             {
-                Logger.LogWarning("Received null timeline event in room {RoomId}.", roomId.Full);
-                continue;
+                if (e == null)
+                {
+                    Logger.LogWarning("Received null timeline event in room {RoomId}.", roomId.Full);
+                    continue;
+                }
+                try
+                {
+                    // The presence of state_key (including "") identifies state, not
+                    // a hardcoded list of event types. State precedes message dispatch.
+                    if (e.StateKey != null)
+                        HandleStateReceived(roomId, [e]);
+                    else if (room.Window.Find(e.EventId) == null && ReadRoomEvent(room, e, updates) is { } message && room.Window.Add(message))
+                        updates.Add(new NewMessage(message));
+                }
+                catch (Exception ex) when (ex is JsonException or ArgumentOutOfRangeException)
+                {
+                    Logger.LogWarning(ex, "Could not interpret timeline event {Type} in room {RoomId}.", e.Type, roomId.Full);
+                }
             }
-            try
-            {
-                // The presence of state_key (including "") identifies state, not
-                // a hardcoded list of event types. State precedes message dispatch.
-                if (e.StateKey != null)
-                    HandleStateReceived(roomId, [e]);
-                else
-                    HandleTimelineEvent(room, e, updates);
-            }
-            catch (Exception ex) when (ex is JsonException or ArgumentOutOfRangeException)
-            {
-                Logger.LogWarning(ex, "Could not interpret timeline event {Type} in room {RoomId}.", e.Type, roomId.Full);
-            }
+            // History walks continue from the first messages the sync delivers for a room.
+            if (wasEmpty && room.Window.Oldest is { } oldest)
+                oldest.HistoryToken ??= timeline.PrevBatch;
         }
     }
 
-    private void HandleTimelineEvent(Room room, RoomEvent e, List<Update> updates)
+    /// <summary>
+    /// Reads a page of history, newest event first, and returns its messages. Messages the window holds are
+    /// returned as they are. Reactions are kept until their message loads. The caller holds the room's timeline lock.
+    /// </summary>
+    internal List<Message> ReadHistoryPage(Room room, List<RoomEvent> events)
     {
-        // A message deleted before we saw it never comes out as new, and its content is gone.
+        List<Message> messages = [];
+        foreach (var e in events)
+        {
+            try
+            {
+                if (e.StateKey != null)
+                    continue;
+                if (room.Window.Find(e.EventId) is { } known)
+                    messages.Add(known);
+                else if (ReadRoomEvent(room, e, updates: null) is { } message)
+                    messages.Add(message);
+            }
+            catch (Exception ex) when (ex is JsonException or ArgumentOutOfRangeException)
+            {
+                Logger.LogWarning(ex, "Could not interpret event {Type} in the history of room {RoomId}.", e.Type, room.RoomId.Full);
+            }
+        }
+        return messages;
+    }
+
+    /// <summary>
+    /// Reads a room event that isn't state and returns the message it is, if any. Edits, reactions and deletions
+    /// are applied to the messages in the window. Pass <paramref name="updates"/> for live events from the sync
+    /// and null for history.
+    /// </summary>
+    private Message? ReadRoomEvent(Room room, RoomEvent e, List<Update>? updates)
+    {
+        var isEncrypted = e.Type == "m.room.encrypted";
         if (e.Unsigned?.RedactedBecause != null)
         {
+            // Live, a message deleted before we saw it never comes out as new. History shows where it was.
+            if (updates == null && (isEncrypted || e.Type == "m.room.message"))
+                return CreateTombstone(room, e, isEncrypted);
             Logger.LogDebug("Skipping event {EventId} in room {RoomId}: it was deleted.", e.EventId, room.RoomId.Full);
-            return;
+            return null;
         }
 
-        var isEncrypted = e.Type == "m.room.encrypted";
         if (isEncrypted)
         {
             if (DecryptRoomEvent(room, e) is not { } decrypted)
-                return;
+                return null;
             e = decrypted;
         }
 
         if (e.Content is not { ValueKind: JsonValueKind.Object } content)
         {
-            Logger.LogWarning("Received timeline event {Type} without object content in room {RoomId}.", e.Type, room.RoomId.Full);
-            return;
+            Logger.LogWarning("Received event {Type} without object content in room {RoomId}.", e.Type, room.RoomId.Full);
+            return null;
         }
 
         switch (e.Type)
@@ -1129,48 +1168,23 @@ public sealed class MatrixClient : IAsyncDisposable
                 // Decrypted content stays out of the logs.
                 var messageContent = ParseContent<RoomMessageContent>(content, withExamples: !isEncrypted);
                 if (messageContent == null)
-                    return;
-                if (messageContent.RelatesTo?.RelType == "m.replace")
-                    HandleEdit(room, e, messageContent, isEncrypted, updates);
-                else if (CreateMessage(room, e, messageContent, isEncrypted) is { } message && room.Window.Add(message))
-                    updates.Add(new NewMessage(message));
-                break;
+                    return null;
+                if (messageContent.RelatesTo?.RelType != "m.replace")
+                    return CreateMessage(room, e, messageContent, isEncrypted);
+                HandleEdit(room, e, messageContent, isEncrypted, updates);
+                return null;
             case "m.reaction":
                 HandleReaction(room, e, ParseContent<ReactionContent>(content, withExamples: !isEncrypted), updates);
-                break;
-            case "m.room.redaction" when !isEncrypted:
-                HandleRedaction(room, e, ParseContent<RedactionContent>(content), updates);
-                break;
-            default:
-                Diagnostics.ReportUnhandled(Logger, UnhandledKind.TimelineEvent, e.Type, isEncrypted ? null : e);
-                break;
-        }
-    }
-
-    /// <summary>
-    /// Creates a message for an event from history, or returns null if the event isn't a message. Edits, reactions
-    /// and deleted messages aren't messages of their own.
-    /// </summary>
-    internal Message? CreateMessage(Room room, RoomEvent e)
-    {
-        if (e.StateKey != null || e.Unsigned?.RedactedBecause != null)
-            return null;
-        var isEncrypted = e.Type == "m.room.encrypted";
-        if (isEncrypted && DecryptRoomEvent(room, e) is { } decrypted)
-            e = decrypted;
-        if (e.Type != "m.room.message" || e.Content is not { ValueKind: JsonValueKind.Object } content)
-            return null;
-        try
-        {
-            var messageContent = ParseContent<RoomMessageContent>(content, withExamples: !isEncrypted);
-            if (messageContent == null || messageContent.RelatesTo?.RelType == "m.replace")
                 return null;
-            return CreateMessage(room, e, messageContent, isEncrypted);
-        }
-        catch (JsonException ex)
-        {
-            Logger.LogWarning(ex, "Could not interpret message {EventId} in room {RoomId}.", e.EventId, room.RoomId.Full);
-            return null;
+            case "m.room.redaction" when !isEncrypted:
+                // In history, the server has applied the redaction already.
+                if (updates != null)
+                    HandleRedaction(room, e, ParseContent<RedactionContent>(content), updates);
+                return null;
+            default:
+                if (updates != null)
+                    Diagnostics.ReportUnhandled(Logger, UnhandledKind.TimelineEvent, e.Type, isEncrypted ? null : e);
+                return null;
         }
     }
 
@@ -1188,48 +1202,100 @@ public sealed class MatrixClient : IAsyncDisposable
         // A thread message carries a reply to the previous thread message as a fallback for clients without threads.
         var replyToId = threadRootId != null && relatesTo!.IsFallingBack == true ? null : relatesTo?.InReplyTo?.EventId;
 
-        return new Message(e.EventId, room, sender, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
+        var message = new Message(e.EventId, room, sender, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
             sender.User.UserId.Equals(CurrentUser), isEncrypted, replyToId, threadRootId,
             ToMessageContent(room, kind, content.Body, content.Format, content.FormattedBody, content.Mentions));
+
+        if (e.Unsigned?.Relations?.Replace is { } bundledEdit)
+            ApplyBundledEdit(room, message, bundledEdit);
+        if (e.Unsigned?.Relations?.Thread is { } thread)
+        {
+            var latestReply = thread.LatestEvent is not { } latest ? null
+                : room.Window.Find(latest.EventId) ?? ReadRoomEvent(room, latest, updates: null);
+            message.SetThread(new ThreadSummary(thread.Count, latestReply, thread.CurrentUserParticipated));
+        }
+        foreach (var reaction in room.Window.GetPendingReactions(message.Id))
+            message.AddReaction(reaction, out _);
+        return message;
     }
 
-    private void HandleEdit(Room room, RoomEvent e, RoomMessageContent content, bool isEncrypted, List<Update> updates)
+    /// <summary>A deleted message in history. Its content and relations are gone.</summary>
+    private Message? CreateTombstone(Room room, RoomEvent e, bool isEncrypted)
     {
-        if (content.RelatesTo?.EventId is not { } targetId || room.Window.Find(targetId) is not { } target)
-        {
-            Logger.LogDebug("Ignoring edit {EventId} in room {RoomId}: the edited message isn't loaded.", e.EventId, room.RoomId.Full);
-            return;
-        }
-        // Only the sender can edit a message, and an encrypted message is only edited by an encrypted edit.
-        if (content.NewContent is not { } newContent || target.Sender.User.UserId.Full != e.Sender || (target.IsEncrypted && !isEncrypted))
-        {
-            Logger.LogDebug("Ignoring invalid edit {EventId} of message {TargetId} in room {RoomId}.", e.EventId, targetId, room.RoomId.Full);
-            return;
-        }
-
-        var edit = new MessageEdit(e.EventId, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
-            ToMessageContent(room, ToMessageKind(newContent.MsgType), newContent.Body, newContent.Format, newContent.FormattedBody, newContent.Mentions));
-        if (!target.AddEdit(edit, out var contentChanged))
-            return;
-        room.Window.AddRelated(e.EventId, target);
-        if (contentChanged)
-            updates.Add(new MessageEdited(target));
+        if (GetRoomUser(room, e.Sender) is not { } sender)
+            return null;
+        var message = new Message(e.EventId, room, sender, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
+            sender.User.UserId.Equals(CurrentUser), isEncrypted, null, null, new MessageContent(MessageKind.Unknown, "", null, []));
+        message.Delete();
+        return message;
     }
 
-    private void HandleReaction(Room room, RoomEvent e, ReactionContent? content, List<Update> updates)
+    private void ApplyBundledEdit(Room room, Message message, RoomEvent edit)
+    {
+        var isEncrypted = edit.Type == "m.room.encrypted";
+        if (isEncrypted)
+        {
+            if (DecryptRoomEvent(room, edit) is not { } decrypted)
+                return;
+            edit = decrypted;
+        }
+        if (edit.Type == "m.room.message" && edit.Content is { ValueKind: JsonValueKind.Object } content &&
+            ParseContent<RoomMessageContent>(content, withExamples: !isEncrypted) is { RelatesTo.RelType: "m.replace" } editContent &&
+            ToEditChange(room, edit, editContent, isEncrypted) is { } change && change.TargetId == message.Id)
+        {
+            ApplyEdit(message, change);
+        }
+    }
+
+    private void HandleEdit(Room room, RoomEvent e, RoomMessageContent content, bool isEncrypted, List<Update>? updates)
+    {
+        if (ToEditChange(room, e, content, isEncrypted) is not { } change)
+            return;
+        // A message loaded later has the edit that counts bundled in by the server.
+        if (room.Window.Find(change.TargetId) is not { } target)
+            Logger.LogDebug("Ignoring edit {EventId} in room {RoomId}: the edited message isn't loaded.", e.EventId, room.RoomId.Full);
+        else if (ApplyEdit(target, change))
+            updates?.Add(new MessageEdited(target));
+    }
+
+    private EditChange? ToEditChange(Room room, RoomEvent e, RoomMessageContent content, bool isEncrypted)
+    {
+        if (content.RelatesTo?.EventId is not { } targetId || content.NewContent is not { } newContent)
+        {
+            Logger.LogDebug("Ignoring edit {EventId} in room {RoomId}: it has no target or no new content.", e.EventId, room.RoomId.Full);
+            return null;
+        }
+        return new EditChange(targetId, e.Sender, isEncrypted, new MessageEdit(e.EventId, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
+            ToMessageContent(room, ToMessageKind(newContent.MsgType), newContent.Body, newContent.Format, newContent.FormattedBody, newContent.Mentions)));
+    }
+
+    /// <summary>Returns true if the message shows different content now.</summary>
+    private bool ApplyEdit(Message target, EditChange change)
+    {
+        // Only the sender can edit a message, and an encrypted message is only edited by an encrypted edit.
+        if (target.Sender.User.UserId.Full != change.SenderId || (target.IsEncrypted && !change.IsEncrypted))
+        {
+            Logger.LogDebug("Ignoring invalid edit {EventId} of message {TargetId} in room {RoomId}.",
+                change.Edit.EventId, target.Id, target.Room.RoomId.Full);
+            return false;
+        }
+        return target.AddEdit(change.Edit, out var contentChanged) && contentChanged;
+    }
+
+    private void HandleReaction(Room room, RoomEvent e, ReactionContent? content, List<Update>? updates)
     {
         if (content?.RelatesTo is not { RelType: "m.annotation" } relation)
         {
             Diagnostics.ReportUnhandled(Logger, UnhandledKind.Relation, content?.RelatesTo.RelType ?? "m.reaction without relation", e);
             return;
         }
-        if (room.Window.Find(relation.EventId) is not { } target || GetRoomUser(room, e.Sender) is not { } user)
+        if (GetRoomUser(room, e.Sender) is not { } user)
             return;
-        if (!target.AddReaction(new ReactionEvent(e.EventId, relation.Key, user), out var isNewKey))
-            return;
-        room.Window.AddRelated(e.EventId, target);
-        if (isNewKey)
-            updates.Add(new ReactionAdded(target, relation.Key, user));
+        var change = new ReactionChange(relation.EventId, new ReactionEvent(e.EventId, relation.Key, user));
+        if (room.Window.Find(change.TargetId) is not { } target)
+            room.Window.AddPendingReaction(change);
+        else if (target.AddReaction(change.Reaction, out var isNewKey) && isNewKey)
+            updates?.Add(new ReactionAdded(target, relation.Key, user));
     }
 
     private void HandleRedaction(Room room, RoomEvent e, RedactionContent? content, List<Update> updates)
@@ -1242,6 +1308,7 @@ public sealed class MatrixClient : IAsyncDisposable
         if (GetRoomUser(room, e.Sender) is not { } redactedBy)
             return;
 
+        room.Window.RemovePendingReaction(redactedId);
         if (room.Window.Find(redactedId) is { } message)
         {
             if (message.Delete())
@@ -1249,7 +1316,6 @@ public sealed class MatrixClient : IAsyncDisposable
         }
         else if (room.Window.FindRelatedTarget(redactedId) is { } target)
         {
-            room.Window.RemoveRelated(redactedId);
             if (target.RemoveReaction(redactedId) is { } reaction)
                 updates.Add(new ReactionRemoved(target, reaction.Key, reaction.User));
             else if (target.RemoveEdit(redactedId))

@@ -26,13 +26,13 @@ public class MatrixDiagnosticsTests
           "unknown_room_field":1,
           "timeline":{"limited":false,"events":[
             {"type":"m.room.message","sender":"@a:example.org","event_id":"$1","origin_server_ts":1,"content":{"anything":1},
-             "unsigned":{"age":1,"m.relations":{}}}]}}}}}
+             "unsigned":{"age":1,"m.relations":{"org.example.relation":{}}}}]}}}}}
         """);
 
         var found = MatrixDiagnostics.FindUnknownFields(json.RootElement, typeof(SyncResponse))
             .Select(f => $"{f.Owner}.{f.Field}").ToList();
 
-        await Assert.That(found).IsEquivalentTo(["SyncResponse.new_section", "SyncJoinedRoom.unknown_room_field", "UnsignedData.m.relations"]);
+        await Assert.That(found).IsEquivalentTo(["SyncResponse.new_section", "SyncJoinedRoom.unknown_room_field", "BundledRelations.org.example.relation"]);
     }
 
     [Test]

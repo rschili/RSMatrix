@@ -215,7 +215,8 @@ internal static class MatrixHelper
         return await HttpClientHelper.SendAsync<JoinRoomResponse>(httpClientParameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
-    internal static async Task<RoomMessagesResponse> GetMessagesAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessagesParameters parameters)
+    internal static async Task<RoomMessagesResponse> GetMessagesAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessagesParameters parameters,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
@@ -225,6 +226,47 @@ internal static class MatrixHelper
             $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/messages",
             parameters.GetAsParameters());
 
-        return await HttpClientHelper.SendAsync<RoomMessagesResponse>(httpClientParameters, path).ConfigureAwait(false);
+        return await HttpClientHelper.SendAsync<RoomMessagesResponse>(httpClientParameters, path, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<EventContextResponse> GetEventContextAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, int limit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentException.ThrowIfNullOrEmpty(eventId, nameof(eventId));
+
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/context/{Uri.EscapeDataString(eventId)}?limit={limit}";
+        return await HttpClientHelper.SendAsync<EventContextResponse>(httpClientParameters, path, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static Task<RoomEvent> GetRoomEventAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId,
+        CancellationToken cancellationToken = default)
+        => GetRoomEventAsync<RoomEvent>(httpClientParameters, roomId, eventId, cancellationToken);
+
+    /// <typeparam name="T">A model, or <see cref="JsonElement"/> for the event as the server sent it.</typeparam>
+    internal static async Task<T> GetRoomEventAsync<T>(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentException.ThrowIfNullOrEmpty(eventId, nameof(eventId));
+
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/event/{Uri.EscapeDataString(eventId)}";
+        return await HttpClientHelper.SendAsync<T>(httpClientParameters, path, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Events that relate to an event with the given relation type, newest first.</summary>
+    internal static async Task<RelationsResponse> GetRelationsAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, string relType,
+        string? from, int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+        ArgumentException.ThrowIfNullOrEmpty(eventId, nameof(eventId));
+
+        var path = $"/_matrix/client/v1/rooms/{Uri.EscapeDataString(roomId.Full)}/relations/{Uri.EscapeDataString(eventId)}/{Uri.EscapeDataString(relType)}?dir=b&limit={limit}";
+        if (from != null)
+            path += $"&from={Uri.EscapeDataString(from)}";
+        return await HttpClientHelper.SendAsync<RelationsResponse>(httpClientParameters, path, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 }

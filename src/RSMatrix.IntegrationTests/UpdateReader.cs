@@ -12,15 +12,18 @@ internal static class UpdateReader
         => ReceiveAsync(client, message => message.Id == eventId, cancellationToken);
 
     public static async Task<Message> ReceiveAsync(MatrixClient client, Func<Message, bool> match, CancellationToken cancellationToken)
+        => (await ReceiveUpdateAsync<NewMessage>(client, update => match(update.Message), cancellationToken)).Message;
+
+    public static async Task<T> ReceiveUpdateAsync<T>(MatrixClient client, Func<T, bool> match, CancellationToken cancellationToken)
     {
         await foreach (var update in client.Updates.ReadAllAsync(cancellationToken))
         {
-            if (update.Value is NewMessage { Message: var message } && match(message))
-                return message;
+            if (update.Value is T expected && match(expected))
+                return expected;
             if (update.Value is ClientIssue issue)
                 PassedIssues.GetOrCreateValue(client).Add(issue);
         }
-        throw new InvalidOperationException("Sync ended before receiving the expected message.");
+        throw new InvalidOperationException($"Sync ended before receiving the expected {typeof(T).Name}.");
     }
 
     /// <summary>Returns the issues reported so far and not read before.</summary>

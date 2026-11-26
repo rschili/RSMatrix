@@ -70,15 +70,22 @@ public class EncryptionTests
             await Assert.That(rawReaction.GetProperty("type").GetString()).IsEqualTo("m.room.encrypted");
             await Assert.That(rawReaction.GetProperty("content").GetProperty("m.relates_to").GetProperty("rel_type")
                 .GetString()).IsEqualTo("m.annotation");
+            var reaction = await ReceiveUpdateAsync<ReactionAdded>(carol, u => u.Message.Id == replyId, server.CancellationToken);
+            await Assert.That(reaction.Key).IsEqualTo("👍");
+            await Assert.That(reaction.User.User.UserId.Full).IsEqualTo($"@{bobUser}:localhost");
 
             var editId = await bobRoom.EditMessageAsync(secretId, "edited body");
-            var edit = await ReceiveAsync(carol, editId, server.CancellationToken);
-            await Assert.That(edit.Body).IsEqualTo("* edited body");
+            var edited = await ReceiveUpdateAsync<MessageEdited>(carol, u => u.Message.Id == secretId, server.CancellationToken);
+            await Assert.That(ReferenceEquals(edited.Message, secret)).IsTrue();
+            await Assert.That(secret.Body).IsEqualTo("edited body");
 
-            var history = await secret.Room.FetchMessagesAsync(limit: 20);
-            await Assert.That(history.Messages.Any(m => m.Id == secretId && m.Body == "secret body" && m.IsEncrypted)).IsTrue();
-            await Assert.That(history.Messages.Any(m => m.Id == pingId && !m.IsEncrypted)).IsTrue();
-            await Assert.That(history.Messages.Any(m => m.Id == replyId && m.Body == "reply body")).IsTrue();
+            var history = await secret.Room.GetMessagesAsync(limit: 20);
+            await Assert.That(string.Join(",", history.Select(m => m.Id))).IsEqualTo($"{pingId},{secretId},{replyId}");
+            await Assert.That(ReferenceEquals(history[1], secret)).IsTrue();
+            await Assert.That(history[0].IsEncrypted).IsFalse();
+            var source = await secret.GetSourceAsync();
+            await Assert.That(source).Contains("\"type\": \"m.room.message\"");
+            await Assert.That(source).Contains("secret body");
 
             // Restart Carol with the same device and store: old sessions must still work both ways.
             await carol.DisposeAsync();
@@ -88,6 +95,18 @@ public class EncryptionTests
             var afterRestartId = await bobRoom.SendMessageAsync("after restart");
             var afterRestart = await ReceiveAsync(restarted, afterRestartId, server.CancellationToken);
             await Assert.That(afterRestart.Body).IsEqualTo("after restart");
+
+            // The restarted window starts after the restart, so the edit and the reaction come from history.
+            var loaded = await afterRestart.Room.GetMessageAsync(secretId);
+            await Assert.That(loaded!.Body).IsEqualTo("edited body");
+            await Assert.That(loaded.IsEncrypted).IsTrue();
+            var walked = await afterRestart.Room.GetMessagesAsync(limit: 20, before: afterRestart);
+            await Assert.That(string.Join(",", walked.Select(m => m.Id))).IsEqualTo($"{pingId},{secretId},{replyId}");
+            await Assert.That(walked.Any(m => m.Id == editId)).IsFalse();
+            await Assert.That(walked[1].Body).IsEqualTo("edited body");
+            await Assert.That(walked[2].Reactions.Single().Key).IsEqualTo("👍");
+            var walkedById = await afterRestart.Room.GetMessagesAsync(limit: 1, beforeId: replyId);
+            await Assert.That(ReferenceEquals(walkedById.Single(), walked[1])).IsTrue();
 
             var answerId = await afterRestart.ReplyAsync("answer after restart", quote: false);
             var answer = await ReceiveAsync(bob, answerId, server.CancellationToken);
@@ -193,8 +212,8 @@ public class EncryptionTests
             await Assert.That(await GetSessionIdAsync(alice, roomPath, afterId)).IsEqualTo(firstSession);
 
             // The new device only got the key from its current index on, so older history stays unreadable.
-            var history = await after.Room.FetchMessagesAsync(limit: 20);
-            await Assert.That(history.Messages.Any(m => m.Id == beforeId)).IsFalse();
+            var history = await after.Room.GetMessagesAsync(limit: 20);
+            await Assert.That(history.Any(m => m.Id == beforeId)).IsFalse();
             await Assert.That(ReadIssues(carolPhone).Any(i => i.Kind == ClientIssueKind.DecryptionFailed && i.EventId == beforeId)).IsTrue();
 
             // Once Bob has seen Carol leave, his next message uses a new key.

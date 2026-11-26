@@ -30,20 +30,20 @@ public class ClientIssueTests
     }
 
     [Test]
-    public async Task FetchMessages_ReportsUndecryptableHistory()
+    public async Task GetMessages_ReportsUndecryptableHistory()
     {
         using var context = new MatrixTestContext();
         context.Send = (_, _) => Task.FromResult(MatrixTestContext.Json("""
-            {"start":"t1","end":"t2","chunk":[
+            {"start":"t1","chunk":[
              {"type":"m.room.message","room_id":"!room:example.org","sender":"@alice:example.org","event_id":"$plain","origin_server_ts":1700000000000,
               "content":{"msgtype":"m.text","body":"hello"}},
              {"type":"m.room.encrypted","room_id":"!room:example.org","sender":"@alice:example.org","event_id":"$secret","origin_server_ts":1700000000000,
               "content":{"algorithm":"m.megolm.v1.aes-sha2","session_id":"s","ciphertext":"c"}}]}
             """));
 
-        var history = await context.Room().FetchMessagesAsync();
+        var history = await context.Room().GetMessagesAsync(limit: 10);
 
-        await Assert.That(history.Messages.Single().Id).IsEqualTo("$plain");
+        await Assert.That(history.Single().Id).IsEqualTo("$plain");
         var issue = ReadAll(context.Client).Single();
         await Assert.That(issue.Kind).IsEqualTo(ClientIssueKind.DecryptionFailed);
         await Assert.That(issue.EventId).IsEqualTo("$secret");

@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using RSMatrix.Http;
 
@@ -37,6 +39,9 @@ public class Room
     public List<MatrixId>? AltAliases { get; internal set; }
 
     internal MessageWindow Window { get; } = new();
+
+    /// <summary>Serialises the sync with history walks, so changes to the window and its messages apply one at a time.</summary>
+    internal Lock TimelineLock { get; } = new();
 
     public RoomEncryption? Encryption { get; internal set; }
     internal bool HasEncryptionState { get; set; }
@@ -170,31 +175,175 @@ public class Room
     }
 
     /// <summary>
-    /// Fetches message history from the room. Messages the room's window holds are returned as the same objects.
-    /// The others don't receive later changes.
+    /// Returns messages of the room, oldest first. Without <paramref name="before"/>, the newest ones; to continue,
+    /// pass the first message of the previous result. Fewer than <paramref name="limit"/> messages means the start
+    /// of the visible history. Thread replies are included, each with <see cref="Message.ThreadRootId"/>.
+    /// Messages that continue the room's window receive later edits, reactions and deletions. The others are
+    /// separate objects that don't.
     /// </summary>
-    /// <param name="limit">Maximum number of events to request (default 10)</param>
-    /// <param name="from">Pagination token to start from (null for most recent)</param>
-    /// <param name="direction">Direction to paginate: "b" for backwards (default), "f" for forwards</param>
-    /// <returns>A result containing messages and a pagination token for further fetching</returns>
-    public async Task<MessageHistoryResult> FetchMessagesAsync(int limit = 10, string? from = null, string direction = "b")
+    public Task<IReadOnlyList<Message>> GetMessagesAsync(int limit, Message? before = null, CancellationToken cancellationToken = default)
     {
-        var parameters = new MessagesParameters { Dir = direction, Limit = limit, From = from };
-        var response = await MatrixHelper.GetMessagesAsync(Client.HttpClientParameters, RoomId, parameters).ConfigureAwait(false);
+        if (before != null && !before.Room.RoomId.Equals(RoomId))
+            throw new ArgumentException("The message is from another room.", nameof(before));
+        return GetMessagesCoreAsync(limit, before?.Id, before?.HistoryToken, cancellationToken);
+    }
 
-        var messages = new List<Message>();
-        foreach (var chunkEvent in response.Chunk ?? [])
+    /// <summary>
+    /// Returns the messages before the message with this ID, oldest first. Works for any message of the room,
+    /// also ones the client hasn't loaded. See <see cref="GetMessagesAsync(int, Message?, CancellationToken)"/>.
+    /// </summary>
+    public Task<IReadOnlyList<Message>> GetMessagesAsync(int limit, string beforeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(beforeId);
+        return GetMessagesCoreAsync(limit, beforeId, Window.Find(beforeId)?.HistoryToken, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<Message>> GetMessagesCoreAsync(int limit, string? beforeId, string? beforeToken, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        List<Message> messages; // newest first, like the pages
+        bool continuesWindow;
+        Message? windowStart;
+        string? token;
+        lock (TimelineLock)
         {
-            if (Window.Find(chunkEvent.EventId) is { } known)
-            {
-                messages.Add(known);
-                continue;
-            }
-            if (Client.CreateMessage(this, chunkEvent) is { } message)
-                messages.Add(message);
+            continuesWindow = beforeId == null || Window.Find(beforeId) != null;
+            messages = continuesWindow ? Window.TakeOlder(beforeId, limit) : [];
+            if (messages.Count == limit || (continuesWindow && Window.ReachedStart))
+                return Chronological(messages);
+            windowStart = continuesWindow ? Window.Oldest : null;
+            token = continuesWindow ? windowStart?.HistoryToken : beforeToken;
         }
 
-        return new MessageHistoryResult { Messages = messages, NextToken = response.End };
+        // Without a token, the server tells us the position before the message. Without a message, /messages starts at the newest one.
+        var startId = continuesWindow ? windowStart?.Id : beforeId;
+        if (token == null && startId != null)
+        {
+            var context = await MatrixHelper.GetEventContextAsync(Client.HttpClientParameters, RoomId, startId, limit: 0, cancellationToken).ConfigureAwait(false);
+            if (context.Start is not { } start)
+                return Chronological(messages);
+            token = start;
+        }
+
+        // Pages also hold reactions, edits and state, so a page can have fewer messages than asked for.
+        while (messages.Count < limit)
+        {
+            var response = await MatrixHelper.GetMessagesAsync(Client.HttpClientParameters, RoomId,
+                new MessagesParameters { Dir = "b", From = token, Limit = limit - messages.Count }, cancellationToken).ConfigureAwait(false);
+            var reachedStart = response.End == null || response.Chunk.Count == 0;
+            lock (TimelineLock)
+            {
+                var page = Client.ReadHistoryPage(this, response.Chunk);
+                if (page.Count > 0 && !reachedStart)
+                    page[^1].HistoryToken = response.End;
+                // The page joins the window if it continues it, and the sync didn't change the window's older end meanwhile.
+                if (continuesWindow && Window.Oldest == windowStart)
+                {
+                    Window.Prepend(page, reachedStart);
+                    windowStart = Window.Oldest;
+                }
+                else
+                {
+                    continuesWindow = false;
+                }
+                messages.AddRange(page);
+            }
+            if (reachedStart)
+                break;
+            token = response.End;
+        }
+        return Chronological(messages);
+    }
+
+    /// <summary>
+    /// Returns the message with this ID: the one the room's window holds, or else a separate object loaded from the
+    /// server that doesn't receive later changes and may miss reactions. Null if the server doesn't know the event,
+    /// we may not see it, or it isn't a message.
+    /// </summary>
+    public async Task<Message?> GetMessageAsync(string eventId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(eventId);
+        if (Window.Find(eventId) is { } known)
+            return known;
+
+        RoomEvent e;
+        try
+        {
+            e = await MatrixHelper.GetRoomEventAsync(Client.HttpClientParameters, RoomId, eventId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (MatrixResponseException ex) when (ex.ErrorCode == "M_NOT_FOUND")
+        {
+            return null;
+        }
+        lock (TimelineLock)
+            return Client.ReadHistoryPage(this, [e]).SingleOrDefault();
+    }
+
+    /// <summary>
+    /// Returns replies of a thread, oldest first, without the thread's first message. Paging works like
+    /// <see cref="GetMessagesAsync(int, Message?, CancellationToken)"/>: pass the first reply of the previous result
+    /// to continue. Replies the room's window holds are returned as they are.
+    /// </summary>
+    public async Task<IReadOnlyList<Message>> GetThreadMessagesAsync(string threadRootId, int limit, Message? before = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(threadRootId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        // Replies are newer than their thread's first message, so the window holds all of them if it holds that one.
+        lock (TimelineLock)
+        {
+            if (Window.Find(threadRootId) != null)
+                return Chronological(Window.TakeOlderInThread(threadRootId, before?.Id, limit));
+        }
+
+        List<Message> messages = []; // newest first, like the pages
+        var token = before?.ThreadHistoryToken;
+        // Without a token, walk from the newest reply and skip everything up to the one to continue from.
+        var skipUntilId = token == null ? before?.Id : null;
+        while (messages.Count < limit)
+        {
+            var response = await MatrixHelper.GetRelationsAsync(Client.HttpClientParameters, RoomId, threadRootId, "m.thread", token,
+                limit - messages.Count, cancellationToken).ConfigureAwait(false);
+            lock (TimelineLock)
+            {
+                var page = Client.ReadHistoryPage(this, response.Chunk);
+                if (skipUntilId != null)
+                {
+                    var skipped = page.FindIndex(m => m.Id == skipUntilId) + 1;
+                    page.RemoveRange(0, skipped > 0 ? skipped : page.Count);
+                    if (skipped > 0)
+                        skipUntilId = null;
+                }
+                if (page.Count > 0 && response.NextBatch != null)
+                    page[^1].ThreadHistoryToken = response.NextBatch;
+                messages.AddRange(page);
+            }
+            if (response.NextBatch == null || response.Chunk.Count == 0)
+                break;
+            token = response.NextBatch;
+        }
+        return Chronological(messages);
+    }
+
+    private static readonly JsonSerializerOptions SourceOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    internal async Task<string> GetEventSourceAsync(string eventId, CancellationToken cancellationToken)
+    {
+        var json = await MatrixHelper.GetRoomEventAsync<JsonElement>(Client.HttpClientParameters, RoomId, eventId, cancellationToken).ConfigureAwait(false);
+        var source = JsonNode.Parse(json.GetRawText())!.AsObject();
+        if (Client.Encryption is { } encryption && source["type"]?.GetValue<string>() == "m.room.encrypted" &&
+            json.Deserialize<RoomEvent>() is { } encrypted && encryption.DecryptRoomEvent(RoomId.Full, encrypted, out _) is { } decrypted)
+        {
+            source["type"] = decrypted.Type;
+            source["content"] = decrypted.Content is { } content ? JsonNode.Parse(content.GetRawText()) : null;
+        }
+        return source.ToJsonString(SourceOptions);
+    }
+
+    private static List<Message> Chronological(List<Message> newestFirst)
+    {
+        newestFirst.Reverse();
+        return newestFirst;
     }
 
     private readonly Lock _readMarkerLock = new();
@@ -256,19 +405,6 @@ public class Room
     {
         return DisplayName ?? RoomId.Localpart.ToString();
     }
-}
-
-/// <summary>
-/// Result of a message history fetch, containing messages and a pagination token.
-/// </summary>
-public class MessageHistoryResult
-{
-    public List<Message> Messages { get; internal init; } = [];
-    /// <summary>
-    /// Token to pass as 'from' in the next FetchMessagesAsync call to continue paginating.
-    /// Null when there are no more messages to fetch.
-    /// </summary>
-    public string? NextToken { get; internal init; }
 }
 
 public class RoomUser

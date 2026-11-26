@@ -36,6 +36,7 @@ public sealed class SampleChatSession : IChatSession
     private readonly Channel<ChatEvent> _events = Channel.CreateUnbounded<ChatEvent>();
     private readonly DateTimeOffset _now;
     private int _nextEventNumber;
+    private readonly Dictionary<string, int> _historyPageByOldestEventId = [];
 
     public SampleChatSession(DateTimeOffset? now = null)
     {
@@ -89,21 +90,22 @@ public sealed class SampleChatSession : IChatSession
         _events.Writer.TryWrite(new ReceiptReceived(room.RoomId, eventId, reader));
     }
 
-    public async Task<HistoryPage> LoadHistoryAsync(string roomId, string? from, int limit, CancellationToken cancellationToken)
+    public async Task<HistoryPage> LoadHistoryAsync(string roomId, string? beforeEventId, int limit, CancellationToken cancellationToken)
     {
         await Task.Delay(TimeSpan.FromMilliseconds(400), cancellationToken).ConfigureAwait(false);
         if (roomId != Lounge.RoomId)
-            return new HistoryPage([], null);
+            return new HistoryPage([], false);
 
         // The lounge has three pages of older small talk to try scrolling back.
-        var page = from == null ? 0 : int.Parse(from);
+        var page = beforeEventId != null && _historyPageByOldestEventId.TryGetValue(beforeEventId, out var previous) ? previous + 1 : 0;
         var start = _now.AddDays(-3 - page);
         var senders = new[] { Alice, Bob, Carol, Me };
         var messages = Enumerable.Range(0, limit)
             .Select(i => CreateMessage(Lounge, senders[(i + page) % senders.Length], start.AddMinutes(i * 7),
                 ChatMessageKind.Text, $"Older message {page * limit + limit - i} from the archive."))
             .ToList();
-        return new HistoryPage(messages, page < 2 ? (page + 1).ToString() : null);
+        _historyPageByOldestEventId[messages[0].EventId] = page;
+        return new HistoryPage(messages, page < 2);
     }
 
     public async Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken)

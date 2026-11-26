@@ -90,11 +90,13 @@ public sealed class MatrixChatSession : IChatSession
         CancellationToken cancellationToken)
         => GetRoom(roomId).SendMessageAsync(text, replyToId: replyToEventId, threadRootId: threadRootId).WaitAsync(cancellationToken);
 
-    public async Task<HistoryPage> LoadHistoryAsync(string roomId, string? from, int limit, CancellationToken cancellationToken)
+    public async Task<HistoryPage> LoadHistoryAsync(string roomId, string? beforeEventId, int limit, CancellationToken cancellationToken)
     {
-        var result = await GetRoom(roomId).FetchMessagesAsync(limit, from).WaitAsync(cancellationToken).ConfigureAwait(false);
-        var messages = result.Messages.Select(ToChatMessage).Reverse().ToList();
-        return new HistoryPage(messages, result.NextToken);
+        var room = GetRoom(roomId);
+        var messages = beforeEventId == null
+            ? await room.GetMessagesAsync(limit, cancellationToken: cancellationToken).ConfigureAwait(false)
+            : await room.GetMessagesAsync(limit, beforeEventId, cancellationToken).ConfigureAwait(false);
+        return new HistoryPage(messages.Select(ToChatMessage).ToList(), messages.Count == limit);
     }
 
     public async Task SendReactionAsync(string roomId, string targetEventId, string key, CancellationToken cancellationToken)

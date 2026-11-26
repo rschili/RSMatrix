@@ -45,19 +45,23 @@ internal record HttpClientParameters
 
 internal static class HttpClientHelper
 {
-    public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
+    /// <param name="cancellationToken">Cancels this request in addition to the client's own token.</param>
+    public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null,
+        bool ignoreRateLimit = false, CancellationToken cancellationToken = default)
     {
-        using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit).ConfigureAwait(false);
+        using var linked = Link(parameters, cancellationToken);
+        cancellationToken = linked?.Token ?? parameters.CancellationToken;
+        using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit, cancellationToken).ConfigureAwait(false);
         TResponse? result;
         var diagnostics = parameters.Diagnostics;
         if (diagnostics.Mode == DiagnosticsMode.Off)
         {
-            using var contentStream = await response.Content.ReadAsStreamAsync(parameters.CancellationToken).ConfigureAwait(false);
-            result = await JsonSerializer.DeserializeAsync<TResponse>(contentStream, cancellationToken: parameters.CancellationToken).ConfigureAwait(false);
+            using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            result = await JsonSerializer.DeserializeAsync<TResponse>(contentStream, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            var body = await response.Content.ReadAsByteArrayAsync(parameters.CancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             diagnostics.LogBody(parameters.Logger, "Response", path, body);
             result = JsonSerializer.Deserialize<TResponse>(body);
             if (result != null)
@@ -75,7 +79,7 @@ internal static class HttpClientHelper
 
     public static async Task SendAsync(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
     {
-        using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit).ConfigureAwait(false);
+        using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit, parameters.CancellationToken).ConfigureAwait(false);
         if (parameters.Diagnostics.Mode == DiagnosticsMode.Verbose)
         {
             var body = await response.Content.ReadAsByteArrayAsync(parameters.CancellationToken).ConfigureAwait(false);
@@ -83,7 +87,11 @@ internal static class HttpClientHelper
         }
     }
 
-    private static async Task<HttpResponseMessage> SendRequestAsync(HttpClientParameters parameters, string relativePath, HttpMethod? method, HttpContent? content, bool ignoreRateLimit)
+    private static CancellationTokenSource? Link(HttpClientParameters parameters, CancellationToken cancellationToken)
+        => cancellationToken.CanBeCanceled ? CancellationTokenSource.CreateLinkedTokenSource(parameters.CancellationToken, cancellationToken) : null;
+
+    private static async Task<HttpResponseMessage> SendRequestAsync(HttpClientParameters parameters, string relativePath, HttpMethod? method, HttpContent? content,
+        bool ignoreRateLimit, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentException.ThrowIfNullOrEmpty(relativePath);
@@ -91,7 +99,6 @@ internal static class HttpClientHelper
         var fullPath = string.Concat(parameters.BaseUri, relativePath);
         var requestMethod = method ?? HttpMethod.Get;
         var debugPath = $"{requestMethod} {fullPath}";
-        var cancellationToken = parameters.CancellationToken;
 
         // Each retry needs a fresh HttpRequestMessage, but exactly the same payload and
         // URL (including txnId). Never reconstruct a message via PutMessageAsync here.

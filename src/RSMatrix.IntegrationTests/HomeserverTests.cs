@@ -82,10 +82,10 @@ public class HomeserverTests
         var notice = await ReceiveAsync(bob, noticeId, server.CancellationToken);
         await Assert.That(notice.Kind).IsEqualTo(MessageKind.Notice);
         await Assert.That(notice.Body).IsEqualTo($"notice {marker}");
-        var history = await received.Room.FetchMessagesAsync(limit: 20);
-        await Assert.That(history.Messages.Any(message => message.Id == replyId && message.Body == replyBody))
+        var history = await received.Room.GetMessagesAsync(limit: 20);
+        await Assert.That(history.Any(message => message.Id == replyId && message.Body == replyBody))
             .IsTrue();
-        await Assert.That(history.Messages.Any(message => message.Id == noticeId)).IsTrue();
+        await Assert.That(history.Any(message => message.Id == noticeId)).IsTrue();
     }
 
 }

@@ -186,6 +186,32 @@ internal class UnsignedData
     /// </summary>
     [JsonPropertyName("transaction_id")]
     public string? TransactionId { get; set; }
+
+    /// <summary>Changes the server bundles into the event, in history and in cut-short syncs.</summary>
+    [JsonPropertyName("m.relations")]
+    public BundledRelations? Relations { get; set; }
+}
+
+internal class BundledRelations
+{
+    /// <summary>The edit that counts, still encrypted in encrypted rooms. The server doesn't apply it.</summary>
+    [JsonPropertyName("m.replace")]
+    public RoomEvent? Replace { get; set; }
+
+    [JsonPropertyName("m.thread")]
+    public BundledThread? Thread { get; set; }
+}
+
+internal class BundledThread
+{
+    [JsonPropertyName("latest_event")]
+    public RoomEvent? LatestEvent { get; set; }
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("current_user_participated")]
+    public bool CurrentUserParticipated { get; set; }
 }
 
 

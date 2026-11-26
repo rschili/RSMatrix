@@ -18,6 +18,10 @@ public enum MessageKind
 /// <summary>One reaction key on a message and the users who reacted with it, in the order they did.</summary>
 public sealed record Reaction(string Key, IReadOnlyList<RoomUser> Users);
 
+/// <summary>The replies to a message that starts a thread.</summary>
+/// <param name="CurrentUserParticipated">The logged-in user started the thread or replied to it.</param>
+public sealed record ThreadSummary(int ReplyCount, Message? LatestReply, bool CurrentUserParticipated);
+
 /// <summary>
 /// A message in a room, in its current state: edits applied, deletion and reactions.
 /// While the message is in its room's window, the client updates this object and reports each change on
@@ -62,8 +66,21 @@ public sealed class Message
 
     public IReadOnlyList<Reaction> Reactions => _state.Reactions;
 
+    /// <summary>
+    /// Set on messages that start a thread. Kept current while the message is in its room's window;
+    /// a new reply comes out as <see cref="NewMessage"/> with <see cref="ThreadRootId"/> pointing here.
+    /// </summary>
+    public ThreadSummary? Thread => _thread;
+    private volatile ThreadSummary? _thread;
+
     // Replaced as a whole, so a reader on another thread sees the old state or the new one, never a mix.
     private volatile MessageState _state;
+
+    /// <summary>A /messages token for the events before this message, if a sync or history page told us one.</summary>
+    internal string? HistoryToken { get; set; }
+
+    /// <summary>A /relations token for the older replies of this message's thread, if a thread page told us one.</summary>
+    internal string? ThreadHistoryToken { get; set; }
 
     internal Message(string id, Room room, RoomUser sender, DateTimeOffset timestamp, bool isOwn, bool isEncrypted,
         string? replyToId, string? threadRootId, MessageContent content)
@@ -90,6 +107,17 @@ public sealed class Message
     /// <returns>The event ID of the sent message</returns>
     public Task<string> ReplyAsync(string body, string? html = null, bool notice = false, bool quote = true, IList<MatrixId>? mentions = null)
         => Room.SendMessageInternalAsync(notice ? "m.notice" : "m.text", body, html, quote ? Id : null, mentions, ThreadRootId, Id);
+
+    /// <summary>The message this one replies to, see <see cref="Room.GetMessageAsync"/>. Null if this isn't a reply.</summary>
+    public Task<Message?> GetReplyToAsync(CancellationToken cancellationToken = default)
+        => ReplyToId == null ? Task.FromResult<Message?>(null) : Room.GetMessageAsync(ReplyToId, cancellationToken);
+
+    /// <summary>
+    /// Fetches this message's event from the server as indented JSON, for inspecting it. An encrypted message shows its
+    /// decrypted type and content if this client can decrypt it. Nothing of it stays in memory.
+    /// </summary>
+    public Task<string> GetSourceAsync(CancellationToken cancellationToken = default)
+        => Room.GetEventSourceAsync(Id, cancellationToken);
 
     /// <summary>
     /// Sends a reaction to this message. The key can be any string, typically an emoji like 👍.
@@ -136,6 +164,20 @@ public sealed class Message
         => Room.RedactEventAsync(Id, reason);
 
     public override string ToString() => $"{Sender}: {Body}";
+
+    internal void SetThread(ThreadSummary thread) => _thread = thread;
+
+    internal void AddThreadReply(Message reply)
+    {
+        var thread = _thread;
+        _thread = new ThreadSummary((thread?.ReplyCount ?? 0) + 1, reply, (thread?.CurrentUserParticipated ?? IsOwn) || reply.IsOwn);
+    }
+
+    internal bool HasRelatedEvent(string eventId)
+    {
+        var state = _state;
+        return state.Edits.Any(e => e.EventId == eventId) || state.ReactionEvents.Any(r => r.EventId == eventId);
+    }
 
     /// <summary>Returns false if the edit is already known.</summary>
     internal bool AddEdit(MessageEdit edit, out bool contentChanged)
@@ -197,6 +239,12 @@ internal sealed record MessageContent(MessageKind Kind, string Body, string? Htm
 internal sealed record MessageEdit(string EventId, DateTimeOffset Timestamp, MessageContent Content);
 
 internal sealed record ReactionEvent(string EventId, string Key, RoomUser User);
+
+/// <summary>An edit and the message it points at, before checking that it may change that message.</summary>
+internal sealed record EditChange(string TargetId, string SenderId, bool IsEncrypted, MessageEdit Edit);
+
+/// <summary>A reaction and the message it points at.</summary>
+internal sealed record ReactionChange(string TargetId, ReactionEvent Reaction);
 
 internal sealed class MessageState
 {

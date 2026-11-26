@@ -277,6 +277,41 @@ internal class RoomMessagesResponse
     public List<RoomEvent>? State { get; set; }
 }
 
+internal class RelationsResponse
+{
+    [JsonPropertyName("chunk")]
+    public required List<RoomEvent> Chunk { get; set; }
+
+    /// <summary>A token for the next, older page. Absent on the last page.</summary>
+    [JsonPropertyName("next_batch")]
+    public string? NextBatch { get; set; }
+
+    [JsonPropertyName("prev_batch")]
+    public string? PrevBatch { get; set; }
+}
+
+internal class EventContextResponse
+{
+    /// <summary>A token to page backwards from the event with /messages.</summary>
+    [JsonPropertyName("start")]
+    public string? Start { get; set; }
+
+    [JsonPropertyName("end")]
+    public string? End { get; set; }
+
+    [JsonPropertyName("event")]
+    public RoomEvent? Event { get; set; }
+
+    [JsonPropertyName("events_before")]
+    public List<RoomEvent>? EventsBefore { get; set; }
+
+    [JsonPropertyName("events_after")]
+    public List<RoomEvent>? EventsAfter { get; set; }
+
+    [JsonPropertyName("state")]
+    public List<RoomEvent>? State { get; set; }
+}
+
 internal class SyncJoinedRoom
 {
     [JsonPropertyName("summary")]

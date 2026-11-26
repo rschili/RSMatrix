@@ -52,4 +52,4 @@ The app works around these, and each would make it simpler or better:
 - **Threads**: received messages carry their thread, and sending to a thread works. There is no list of a room's threads yet.
 - **Event source**: no raw event JSON, so "View source" only works in the sample.
 - **Rate limit**: all requests except sync share one local bucket of 10 requests, refilled at 600 per hour. History pages and quick replies wait several seconds once it is empty.
-- **Cancellation**: sending and loading history only stop with the whole client.
+- **Cancellation**: sending only stops with the whole client.

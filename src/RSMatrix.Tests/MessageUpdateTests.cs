@@ -7,25 +7,25 @@ public class MessageUpdateTests
     private const string Room = "!room:example.org";
     private const string RoomPath = "/rooms/%21room%3Aexample.org/";
 
-    private static string Sync(params string[] timeline)
+    internal static string Sync(params string[] timeline)
         => $$"""{"next_batch":"next","rooms":{"join":{"{{Room}}":{"timeline":{"events":[""" + string.Join(",", timeline) + "]}}}}}";
 
-    private static string Event(string id, string type, string content, string sender = "@alice:example.org", long ts = 1700000000000, string extra = "")
+    internal static string Event(string id, string type, string content, string sender = "@alice:example.org", long ts = 1700000000000, string extra = "")
         => $$"""{"type":"{{type}}","sender":"{{sender}}","event_id":"{{id}}","origin_server_ts":{{ts}},"content":{{content}}{{extra}}}""";
 
-    private static string Text(string id, string body, string sender = "@alice:example.org", long ts = 1700000000000, string relatesTo = "")
+    internal static string Text(string id, string body, string sender = "@alice:example.org", long ts = 1700000000000, string relatesTo = "")
         => Event(id, "m.room.message", $$"""{"msgtype":"m.text","body":"{{body}}"{{relatesTo}}}""", sender, ts);
 
-    private static string Edit(string id, string target, string body, string sender = "@alice:example.org", long ts = 1700000001000, string msgType = "m.text")
+    internal static string Edit(string id, string target, string body, string sender = "@alice:example.org", long ts = 1700000001000, string msgType = "m.text")
         => Event(id, "m.room.message", $$$"""
             {"msgtype":"{{{msgType}}}","body":"* {{{body}}}","m.new_content":{"msgtype":"{{{msgType}}}","body":"{{{body}}}"},
              "m.relates_to":{"rel_type":"m.replace","event_id":"{{{target}}}"}}
             """, sender, ts);
 
-    private static string Reaction(string id, string target, string key, string sender = "@bob:example.org")
+    internal static string Reaction(string id, string target, string key, string sender = "@bob:example.org")
         => Event(id, "m.reaction", $$$"""{"m.relates_to":{"rel_type":"m.annotation","event_id":"{{{target}}}","key":"{{{key}}}"}}""", sender);
 
-    private static string Redaction(string id, string target, string sender = "@alice:example.org")
+    internal static string Redaction(string id, string target, string sender = "@alice:example.org")
         => Event(id, "m.room.redaction", $$"""{"redacts":"{{target}}"}""", sender);
 
     private static async Task<List<object>> ProcessAsync(MatrixTestContext context, params string[] timeline)

@@ -27,8 +27,8 @@ public interface IChatSession : IAsyncDisposable
     /// <summary>Takes back the current user's reaction. Comes back as a <see cref="ReactionRemoved"/> event.</summary>
     Task RemoveReactionAsync(string roomId, string targetEventId, string key, CancellationToken cancellationToken);
 
-    /// <param name="from">Token from the previous page, or null to start at the newest message.</param>
-    Task<HistoryPage> LoadHistoryAsync(string roomId, string? from, int limit, CancellationToken cancellationToken);
+    /// <param name="beforeEventId">The oldest message loaded so far, or null to start at the newest message.</param>
+    Task<HistoryPage> LoadHistoryAsync(string roomId, string? beforeEventId, int limit, CancellationToken cancellationToken);
 
     /// <summary>Joined and invited members of the room, in no particular order.</summary>
     Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken);
@@ -69,8 +69,8 @@ public sealed record ChatMessage(
     string? Source = null);
 
 /// <param name="Messages">Oldest first.</param>
-/// <param name="NextToken">Null when there is no older history.</param>
-public sealed record HistoryPage(IReadOnlyList<ChatMessage> Messages, string? NextToken);
+/// <param name="HasMore">False when the page reached the start of the room.</param>
+public sealed record HistoryPage(IReadOnlyList<ChatMessage> Messages, bool HasMore);
 
 public enum ConnectionState
 {

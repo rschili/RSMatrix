@@ -8,7 +8,7 @@ public sealed partial class RoomViewModel : ConversationViewModel
 {
     private const int HistoryPageSize = 30;
     private readonly Dictionary<string, ThreadViewModel> _threadsByRootId = new(StringComparer.Ordinal);
-    private string? _historyToken;
+    private string? _oldestLoadedEventId;
 
     public RoomViewModel(ChatRoomInfo info, ChatViewModel chat)
         : base(chat, new RoomMessages(chat.CurrentUser.UserId))
@@ -89,9 +89,10 @@ public sealed partial class RoomViewModel : ConversationViewModel
         var added = 0;
         while (added == 0 && HasMoreHistory)
         {
-            var page = await Chat.Session.LoadHistoryAsync(RoomId, _historyToken, HistoryPageSize, cancellationToken);
-            _historyToken = page.NextToken;
-            HasMoreHistory = page.NextToken != null;
+            var page = await Chat.Session.LoadHistoryAsync(RoomId, _oldestLoadedEventId, HistoryPageSize, cancellationToken);
+            if (page.Messages.Count > 0)
+                _oldestLoadedEventId = page.Messages[0].EventId;
+            HasMoreHistory = page.HasMore;
 
             var mainMessages = page.Messages.Where(m => m.ThreadRootId == null).ToList();
             var mainViewModels = mainMessages.Select(CreateMessageViewModel).ToList();
