@@ -12,18 +12,20 @@ public class EncryptionEngineTests
     public async Task OwnEncryptedMessage_IsDecryptedAndMarkedEncrypted_AndReplayIsReported()
     {
         using var fixture = await EncryptedRoomFixture.StartAsync();
-        var sentId = await fixture.Context.Room().SendTextMessageAsync("secret", null, null);
+        var sentId = await fixture.Context.Room().SendMessageAsync("secret");
         var sent = fixture.Context.Requests.Last(r => r.Path.Contains("/send/m.room.encrypted/"));
         await Assert.That(sent.Body.Contains("secret")).IsFalse();
 
         await fixture.ProcessEncryptedEvent(sentId, "@bot:example.org", sent.Body);
-        await Assert.That(fixture.Context.Client.Messages.TryRead(out var message)).IsTrue();
-        await Assert.That(message!.Body).IsEqualTo("secret");
+        var firstUpdates = fixture.Context.ReadUpdates();
+        var message = firstUpdates.Select(update => update.Value).OfType<NewMessage>().Single().Message;
+        await Assert.That(message.Body).IsEqualTo("secret");
         await Assert.That(message.IsEncrypted).IsTrue();
 
         await fixture.ProcessEncryptedEvent("$replay", "@bot:example.org", sent.Body);
-        await Assert.That(fixture.Context.Client.Messages.TryRead(out _)).IsFalse();
-        var issue = ClientIssueTests.ReadAll(fixture.Context.Client).Single(i => i.Kind == ClientIssueKind.DecryptionFailed);
+        var replayUpdates = fixture.Context.ReadUpdates();
+        await Assert.That(replayUpdates.Select(update => update.Value).OfType<NewMessage>()).IsEmpty();
+        var issue = replayUpdates.Select(update => update.Value).OfType<ClientIssue>().Single(i => i.Kind == ClientIssueKind.DecryptionFailed);
         await Assert.That(issue.EventId).IsEqualTo("$replay");
         await Assert.That(issue.Message.Contains(sentId)).IsTrue();
     }
@@ -35,8 +37,9 @@ public class EncryptionEngineTests
         await fixture.ProcessEncryptedEvent("$unknown", "@alice:example.org",
             """{"algorithm":"m.megolm.v1.aes-sha2","session_id":"unknown","ciphertext":"AAAA"}""");
 
-        await Assert.That(fixture.Context.Client.Messages.TryRead(out _)).IsFalse();
-        var issue = ClientIssueTests.ReadAll(fixture.Context.Client).Single();
+        var updates = fixture.Context.ReadUpdates();
+        await Assert.That(updates.Select(update => update.Value).OfType<NewMessage>()).IsEmpty();
+        var issue = updates.Select(update => update.Value).OfType<ClientIssue>().Single();
         await Assert.That(issue.Kind).IsEqualTo(ClientIssueKind.DecryptionFailed);
         await Assert.That(issue.EventId).IsEqualTo("$unknown");
         await Assert.That(issue.User!.User.UserId.Full).IsEqualTo("@alice:example.org");
@@ -46,8 +49,8 @@ public class EncryptionEngineTests
     public async Task DeviceWithoutOneTimeKey_IsReportedOncePerSession()
     {
         using var fixture = await EncryptedRoomFixture.StartAsync();
-        await fixture.Context.Room().SendTextMessageAsync("first", null, null);
-        await fixture.Context.Room().SendTextMessageAsync("second", null, null);
+        await fixture.Context.Room().SendMessageAsync("first");
+        await fixture.Context.Room().SendMessageAsync("second");
 
         // Sharing is retried for every message, but reported once.
         await Assert.That(fixture.Context.Requests.Count(r => r.Path.EndsWith("/keys/claim"))).IsEqualTo(2);
@@ -202,8 +205,8 @@ public class EncryptionEngineTests
     public async Task DeviceNotCrossSigned_GetsNoRoomKey_ButAWithheldNotice()
     {
         using var fixture = await EncryptedRoomFixture.StartAsync(f => f.AliceIdentity = null);
-        await fixture.Context.Room().SendTextMessageAsync("first", null, null);
-        await fixture.Context.Room().SendTextMessageAsync("second", null, null);
+        await fixture.Context.Room().SendMessageAsync("first");
+        await fixture.Context.Room().SendMessageAsync("second");
 
         await Assert.That(fixture.Context.Requests.Any(r => r.Path.EndsWith("/keys/claim"))).IsFalse();
         var withheld = fixture.Context.Requests.Single(r => r.Path.Contains("/sendToDevice/m.room_key.withheld/"));
@@ -230,8 +233,9 @@ public class EncryptionEngineTests
         };
         var first = fixture.EncryptFromAlice(session, "first");
         await fixture.ProcessEncryptedEvent("$first", "@alice:example.org", first);
-        await Assert.That(fixture.Context.Client.Messages.TryRead(out _)).IsFalse();
-        var issue = ClientIssueTests.ReadAll(fixture.Context.Client).Single();
+        var firstUpdates = fixture.Context.ReadUpdates();
+        await Assert.That(firstUpdates.Select(update => update.Value).OfType<NewMessage>()).IsEmpty();
+        var issue = firstUpdates.Select(update => update.Value).OfType<ClientIssue>().Single();
         await Assert.That(issue.Kind).IsEqualTo(ClientIssueKind.DecryptionFailed);
         await Assert.That(issue.Message.Contains("not cross-signed")).IsTrue();
 
@@ -239,8 +243,9 @@ public class EncryptionEngineTests
         fixture.AliceIdentity = new TestIdentity();
         await fixture.Context.Process("""{"next_batch":"next","device_lists":{"changed":["@alice:example.org"]}}""");
         await fixture.ProcessEncryptedEvent("$second", "@alice:example.org", fixture.EncryptFromAlice(session, "second"));
-        await Assert.That(fixture.Context.Client.Messages.TryRead(out var message)).IsTrue();
-        await Assert.That(message!.Body).IsEqualTo("second");
+        var secondUpdates = fixture.Context.ReadUpdates();
+        var message = secondUpdates.Select(update => update.Value).OfType<NewMessage>().Single().Message;
+        await Assert.That(message.Body).IsEqualTo("second");
     }
 
     [Test]
@@ -256,8 +261,9 @@ public class EncryptionEngineTests
             Export = MegolmInboundSession.FromSessionKey(session.ExportSessionKey()).Export()
         };
         await fixture.ProcessEncryptedEvent("$legacy", "@alice:example.org", fixture.EncryptFromAlice(session, "legacy"));
-        await Assert.That(fixture.Context.Client.Messages.TryRead(out var message)).IsTrue();
-        await Assert.That(message!.Body).IsEqualTo("legacy");
+        var updates = fixture.Context.ReadUpdates();
+        var message = updates.Select(update => update.Value).OfType<NewMessage>().Single().Message;
+        await Assert.That(message.Body).IsEqualTo("legacy");
     }
 
     [Test]
@@ -284,11 +290,11 @@ public class EncryptionEngineTests
     public async Task ChangedMasterKey_IsReported()
     {
         using var fixture = await EncryptedRoomFixture.StartAsync();
-        await fixture.Context.Room().SendTextMessageAsync("first", null, null);
+        await fixture.Context.Room().SendMessageAsync("first");
 
         fixture.AliceIdentity = new TestIdentity();
         await fixture.Context.Process("""{"next_batch":"next","device_lists":{"changed":["@alice:example.org"]}}""");
-        await fixture.Context.Room().SendTextMessageAsync("second", null, null);
+        await fixture.Context.Room().SendMessageAsync("second");
 
         var issue = ClientIssueTests.ReadAll(fixture.Context.Client).Single(i => i.Kind == ClientIssueKind.IdentityChanged);
         await Assert.That(issue.Message.Contains("@alice:example.org")).IsTrue();

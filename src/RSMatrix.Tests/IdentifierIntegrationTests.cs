@@ -32,9 +32,11 @@ public class IdentifierIntegrationTests
          {"type":"m.room.message","sender":"@a:b","event_id":"$event","origin_server_ts":1700000000000,
           "content":{"msgtype":"m.text","body":"hello"}}]}}}}}
         """);
-        await Assert.That(context.Client.Messages.TryRead(out var message)).IsTrue();
-        await Assert.That(message!.Room.RoomId.Full).IsEqualTo("!abcdef_-123");
-        await message.SendResponseAsync("reply");
+        await Assert.That(context.Client.Updates.TryRead(out var update)).IsTrue();
+        await Assert.That(update!.Value is NewMessage).IsTrue();
+        var message = ((NewMessage)update.Value).Message;
+        await Assert.That(message.Room.RoomId.Full).IsEqualTo("!abcdef_-123");
+        await message.ReplyAsync("reply", quote: false);
         await Assert.That(context.Requests.Any(r => r.Path.Contains("/rooms/%21abcdef_-123/send/"))).IsTrue();
     }
 
@@ -44,7 +46,7 @@ public class IdentifierIntegrationTests
         using var context = new MatrixTestContext();
         const string roomId = "!a /?#%é:example.org";
         const string eventId = "$event /?#%é";
-        await context.Room(roomId).SendTextMessageAsync("hello", null, null);
+        await context.Room(roomId).SendMessageAsync("hello");
         await MatrixHelper.PostReceiptAsync(context.Client.HttpClientParameters, context.Room(roomId).RoomId, eventId, null);
         await Assert.That(context.Requests[0].Path.Split('/')[5]).IsEqualTo(Uri.EscapeDataString(roomId));
         await Assert.That(context.Requests[1].Path).IsEqualTo(

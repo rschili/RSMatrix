@@ -14,7 +14,7 @@ public enum EncryptionState
 
     /// <summary>
     /// The account has a cross-signing identity, but it hasn't signed this device. Resume or log in once with the recovery key.
-    /// <see cref="MatrixClient.Issues"/> reports why as <see cref="ClientIssueKind.DeviceNotCrossSigned"/>.
+    /// <see cref="MatrixClient.Updates"/> reports why as a <see cref="ClientIssue"/> of kind <see cref="ClientIssueKind.DeviceNotCrossSigned"/>.
     /// </summary>
     DeviceNotSigned,
 

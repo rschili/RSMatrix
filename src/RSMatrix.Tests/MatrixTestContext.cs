@@ -37,6 +37,18 @@ internal sealed class MatrixTestContext : IDisposable
 
     public Task Process(string json) => Client.HandleSyncResponseForTestingAsync(JsonSerializer.Deserialize<SyncResponse>(json)!);
 
+    public List<Update> ReadUpdates(MatrixClient? client = null)
+    {
+        client ??= Client;
+        var updates = new List<Update>();
+        while (client.Updates.TryRead(out var update))
+            updates.Add(update);
+        return updates;
+    }
+
+    public List<Message> ReadMessages(MatrixClient? client = null)
+        => ReadUpdates(client).Select(update => update.Value).OfType<NewMessage>().Select(update => update.Message).ToList();
+
     public static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK)
         => new(status) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
 

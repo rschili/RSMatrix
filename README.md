@@ -14,7 +14,7 @@ I'm trying to keep it as simple as possible without sacrificing essential featur
 
 RSMatrix is text-only. It does not support voice or video calls, and there are no plans to add them.
 
-## Example
+## Usage
 
 Check the github repository for a minimalistic [console example](https://github.com/rschili/RSMatrix/blob/main/src/RSMatrix.Console/Program.cs).
 Here is the basic usage:
@@ -27,30 +27,35 @@ await using MatrixClient client = await MatrixClient.LoginAsync(userId, password
 Without a `homeserver` URL, the client looks it up through the `.well-known` file of the user ID's domain.
 The client immediately starts syncing after login or resume.
 
-To handle messages:
+To handle incoming updates:
+I arrived at a central unbounded channel `client.Updates` for everything (new messages, edits, deletions, reactions and issues...).
+Found that it fits matrix's model best. The sync doesn't wait for it, your handlers can be slow without affecting the sync loop. Just make sure the code keeps up with the amount of incoming updates.
+
+This uses C# 15 unions, I found they make switching or filtering on one kind of update the most convenient and type-safe. For example a `switch` that misses a kind gets a compiler warning.
 
 ```cs
-await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
+await foreach (var update in client.Updates.ReadAllAsync(cancellationToken))
 {
-    Console.WriteLine(message);
-    await message.Room.SendTypingNotificationAsync();
-    if(message.Body.Equals("ping", StringComparison.OrdinalIgnoreCase))
-        await message.SendResponseAsync("pong!");
+    if (update is NewMessage { Message: { Kind: MessageKind.Text, IsOwn: false } message } &&
+        message.Body.Equals("ping", StringComparison.OrdinalIgnoreCase))
+        await message.ReplyAsync("pong!");
 }
 ```
 
+The client did previously send read receipts on its own, which I changed in 2.0. `message.MarkAsReadAsync()` marks a room as read up to that message. Try and not use this too chatty, as it can generate a lot of requests if called frequently. You will want to rate limit this for a bot which may handle thousands of incoming messages per second.
+
 The cancellation token cancels logging in or resuming.
-To stop the sync, dispose the client. That stops sync, waits until it has ended and completes `client.Messages`.
+To stop the sync, dispose the client. That stops sync, waits until it has ended and completes `client.Updates`. If the session ends with an error, reading `client.Updates` throws it.
 
 ## Reconnecting and resuming
 
 Once the client has logged in, it retries network errors, unavailable servers and rate limits until it is disposed. Before the login, `LoginAsync` throws on these errors instead, because they more likely point to a wrong configuration.
 
-Instead of logging in every time and replacine the earlier sessions, you probably want to resume instead.
+Instead of logging in every time and replacing the earlier sessions, you probably want to resume instead.
 To do that, a storage for the session data is needed:
 
 ```cs
-const string store = Path.Combine(
+string store = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "mybot", "matrix");
 var session = MatrixClient.GetStoredSession(store, userId);
 await using MatrixClient client = session != null
@@ -63,14 +68,11 @@ The store holds one session per user: the access token, the sync position and th
 
 ## Issues and health
 
-`client.Issues` reports problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, a device the account's identity hasn't signed, changed identities of other users, failed auto-joins and interrupted syncs. Reading it is optional. It buffers the latest 100 issues.
+`ClientIssue` updates report problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, a device the account's identity hasn't signed, changed identities of other users, failed auto-joins and interrupted syncs.
 
 ```cs
-_ = Task.Run(async () =>
-{
-    await foreach (var issue in client.Issues.ReadAllAsync(cancellationToken))
-        logger.LogWarning("{Issue}", issue);
-});
+if (update is ClientIssue issue)
+    logger.LogWarning("{Issue}", issue);
 ```
 
 For troubleshooting, set the environment variable `RSMATRIX_DIAGNOSTICS` before starting the client:
@@ -97,7 +99,7 @@ Encrypted rooms only work between devices the account vouches for, called cross-
   string recoveryKey = await client.SetUpCrossSigningAsync(password);
   ```
 
-`client.EncryptionState` shows where the client stands: `Off` without a store, `NoIdentity`, `DeviceNotSigned` (also reported on `client.Issues` as `DeviceNotCrossSigned`, with the reason) or `Ready`.
+`client.EncryptionState` provides info on encryption: `Off` without a store, `NoIdentity`, `DeviceNotSigned` (also reported as a `ClientIssue` of kind `DeviceNotCrossSigned`, with the reason) or `Ready`.
 
 > [!WARNING]
 > The encryption code was written by AI, from the Matrix specification. It has been tested locally against a synapse server, but I have not done any real-world testing yet.

@@ -57,26 +57,16 @@ public sealed class MatrixClient : IAsyncDisposable
     private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
 
     private ConcurrentDictionary<string, User> _users = new(StringComparer.Ordinal);
-    private Channel<ReceivedTextMessage> MessageChannel { get; set; }
+    private readonly Channel<Update> _updates = Channel.CreateUnbounded<Update>();
 
     /// <summary>
-    /// The channel to receive messages from the server.
-    /// The channel is unbounded, so it will not block the sender.
-    /// The channel completes when the client is disposed and faults on a terminal sync error.
+    /// Everything the client receives: new messages, edits, deletions, reactions, and problems the client keeps
+    /// running through, like messages it could not decrypt. Read it continuously; the channel is unbounded and the sync
+    /// never waits for the reader. It completes when the client is disposed and throws the error that ended the
+    /// session, like <see cref="SessionEndedException"/> or <see cref="PasswordRequiredException"/>.
     /// Transient failures are retried with the existing session.
     /// </summary>
-    public ChannelReader<ReceivedTextMessage> Messages => MessageChannel.Reader;
-
-    internal const int IssueChannelCapacity = 100;
-    private readonly Channel<ClientIssue> _issueChannel = Channel.CreateBounded<ClientIssue>(
-        new BoundedChannelOptions(IssueChannelCapacity) { FullMode = BoundedChannelFullMode.DropOldest });
-
-    /// <summary>
-    /// Problems the client ran into while it keeps running, like messages it could not decrypt.
-    /// Reading is optional. The channel keeps the latest 100 issues and drops older ones.
-    /// It completes when the client stops.
-    /// </summary>
-    public ChannelReader<ClientIssue> Issues => _issueChannel.Reader;
+    public ChannelReader<Update> Updates => _updates.Reader;
 
     private long _lastSyncAtUnixMilliseconds;
 
@@ -117,7 +107,6 @@ public sealed class MatrixClient : IAsyncDisposable
             throw new ArgumentException("User ID must be of type 'User'.", nameof(userId));
         SupportedSpecVersions = supportedSpecVersions ?? throw new ArgumentNullException(nameof(supportedSpecVersions));
         ServerCapabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
-        MessageChannel = Channel.CreateUnbounded<ReceivedTextMessage>();
     }
 
     /// <summary>
@@ -458,7 +447,7 @@ public sealed class MatrixClient : IAsyncDisposable
 
     /// <summary>
     /// Stops syncing and waits until the client has stopped: running requests are cancelled, the session and keys
-    /// are saved, <see cref="Messages"/> and <see cref="Issues"/> complete, and the store directory is released.
+    /// are saved, <see cref="Updates"/> completes, and the store directory is released.
     /// Doesn't log out; <see cref="ResumeAsync"/> continues the stored session.
     /// </summary>
     public async ValueTask DisposeAsync()
@@ -680,9 +669,8 @@ public sealed class MatrixClient : IAsyncDisposable
         {
             IsSyncing = false;
             _sessionStore?.Dispose();
-            if (!MessageChannel.Writer.TryComplete(failure))
-                Logger.LogError("Sync ended, but failed to complete message channel.");
-            _issueChannel.Writer.TryComplete();
+            if (!_updates.Writer.TryComplete(failure))
+                Logger.LogError("Sync ended, but failed to complete the update channel.");
         }
     }
 
@@ -707,8 +695,6 @@ public sealed class MatrixClient : IAsyncDisposable
         _sessionStore.Save(CreateSessionData(HttpClientParameters, CurrentUser, _deviceId!, syncToken));
     }
 
-    private LeakyBucket _receiptRateLimiter = new LeakyBucket(1, 30);
-
     private async Task HandleSyncResponseAsync(SyncResponse response)
     {
         if (response == null)
@@ -721,7 +707,7 @@ public sealed class MatrixClient : IAsyncDisposable
         if (Encryption != null)
             await Encryption.HandleSyncAsync(response).ConfigureAwait(false);
 
-        List<ReceivedTextMessage> messages = new();
+        List<Update> updates = [];
         if (response.AccountData?.Events is { } accountData)
             HandleAccountDataReceived(null, accountData);
         if (response.Presence?.Events is { } presence)
@@ -748,12 +734,12 @@ public sealed class MatrixClient : IAsyncDisposable
                 if (roomEvents.State?.Events is { } state)
                     HandleStateReceived(roomId, state);
                 if (roomEvents.Timeline?.Events is { } timeline)
-                    HandleTimelineReceived(roomId, timeline, messages);
+                    HandleTimelineReceived(roomId, timeline, updates);
             }
         }
 
         // Stripped invite state can already tell us that a room is encrypted.
-        // Record it before delivering messages or making optional join requests.
+        // Record it before delivering updates or making optional join requests.
         if (response.Rooms?.Invites is { } inviteState)
         {
             foreach (var pair in inviteState)
@@ -762,10 +748,10 @@ public sealed class MatrixClient : IAsyncDisposable
 
         // Malformed events are skipped at their own boundary. Delivery failures or
         // unexpected processing errors must propagate, not advance the sync token.
-        foreach (var message in messages)
-            await MessageChannel.Writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+        foreach (var update in updates)
+            await _updates.Writer.WriteAsync(update, cancellationToken).ConfigureAwait(false);
 
-        // Optional HTTP side effects cannot discard messages already collected.
+        // Optional HTTP side effects cannot discard updates already collected.
         if (response.Rooms?.Invites is { } invites)
         {
             foreach (var pair in invites)
@@ -779,28 +765,6 @@ public sealed class MatrixClient : IAsyncDisposable
             Diagnostics.ReportUnhandled(Logger, UnhandledKind.SyncSection, "rooms.leave", leaves.First().Value);
         if (response.Rooms?.Knocks is { Count: > 0 } knocks)
             Diagnostics.ReportUnhandled(Logger, UnhandledKind.SyncSection, "rooms.knock", knocks.First().Value);
-
-        foreach (var room in _rooms.Values)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var message = room.LastMessage;
-            if (message == null || message.EventId == room.LastReceiptEventId || !_receiptRateLimiter.Leak())
-                continue;
-
-            try
-            {
-                await message.SendReceiptAsync().ConfigureAwait(false);
-                room.LastReceiptEventId = message.EventId;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is HttpRequestException or MatrixResponseException or JsonException or OperationCanceledException)
-            {
-                Logger.LogWarning(ex, "Failed to send read marker in room {RoomId}.", room.RoomId.Full);
-            }
-        }
     }
 
     private void HandleRoomSummaryReceived(MatrixId roomId, RoomSummary? summary)
@@ -1107,11 +1071,10 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleTimelineReceived(MatrixId roomId, List<RoomEvent> events, List<ReceivedTextMessage> messages)
+    private void HandleTimelineReceived(MatrixId roomId, List<RoomEvent> events, List<Update> updates)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(events, nameof(events));
-        ArgumentNullException.ThrowIfNull(messages, nameof(messages));
         var room = GetOrAddRoom(roomId);
 
         foreach (var e in events)
@@ -1127,12 +1090,8 @@ public sealed class MatrixClient : IAsyncDisposable
                 // a hardcoded list of event types. State precedes message dispatch.
                 if (e.StateKey != null)
                     HandleStateReceived(roomId, [e]);
-                else if (e.Type == "m.room.message")
-                    HandleMessageReceived(roomId, messages, room, e);
-                else if (e.Type == "m.room.encrypted")
-                    HandleEncryptedEvent(room, e, messages);
                 else
-                    Diagnostics.ReportUnhandled(Logger, UnhandledKind.TimelineEvent, e.Type, e);
+                    HandleTimelineEvent(room, e, updates);
             }
             catch (Exception ex) when (ex is JsonException or ArgumentOutOfRangeException)
             {
@@ -1141,13 +1100,193 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleEncryptedEvent(Room room, RoomEvent e, List<ReceivedTextMessage> messages)
+    private void HandleTimelineEvent(Room room, RoomEvent e, List<Update> updates)
     {
-        var decrypted = DecryptRoomEvent(room, e);
-        if (decrypted?.Type == "m.room.message")
-            HandleMessageReceived(room.RoomId, messages, room, decrypted, isEncrypted: true);
-        else if (decrypted != null)
-            Diagnostics.ReportUnhandled(Logger, UnhandledKind.TimelineEvent, decrypted.Type);
+        // A message deleted before we saw it never comes out as new, and its content is gone.
+        if (e.Unsigned?.RedactedBecause != null)
+        {
+            Logger.LogDebug("Skipping event {EventId} in room {RoomId}: it was deleted.", e.EventId, room.RoomId.Full);
+            return;
+        }
+
+        var isEncrypted = e.Type == "m.room.encrypted";
+        if (isEncrypted)
+        {
+            if (DecryptRoomEvent(room, e) is not { } decrypted)
+                return;
+            e = decrypted;
+        }
+
+        if (e.Content is not { ValueKind: JsonValueKind.Object } content)
+        {
+            Logger.LogWarning("Received timeline event {Type} without object content in room {RoomId}.", e.Type, room.RoomId.Full);
+            return;
+        }
+
+        switch (e.Type)
+        {
+            case "m.room.message":
+                // Decrypted content stays out of the logs.
+                var messageContent = ParseContent<RoomMessageContent>(content, withExamples: !isEncrypted);
+                if (messageContent == null)
+                    return;
+                if (messageContent.RelatesTo?.RelType == "m.replace")
+                    HandleEdit(room, e, messageContent, isEncrypted, updates);
+                else if (CreateMessage(room, e, messageContent, isEncrypted) is { } message && room.Window.Add(message))
+                    updates.Add(new NewMessage(message));
+                break;
+            case "m.reaction":
+                HandleReaction(room, e, ParseContent<ReactionContent>(content, withExamples: !isEncrypted), updates);
+                break;
+            case "m.room.redaction" when !isEncrypted:
+                HandleRedaction(room, e, ParseContent<RedactionContent>(content), updates);
+                break;
+            default:
+                Diagnostics.ReportUnhandled(Logger, UnhandledKind.TimelineEvent, e.Type, isEncrypted ? null : e);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Creates a message for an event from history, or returns null if the event isn't a message. Edits, reactions
+    /// and deleted messages aren't messages of their own.
+    /// </summary>
+    internal Message? CreateMessage(Room room, RoomEvent e)
+    {
+        if (e.StateKey != null || e.Unsigned?.RedactedBecause != null)
+            return null;
+        var isEncrypted = e.Type == "m.room.encrypted";
+        if (isEncrypted && DecryptRoomEvent(room, e) is { } decrypted)
+            e = decrypted;
+        if (e.Type != "m.room.message" || e.Content is not { ValueKind: JsonValueKind.Object } content)
+            return null;
+        try
+        {
+            var messageContent = ParseContent<RoomMessageContent>(content, withExamples: !isEncrypted);
+            if (messageContent == null || messageContent.RelatesTo?.RelType == "m.replace")
+                return null;
+            return CreateMessage(room, e, messageContent, isEncrypted);
+        }
+        catch (JsonException ex)
+        {
+            Logger.LogWarning(ex, "Could not interpret message {EventId} in room {RoomId}.", e.EventId, room.RoomId.Full);
+            return null;
+        }
+    }
+
+    private Message? CreateMessage(Room room, RoomEvent e, RoomMessageContent content, bool isEncrypted)
+    {
+        if (GetRoomUser(room, e.Sender) is not { } sender)
+            return null;
+        var kind = ToMessageKind(content.MsgType);
+        if (kind == MessageKind.Unknown)
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.MsgType, content.MsgType, isEncrypted ? null : e);
+        ReportUnhandledRelation(content.RelatesTo, isEncrypted ? null : e);
+
+        var relatesTo = content.RelatesTo;
+        var threadRootId = relatesTo?.RelType == "m.thread" ? relatesTo.EventId : null;
+        // A thread message carries a reply to the previous thread message as a fallback for clients without threads.
+        var replyToId = threadRootId != null && relatesTo!.IsFallingBack == true ? null : relatesTo?.InReplyTo?.EventId;
+
+        return new Message(e.EventId, room, sender, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
+            sender.User.UserId.Equals(CurrentUser), isEncrypted, replyToId, threadRootId,
+            ToMessageContent(room, kind, content.Body, content.Format, content.FormattedBody, content.Mentions));
+    }
+
+    private void HandleEdit(Room room, RoomEvent e, RoomMessageContent content, bool isEncrypted, List<Update> updates)
+    {
+        if (content.RelatesTo?.EventId is not { } targetId || room.Window.Find(targetId) is not { } target)
+        {
+            Logger.LogDebug("Ignoring edit {EventId} in room {RoomId}: the edited message isn't loaded.", e.EventId, room.RoomId.Full);
+            return;
+        }
+        // Only the sender can edit a message, and an encrypted message is only edited by an encrypted edit.
+        if (content.NewContent is not { } newContent || target.Sender.User.UserId.Full != e.Sender || (target.IsEncrypted && !isEncrypted))
+        {
+            Logger.LogDebug("Ignoring invalid edit {EventId} of message {TargetId} in room {RoomId}.", e.EventId, targetId, room.RoomId.Full);
+            return;
+        }
+
+        var edit = new MessageEdit(e.EventId, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
+            ToMessageContent(room, ToMessageKind(newContent.MsgType), newContent.Body, newContent.Format, newContent.FormattedBody, newContent.Mentions));
+        if (!target.AddEdit(edit, out var contentChanged))
+            return;
+        room.Window.AddRelated(e.EventId, target);
+        if (contentChanged)
+            updates.Add(new MessageEdited(target));
+    }
+
+    private void HandleReaction(Room room, RoomEvent e, ReactionContent? content, List<Update> updates)
+    {
+        if (content?.RelatesTo is not { RelType: "m.annotation" } relation)
+        {
+            Diagnostics.ReportUnhandled(Logger, UnhandledKind.Relation, content?.RelatesTo.RelType ?? "m.reaction without relation", e);
+            return;
+        }
+        if (room.Window.Find(relation.EventId) is not { } target || GetRoomUser(room, e.Sender) is not { } user)
+            return;
+        if (!target.AddReaction(new ReactionEvent(e.EventId, relation.Key, user), out var isNewKey))
+            return;
+        room.Window.AddRelated(e.EventId, target);
+        if (isNewKey)
+            updates.Add(new ReactionAdded(target, relation.Key, user));
+    }
+
+    private void HandleRedaction(Room room, RoomEvent e, RedactionContent? content, List<Update> updates)
+    {
+        if ((content?.Redacts ?? e.Redacts) is not { } redactedId)
+        {
+            Logger.LogWarning("Received redaction {EventId} without a target in room {RoomId}.", e.EventId, room.RoomId.Full);
+            return;
+        }
+        if (GetRoomUser(room, e.Sender) is not { } redactedBy)
+            return;
+
+        if (room.Window.Find(redactedId) is { } message)
+        {
+            if (message.Delete())
+                updates.Add(new MessageDeleted(message, redactedBy));
+        }
+        else if (room.Window.FindRelatedTarget(redactedId) is { } target)
+        {
+            room.Window.RemoveRelated(redactedId);
+            if (target.RemoveReaction(redactedId) is { } reaction)
+                updates.Add(new ReactionRemoved(target, reaction.Key, reaction.User));
+            else if (target.RemoveEdit(redactedId))
+                updates.Add(new MessageEdited(target));
+        }
+    }
+
+    private MessageContent ToMessageContent(Room room, MessageKind kind, string body, string? format, string? formattedBody, Mentions? mentions)
+    {
+        var html = format == "org.matrix.custom.html" ? formattedBody : null;
+        var mentionedUsers = mentions?.UserIds?
+            .Select(id => GetRoomUser(room, id))
+            .OfType<RoomUser>()
+            .ToList() ?? [];
+        return new MessageContent(kind, body, html, mentionedUsers);
+    }
+
+    private static MessageKind ToMessageKind(string msgType) => msgType switch
+    {
+        "m.text" => MessageKind.Text,
+        "m.notice" => MessageKind.Notice,
+        "m.emote" => MessageKind.Emote,
+        "m.image" => MessageKind.Image,
+        "m.file" => MessageKind.File,
+        "m.audio" => MessageKind.Audio,
+        "m.video" => MessageKind.Video,
+        _ => MessageKind.Unknown,
+    };
+
+    private RoomUser? GetRoomUser(Room room, string? userId)
+    {
+        if (!UserId.TryParse(userId, out var parsed) || parsed == null)
+        {
+            Logger.LogWarning("Received an event with invalid user ID {UserId} in room {RoomId}.", userId, room.RoomId.Full);
+            return null;
+        }
+        return GetOrAddUser(GetOrAddUser(parsed), room);
     }
 
     /// <summary>Decrypts an m.room.encrypted event, or reports why it can't and returns null.</summary>
@@ -1168,7 +1307,7 @@ public sealed class MatrixClient : IAsyncDisposable
             failure = engineFailure ?? "unknown error";
         }
 
-        // Reactions are not delivered even when they can be decrypted.
+        // A reaction we can't decrypt isn't worth an issue.
         if (!IsAnnotation(e))
         {
             ReportIssue(ClientIssueKind.DecryptionFailed,
@@ -1190,7 +1329,7 @@ public sealed class MatrixClient : IAsyncDisposable
         RoomUser? user = null;
         if (room != null && userId != null && UserId.TryParse(userId, out var parsedUserId) && parsedUserId != null)
             user = GetOrAddUser(GetOrAddUser(parsedUserId), room);
-        _issueChannel.Writer.TryWrite(new ClientIssue(kind, message, room, user, eventId, exception));
+        _updates.Writer.TryWrite(new ClientIssue(kind, message, room, user, eventId, exception));
     }
 
     private void HandleRoomEncryptionEvent(Room room, JsonElement? content)
@@ -1220,62 +1359,6 @@ public sealed class MatrixClient : IAsyncDisposable
         }
         if (encryptionEvent.Algorithm != "m.megolm.v1.aes-sha2")
             Logger.LogWarning("Received unknown encryption algorithm {Algorithm} in room {RoomId}.", encryptionEvent.Algorithm, room.RoomId.Full);
-    }
-
-    private void HandleMessageReceived(MatrixId roomId, List<ReceivedTextMessage> messages, Room room, RoomEvent e,
-        bool isEncrypted = false)
-    {
-        if (e.Content == null)
-        {
-            Logger.LogWarning("Received timeline event with no content in room {RoomId}. Type {Type}", roomId.Full, e.Type);
-            return;
-        }
-
-        // Decrypted content stays out of the logs.
-        var messageEvent = ParseContent<RoomMessageContent>((JsonElement)e.Content, withExamples: !isEncrypted);
-        if (messageEvent == null)
-        {
-            Logger.LogWarning("Received m.room.message event deserialize returned null in room {RoomId}.", roomId.Full);
-            return;
-        }
-        var userIdStr = e.Sender;
-        if (!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
-        {
-            Logger.LogWarning("Received m.room.message event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, roomId.Full);
-            return;
-        }
-        if (messageEvent.MsgType is not "m.text" and not "m.notice")
-        {
-            Logger.LogInformation("Ignoring m.room.message event with non-text message type {MsgType} in room {RoomId}.", messageEvent.MsgType, roomId.Full);
-            Diagnostics.ReportUnhandled(Logger, UnhandledKind.MsgType, messageEvent.MsgType, isEncrypted ? null : e);
-            return;
-        }
-        ReportUnhandledRelation(messageEvent.RelatesTo, isEncrypted ? null : e);
-
-        var serverTs = DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs);
-
-        var user = GetOrAddUser(userId);
-        var roomUser = GetOrAddUser(user, room);
-        var threadId = (string?)null;
-        if(messageEvent.RelatesTo != null && messageEvent.RelatesTo.EventId != null
-            && messageEvent.RelatesTo.RelType == "m.thread")
-        {
-            threadId = messageEvent.RelatesTo.EventId;
-        }
-
-        var message = new ReceivedTextMessage(messageEvent.Body, room, roomUser, e.EventId, serverTs, threadId, messageEvent.MsgType, this, isEncrypted);
-        if (messageEvent.Mentions != null && messageEvent.Mentions.UserIds != null && messageEvent.Mentions.UserIds.Count > 0)
-        {
-            message.Mentions = messageEvent.Mentions.UserIds
-                .Select(id => UserId.TryParse(id, out MatrixId? mentionId) ? mentionId : null)
-                .Where(id => id != null)
-                .Select(id => id!)
-                .Select(id => GetOrAddUser(id))
-                .Select(u => GetOrAddUser(u, room)).ToList();
-        }
-
-        messages.Add(message);
-        room.LastMessage = message;
     }
 
     internal User GetOrAddUser(MatrixId id)
@@ -1320,16 +1403,11 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    // Threads are handled; replies and every other relation type are not delivered yet.
+    // Edits, reactions, threads and replies are handled; other relation types of messages are not.
     private void ReportUnhandledRelation(RelatesTo? relatesTo, RoomEvent? example)
     {
-        if (relatesTo == null)
-            return;
-        if (relatesTo.RelType is { } relType && relType != "m.thread")
+        if (relatesTo?.RelType is { } relType && relType != "m.thread")
             Diagnostics.ReportUnhandled(Logger, UnhandledKind.Relation, relType, example);
-        // A thread message carries the reply as a fallback for clients without threads.
-        if (relatesTo.InReplyTo != null && !(relatesTo.RelType == "m.thread" && relatesTo.IsFallingBack == true))
-            Diagnostics.ReportUnhandled(Logger, UnhandledKind.Relation, "m.in_reply_to", example);
     }
 
     private MatrixDiagnostics Diagnostics => HttpClientParameters.Diagnostics;

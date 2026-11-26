@@ -6,6 +6,7 @@ using RSMatrix.Desktop.Chat;
 using RSMatrix.Desktop.Content;
 using RSMatrix.Desktop.Storage;
 using RSMatrix.Models;
+using LibraryReactionRemoved = RSMatrix.Models.ReactionRemoved;
 
 namespace RSMatrix.Desktop.Matrix;
 
@@ -43,7 +44,7 @@ public sealed class MatrixChatSession : IChatSession
         _logger = logger;
         CurrentUser = new ChatUser(client.CurrentUser.Full, client.CurrentUser.Localpart.ToString());
         ServerName = client.CurrentUser.Domain.ToString();
-        _pumps = Task.WhenAll(ForwardMessagesAsync(), ForwardIssuesAsync(), PollConnectionStateAsync());
+        _pumps = Task.WhenAll(ForwardUpdatesAsync(), PollConnectionStateAsync());
     }
 
     public ChatUser CurrentUser { get; }
@@ -85,12 +86,9 @@ public sealed class MatrixChatSession : IChatSession
     public IAsyncEnumerable<ChatEvent> ReadEventsAsync(CancellationToken cancellationToken)
         => _events.Reader.ReadAllAsync(cancellationToken);
 
-    // RSMatrix sends to a thread only as a response to a received message object, which this session doesn't keep.
     public Task<string> SendTextAsync(string roomId, string text, string? replyToEventId, string? threadRootId,
         CancellationToken cancellationToken)
-        => threadRootId != null
-            ? throw new NotSupportedException("RSMatrix can't send to threads yet.")
-            : GetRoom(roomId).SendTextMessageAsync(text, replyToEventId, mentions: null).WaitAsync(cancellationToken);
+        => GetRoom(roomId).SendMessageAsync(text, replyToId: replyToEventId, threadRootId: threadRootId).WaitAsync(cancellationToken);
 
     public async Task<HistoryPage> LoadHistoryAsync(string roomId, string? from, int limit, CancellationToken cancellationToken)
     {
@@ -112,7 +110,7 @@ public sealed class MatrixChatSession : IChatSession
             throw new InvalidOperationException("Only reactions sent in this session can be removed.");
         await GetRoom(roomId).RedactEventAsync(reactionId).WaitAsync(cancellationToken).ConfigureAwait(false);
         _sentReactionIds.TryRemove((roomId, targetEventId, key), out _);
-        _events.Writer.TryWrite(new ReactionRemoved(roomId, targetEventId, key, CurrentUser));
+        _events.Writer.TryWrite(new RSMatrix.Desktop.Chat.ReactionRemoved(roomId, targetEventId, key, CurrentUser));
     }
 
     // The sync lazy-loads members and RSMatrix has no public call for the full list,
@@ -148,15 +146,44 @@ public sealed class MatrixChatSession : IChatSession
     private Room GetRoom(string roomId)
         => _rooms.TryGetValue(roomId, out var room) ? room : throw new InvalidOperationException($"Unknown room {roomId}.");
 
-    private async Task ForwardMessagesAsync()
+    private async Task ForwardUpdatesAsync()
     {
         string? failure = null;
         try
         {
-            await foreach (var message in _client.Messages.ReadAllAsync(_lifetime.Token).ConfigureAwait(false))
+            await foreach (var update in _client.Updates.ReadAllAsync(_lifetime.Token).ConfigureAwait(false))
             {
-                _rooms.TryAdd(message.Room.RoomId.Full, message.Room);
-                _events.Writer.TryWrite(new MessageReceived(ToRoomInfo(message.Room), ToChatMessage(message)));
+                switch (update.Value)
+                {
+                    case NewMessage { Message: var message }:
+                        _rooms.TryAdd(message.Room.RoomId.Full, message.Room);
+                        _events.Writer.TryWrite(new MessageReceived(ToRoomInfo(message.Room), ToChatMessage(message)));
+                        break;
+                    case ClientIssue issue:
+                        _logger.LogWarning("{Issue}", issue);
+                        if (issue.Kind == ClientIssueKind.SyncInterrupted)
+                        {
+                            Interlocked.Exchange(ref _syncInterruptedAtUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                            _events.Writer.TryWrite(new ConnectionChanged(ConnectionState.Reconnecting, issue.Message));
+                            continue;
+                        }
+                        _events.Writer.TryWrite(new IssueReported(issue.Message, issue.Room?.RoomId.Full));
+                        break;
+                    case ReactionAdded reaction:
+                        _events.Writer.TryWrite(new ReactionReceived(reaction.Message.Room.RoomId.Full, reaction.Message.Id,
+                            reaction.Key, ToChatUser(reaction.User)));
+                        break;
+                    case LibraryReactionRemoved reaction:
+                        _events.Writer.TryWrite(new RSMatrix.Desktop.Chat.ReactionRemoved(reaction.Message.Room.RoomId.Full,
+                            reaction.Message.Id, reaction.Key, ToChatUser(reaction.User)));
+                        break;
+                    case MessageEdited:
+                        // The app does not show message edits yet.
+                        break;
+                    case MessageDeleted:
+                        // The app does not show message deletions yet.
+                        break;
+                }
             }
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
@@ -164,33 +191,12 @@ public sealed class MatrixChatSession : IChatSession
         }
         catch (Exception ex)
         {
-            // The message channel faults when the sync ends with an error, like a revoked session.
+            // The update channel faults when the sync ends with an error, like a revoked session.
             _logger.LogError(ex, "Sync stopped.");
             failure = ex.Message;
         }
         _events.Writer.TryWrite(new ConnectionChanged(ConnectionState.Stopped, failure));
         _events.Writer.TryComplete();
-    }
-
-    private async Task ForwardIssuesAsync()
-    {
-        try
-        {
-            await foreach (var issue in _client.Issues.ReadAllAsync(_lifetime.Token).ConfigureAwait(false))
-            {
-                _logger.LogWarning("{Issue}", issue);
-                if (issue.Kind == ClientIssueKind.SyncInterrupted)
-                {
-                    Interlocked.Exchange(ref _syncInterruptedAtUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-                    _events.Writer.TryWrite(new ConnectionChanged(ConnectionState.Reconnecting, issue.Message));
-                    continue;
-                }
-                _events.Writer.TryWrite(new IssueReported(issue.Message, issue.Room?.RoomId.Full));
-            }
-        }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
-        {
-        }
     }
 
     // RSMatrix offers connection health as properties without change notifications, so they are polled.
@@ -255,12 +261,14 @@ public sealed class MatrixChatSession : IChatSession
         };
     }
 
-    // RSMatrix delivers the plain text body only, without formatted_body.
-    private static ChatMessage ToChatMessage(ReceivedTextMessage message)
+    private static ChatMessage ToChatMessage(Message message)
     {
-        var kind = message.MsgType == "m.notice" ? ChatMessageKind.Notice : ChatMessageKind.Text;
-        var sender = new ChatUser(message.Sender.User.UserId.Full, message.Sender.GetDisplayName());
-        return new ChatMessage(message.Room.RoomId.Full, message.EventId, sender, message.Timestamp, kind,
-            message.Body ?? "", PlainTextParser.Parse(message.Body), message.IsEncrypted, message.ThreadId);
+        var kind = message.Kind == MessageKind.Notice ? ChatMessageKind.Notice : ChatMessageKind.Text;
+        var sender = ToChatUser(message.Sender);
+        return new ChatMessage(message.Room.RoomId.Full, message.Id, sender, message.Timestamp, kind,
+            message.Body, PlainTextParser.Parse(message.Body), message.IsEncrypted, message.ThreadRootId, message.ReplyToId);
     }
+
+    private static ChatUser ToChatUser(RoomUser user)
+        => new(user.User.UserId.Full, user.GetDisplayName());
 }

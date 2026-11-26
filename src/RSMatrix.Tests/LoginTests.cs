@@ -27,8 +27,10 @@ public class LoginTests
         // The fake server keeps answering sync with a soft logout. The client logs in once more
         // with the same device and sync position. A rejection right after that login is terminal
         // and must reach the channel, rather than looping on logins or leaving a background loop.
-        var error = await Assert.ThrowsAsync<MatrixResponseException>(() =>
-            client.Messages.Completion.WaitAsync(lifetime.Token));
+        var error = await Assert.ThrowsAsync<MatrixResponseException>(async () =>
+        {
+            await foreach (var _ in client.Updates.ReadAllAsync(lifetime.Token)) { }
+        });
         await Assert.That(error!.ErrorCode).IsEqualTo("M_UNKNOWN_TOKEN");
         await Assert.That(handler.LoginCount).IsEqualTo(2);
         await Assert.That(handler.CapabilitiesCount).IsEqualTo(failInitialization ? 2 : 1);

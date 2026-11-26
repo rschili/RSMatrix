@@ -1,6 +1,7 @@
 using System.Text.Json;
 using RSMatrix.Http;
 using RSMatrix.Models;
+using static RSMatrix.IntegrationTests.UpdateReader;
 
 namespace RSMatrix.IntegrationTests;
 
@@ -47,7 +48,7 @@ public class EncryptionTests
             await Assert.That(bobRoom.IsEncrypted).IsTrue();
             await Assert.That(bobPing.IsEncrypted).IsFalse();
 
-            var secretId = await bobRoom.SendTextMessageAsync("secret body", null, null);
+            var secretId = await bobRoom.SendMessageAsync("secret body");
             var secret = await ReceiveAsync(carol, secretId, server.CancellationToken);
             await Assert.That(secret.Body).IsEqualTo("secret body");
             await Assert.That(secret.IsEncrypted).IsTrue();
@@ -56,7 +57,7 @@ public class EncryptionTests
             await Assert.That(rawSecret.GetProperty("type").GetString()).IsEqualTo("m.room.encrypted");
             await Assert.That(rawSecret.GetRawText().Contains("secret body")).IsFalse();
 
-            var replyId = await secret.SendResponseAsync("reply body", isReply: true);
+            var replyId = await secret.ReplyAsync("reply body");
             var reply = await ReceiveAsync(bob, replyId, server.CancellationToken);
             await Assert.That(reply.Body).IsEqualTo("reply body");
             var rawReply = await GetEventAsync(alice, roomPath, replyId);
@@ -75,20 +76,20 @@ public class EncryptionTests
             await Assert.That(edit.Body).IsEqualTo("* edited body");
 
             var history = await secret.Room.FetchMessagesAsync(limit: 20);
-            await Assert.That(history.Messages.Any(m => m.EventId == secretId && m.Body == "secret body" && m.IsEncrypted)).IsTrue();
-            await Assert.That(history.Messages.Any(m => m.EventId == pingId && !m.IsEncrypted)).IsTrue();
-            await Assert.That(history.Messages.Any(m => m.EventId == replyId && m.Body == "reply body")).IsTrue();
+            await Assert.That(history.Messages.Any(m => m.Id == secretId && m.Body == "secret body" && m.IsEncrypted)).IsTrue();
+            await Assert.That(history.Messages.Any(m => m.Id == pingId && !m.IsEncrypted)).IsTrue();
+            await Assert.That(history.Messages.Any(m => m.Id == replyId && m.Body == "reply body")).IsTrue();
 
             // Restart Carol with the same device and store: old sessions must still work both ways.
             await carol.DisposeAsync();
             var restarted = await server.ResumeClientAsync(carolUser, carolStore);
             restarted.AutoJoinOnInvite = true;
 
-            var afterRestartId = await bobRoom.SendTextMessageAsync("after restart", null, null);
+            var afterRestartId = await bobRoom.SendMessageAsync("after restart");
             var afterRestart = await ReceiveAsync(restarted, afterRestartId, server.CancellationToken);
             await Assert.That(afterRestart.Body).IsEqualTo("after restart");
 
-            var answerId = await afterRestart.SendResponseAsync("answer after restart");
+            var answerId = await afterRestart.ReplyAsync("answer after restart", quote: false);
             var answer = await ReceiveAsync(bob, answerId, server.CancellationToken);
             await Assert.That(answer.Body).IsEqualTo("answer after restart");
         }
@@ -146,7 +147,7 @@ public class EncryptionTests
             var sessionIds = new List<string>();
             foreach (var body in new[] { "one", "two", "three" })
             {
-                var eventId = await bobRoom.SendTextMessageAsync(body, null, null);
+                var eventId = await bobRoom.SendMessageAsync(body);
                 await Assert.That((await ReceiveAsync(carol, eventId, server.CancellationToken)).Body).IsEqualTo(body);
                 sessionIds.Add(await GetSessionIdAsync(alice, roomPath, eventId));
             }
@@ -175,7 +176,7 @@ public class EncryptionTests
             var (roomPath, bobRoom) = await CreateEncryptedRoomAsync(alice, bob, [carol],
                 new { algorithm = "m.megolm.v1.aes-sha2" }, server.CancellationToken);
 
-            var beforeId = await bobRoom.SendTextMessageAsync("before the new device", null, null);
+            var beforeId = await bobRoom.SendMessageAsync("before the new device");
             await ReceiveAsync(carol, beforeId, server.CancellationToken);
             var firstSession = await GetSessionIdAsync(alice, roomPath, beforeId);
 
@@ -185,7 +186,7 @@ public class EncryptionTests
             await ReceiveAsync(bob, pingId, server.CancellationToken);
             await ReceiveAsync(carolPhone, pingId, server.CancellationToken);
 
-            var afterId = await bobRoom.SendTextMessageAsync("after the new device", null, null);
+            var afterId = await bobRoom.SendMessageAsync("after the new device");
             var after = await ReceiveAsync(carolPhone, afterId, server.CancellationToken);
             await Assert.That(after.Body).IsEqualTo("after the new device");
             await Assert.That(after.IsEncrypted).IsTrue();
@@ -193,14 +194,14 @@ public class EncryptionTests
 
             // The new device only got the key from its current index on, so older history stays unreadable.
             var history = await after.Room.FetchMessagesAsync(limit: 20);
-            await Assert.That(history.Messages.Any(m => m.EventId == beforeId)).IsFalse();
+            await Assert.That(history.Messages.Any(m => m.Id == beforeId)).IsFalse();
             await Assert.That(ReadIssues(carolPhone).Any(i => i.Kind == ClientIssueKind.DecryptionFailed && i.EventId == beforeId)).IsTrue();
 
             // Once Bob has seen Carol leave, his next message uses a new key.
             await LocalHomeserver.RequestAsync(alice, $"{roomPath}/kick", HttpMethod.Post, new { user_id = $"@{carolUser}:localhost" });
             await WaitUntilAsync(() => bobRoom.Users.TryGetValue($"@{carolUser}:localhost", out var member) && member.Membership == Membership.Leave,
                 server.CancellationToken);
-            var afterLeaveId = await bobRoom.SendTextMessageAsync("after carol left", null, null);
+            var afterLeaveId = await bobRoom.SendMessageAsync("after carol left");
             await Assert.That(await GetSessionIdAsync(alice, roomPath, afterLeaveId)).IsNotEqualTo(firstSession);
         }
         finally
@@ -246,13 +247,6 @@ public class EncryptionTests
     private static async Task<string> GetSessionIdAsync(HttpClientParameters user, string roomPath, string eventId)
         => (await GetEventAsync(user, roomPath, eventId)).GetProperty("content").GetProperty("session_id").GetString()!;
 
-    internal static List<ClientIssue> ReadIssues(MatrixClient client)
-    {
-        var issues = new List<ClientIssue>();
-        while (client.Issues.TryRead(out var issue))
-            issues.Add(issue);
-        return issues;
-    }
 
     private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken cancellationToken)
     {
@@ -275,14 +269,4 @@ public class EncryptionTests
     private static Task<JsonElement> GetEventAsync(HttpClientParameters user, string roomPath, string eventId)
         => LocalHomeserver.RequestAsync(user, $"{roomPath}/event/{Uri.EscapeDataString(eventId)}", HttpMethod.Get);
 
-    internal static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, string eventId,
-        CancellationToken cancellationToken)
-    {
-        await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
-        {
-            if (message.EventId == eventId)
-                return message;
-        }
-        throw new InvalidOperationException($"Sync ended before receiving event {eventId}.");
-    }
 }

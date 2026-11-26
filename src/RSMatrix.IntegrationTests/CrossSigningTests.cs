@@ -3,6 +3,7 @@ using RSMatrix.Crypto;
 using RSMatrix.Http;
 using RSMatrix.Models;
 using static RSMatrix.IntegrationTests.EncryptionTests;
+using static RSMatrix.IntegrationTests.UpdateReader;
 
 namespace RSMatrix.IntegrationTests;
 
@@ -119,7 +120,7 @@ public class CrossSigningTests
             var (roomPath, bobRoom) = await CreateEncryptedRoomAsync(alice, bob, [carol, carolUnsigned],
                 new { algorithm = "m.megolm.v1.aes-sha2" }, server.CancellationToken);
 
-            var fromBobId = await bobRoom.SendTextMessageAsync("for signed devices", null, null);
+            var fromBobId = await bobRoom.SendMessageAsync("for signed devices");
             await Assert.That((await ReceiveAsync(carol, fromBobId, server.CancellationToken)).Body).IsEqualTo("for signed devices");
             await Assert.That(ReadIssues(bob).Any(i => i.Kind == ClientIssueKind.RoomKeyNotShared && i.Message.Contains("not cross-signed"))).IsTrue();
 
@@ -129,7 +130,7 @@ public class CrossSigningTests
             await Assert.That(unreadable.Kind).IsEqualTo(ClientIssueKind.DecryptionFailed);
             await Assert.That(unreadable.Message.Contains("m.unverified")).IsTrue();
 
-            var fromUnsignedId = await ping.Room.SendTextMessageAsync("from an unsigned device", null, null);
+            var fromUnsignedId = await ping.Room.SendMessageAsync("from an unsigned device");
             var secondPingId = await SendPlaintextAsync(alice, roomPath, "second ping");
             await ReceiveAsync(bob, secondPingId, server.CancellationToken);
             var refused = ReadIssues(bob).Single(i => i.EventId == fromUnsignedId);

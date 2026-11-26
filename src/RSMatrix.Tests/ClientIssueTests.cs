@@ -26,7 +26,7 @@ public class ClientIssueTests
         await Assert.That(issue.Room).IsSameReferenceAs(context.Room());
         await Assert.That(issue.User!.User.UserId.Full).IsEqualTo("@alice:example.org");
         await Assert.That(issue.Message.Contains("encryption is not enabled")).IsTrue();
-        await Assert.That(context.Client.Messages.TryRead(out _)).IsFalse();
+        await Assert.That(context.ReadUpdates().OfType<Update>().Any(update => update.Value is NewMessage)).IsFalse();
     }
 
     [Test]
@@ -43,7 +43,7 @@ public class ClientIssueTests
 
         var history = await context.Room().FetchMessagesAsync();
 
-        await Assert.That(history.Messages.Single().EventId).IsEqualTo("$plain");
+        await Assert.That(history.Messages.Single().Id).IsEqualTo("$plain");
         var issue = ReadAll(context.Client).Single();
         await Assert.That(issue.Kind).IsEqualTo(ClientIssueKind.DecryptionFailed);
         await Assert.That(issue.EventId).IsEqualTo("$secret");
@@ -89,28 +89,17 @@ public class ClientIssueTests
         var issues = ReadAll(context.Client);
         await Assert.That(issues.Count).IsEqualTo(2);
         await Assert.That(issues.All(i => i.Kind == ClientIssueKind.SyncInterrupted && i.Exception != null)).IsTrue();
-        await Assert.That(context.Client.Issues.Completion.IsCompleted).IsTrue();
-    }
-
-    [Test]
-    public async Task IssueChannel_KeepsTheLatestIssues()
-    {
-        using var context = new MatrixTestContext();
-        var total = MatrixClient.IssueChannelCapacity + 20;
-        for (var i = 0; i < total; i++)
-            context.Client.ReportIssue(ClientIssueKind.SyncInterrupted, $"issue {i}");
-
-        var issues = ReadAll(context.Client);
-        await Assert.That(issues.Count).IsEqualTo(MatrixClient.IssueChannelCapacity);
-        await Assert.That(issues[0].Message).IsEqualTo("issue 20");
-        await Assert.That(issues[^1].Message).IsEqualTo($"issue {total - 1}");
+        await Assert.That(context.Client.Updates.Completion.IsCompleted).IsTrue();
     }
 
     internal static List<ClientIssue> ReadAll(MatrixClient client)
     {
         var issues = new List<ClientIssue>();
-        while (client.Issues.TryRead(out var issue))
-            issues.Add(issue);
+        while (client.Updates.TryRead(out var update))
+        {
+            if (update.Value is ClientIssue issue)
+                issues.Add(issue);
+        }
         return issues;
     }
 }

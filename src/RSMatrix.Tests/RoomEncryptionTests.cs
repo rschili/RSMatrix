@@ -13,22 +13,17 @@ public class RoomEncryptionTests
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""", timeline);
         var room = context.Room();
         var sender = context.Client.GetOrAddUser(context.Client.CurrentUser);
-        var message = new ReceivedTextMessage("received", room, context.Client.GetOrAddUser(sender, room),
-            "$original", DateTimeOffset.UtcNow, "$thread", "m.text", context.Client);
+        var message = new Message("$original", room, context.Client.GetOrAddUser(sender, room),
+            DateTimeOffset.UtcNow, true, false, null, "$thread",
+            new MessageContent(MessageKind.Text, "received", null, []));
 
         Func<Task>[] sends = [
-            () => room.SendTextMessageAsync("secret", null, null),
-            () => room.SendHtmlMessageAsync("secret", "<b>secret</b>", null, null),
-            () => room.SendNoticeAsync("secret", null, null),
-            () => room.SendHtmlNoticeAsync("secret", "<b>secret</b>", null, null),
-            () => room.EditMessageAsync("$original", "secret"),
-            () => room.EditHtmlMessageAsync("$original", "secret", "<b>secret</b>"),
-            () => message.SendResponseAsync("secret"),
-            () => message.SendHtmlResponseAsync("secret", "<b>secret</b>"),
-            () => message.SendNoticeResponseAsync("secret"),
-            () => message.SendHtmlNoticeResponseAsync("secret", "<b>secret</b>"),
-            () => message.EditAsync("secret"),
-            () => message.EditHtmlAsync("secret", "<b>secret</b>"),
+            () => room.SendMessageAsync("secret"),
+            () => room.SendMessageAsync("secret", "<b>secret</b>", notice: true, threadRootId: "$thread"),
+            () => room.EditMessageAsync("$original", "secret", "<b>secret</b>"),
+            () => message.ReplyAsync("secret"),
+            () => message.ReplyAsync("secret", "<b>secret</b>", notice: true, quote: false),
+            () => message.EditAsync("secret", "<b>secret</b>"),
             () => room.SendReactionAsync("$original", "🤫"),
             () => message.SendReactionAsync("🤫")
         ];
@@ -52,7 +47,7 @@ public class RoomEncryptionTests
         using var context = new MatrixTestContext();
         await SetEncryption(context, content);
         await Assert.That(context.Room().IsEncrypted).IsTrue();
-        await Assert.ThrowsAsync<NotSupportedException>(() => context.Room().SendTextMessageAsync("secret", null, null));
+        await Assert.ThrowsAsync<NotSupportedException>(() => context.Room().SendMessageAsync("secret"));
         await Assert.That(context.Requests.Count).IsEqualTo(0);
     }
 
@@ -76,7 +71,7 @@ public class RoomEncryptionTests
                 """.Replace("CONTENT", content));
             var room = context.Room("!invite:example.org");
             await Assert.That(room.IsEncrypted).IsTrue();
-            await Assert.ThrowsAsync<NotSupportedException>(() => room.SendTextMessageAsync("secret", null, null));
+            await Assert.ThrowsAsync<NotSupportedException>(() => room.SendMessageAsync("secret"));
             await Assert.That(context.Requests.Count).IsEqualTo(autoJoin ? 1 : 0);
         }
     }
@@ -88,7 +83,7 @@ public class RoomEncryptionTests
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""");
         await SetEncryption(context, "{}", timeline: true);
         await Assert.That(context.Room().IsEncrypted).IsTrue();
-        await Assert.ThrowsAsync<NotSupportedException>(() => context.Room().SendNoticeAsync("secret", null, null));
+        await Assert.ThrowsAsync<NotSupportedException>(() => context.Room().SendMessageAsync("secret", notice: true));
     }
 
     [Test]
@@ -97,7 +92,7 @@ public class RoomEncryptionTests
         using var context = new MatrixTestContext();
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""");
         var another = new Room(context.Room().RoomId, context.Client);
-        await Assert.ThrowsAsync<NotSupportedException>(() => another.SendTextMessageAsync("secret", null, null));
+        await Assert.ThrowsAsync<NotSupportedException>(() => another.SendMessageAsync("secret"));
         await Assert.That(context.Requests.Count).IsEqualTo(0);
     }
 
@@ -105,7 +100,7 @@ public class RoomEncryptionTests
     public async Task PlainRoomStillSends_AndEncryptedRoomAllowsUnencryptedControlEvents()
     {
         using var context = new MatrixTestContext();
-        await Assert.That(await context.Room().SendTextMessageAsync("hello", null, null)).IsEqualTo("$sent");
+        await Assert.That(await context.Room().SendMessageAsync("hello")).IsEqualTo("$sent");
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""");
         await context.Room().RedactEventAsync("$event");
         await context.Room().SendTypingNotificationAsync();
@@ -125,11 +120,13 @@ public class RoomEncryptionTests
          {"type":"m.room.message","sender":"@a:example.org","event_id":"$plain","origin_server_ts":1700000000000,
           "content":{"msgtype":"m.text","body":"hello"}}]}}}}}
         """);
-        await Assert.That(context.Client.Messages.TryRead(out var message)).IsTrue();
-        await Assert.That(message!.EventId).IsEqualTo("$plain");
+        var updates = context.ReadUpdates();
+        await Assert.That(updates.Count).IsEqualTo(2);
+        await Assert.That(updates[0].Value is ClientIssue { Kind: ClientIssueKind.DecryptionFailed, EventId: "$encrypted" }).IsTrue();
+        var message = ((NewMessage)updates[1].Value!).Message;
+        await Assert.That(message.Id).IsEqualTo("$plain");
         await Assert.That(message.IsEncrypted).IsFalse();
         await Assert.That(message.Room.IsEncrypted).IsTrue();
-        await Assert.That(context.Client.Messages.TryRead(out _)).IsFalse();
     }
 
     private static Task SetEncryption(MatrixTestContext context, string content, bool timeline = false)

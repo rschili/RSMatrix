@@ -39,15 +39,16 @@ public class SyncHandlerTests
         return response ?? throw new InvalidOperationException($"Failed to deserialize fixture {fileName}");
     }
 
-    private async Task<List<ReceivedTextMessage>> ProcessSyncAndCollectMessagesAsync(string fixtureName)
+    private async Task<List<Message>> ProcessSyncAndCollectMessagesAsync(string fixtureName)
     {
         var syncResponse = await LoadFixtureAsync(fixtureName);
         await _client.HandleSyncResponseForTestingAsync(syncResponse);
 
-        var messages = new List<ReceivedTextMessage>();
-        while (_client.Messages.TryRead(out var msg))
+        var messages = new List<Message>();
+        while (_client.Updates.TryRead(out var update))
         {
-            messages.Add(msg);
+            if (update.Value is NewMessage message)
+                messages.Add(message.Message);
         }
         return messages;
     }
@@ -61,8 +62,8 @@ public class SyncHandlerTests
 
         await Assert.That(messages.Count).IsEqualTo(1);
         await Assert.That(messages[0].Body).IsEqualTo("Hello, world!");
-        await Assert.That(messages[0].MsgType).IsEqualTo("m.text");
-        await Assert.That(messages[0].EventId).IsEqualTo("$msg1");
+        await Assert.That(messages[0].Kind).IsEqualTo(MessageKind.Text);
+        await Assert.That(messages[0].Id).IsEqualTo("$msg1");
         await Assert.That(messages[0].Sender.User.UserId.Full).IsEqualTo("@alice:example.org");
         await Assert.That(messages[0].Room.RoomId.Full).IsEqualTo("!room1:example.org");
     }
@@ -75,15 +76,6 @@ public class SyncHandlerTests
         await Assert.That(messages[0].Timestamp).IsEqualTo(DateTimeOffset.FromUnixTimeMilliseconds(1700000000000));
     }
 
-    [Test]
-    public async Task TextMessage_SetsLastMessageOnRoom()
-    {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
-
-        await Assert.That(messages[0].Room.LastMessage).IsNotNull();
-        await Assert.That(messages[0].Room.LastMessage!.EventId).IsEqualTo("$msg1");
-    }
-
     // ── Notice message ──
 
     [Test]
@@ -93,18 +85,18 @@ public class SyncHandlerTests
 
         await Assert.That(messages.Count).IsEqualTo(1);
         await Assert.That(messages[0].Body).IsEqualTo("I am a bot response");
-        await Assert.That(messages[0].MsgType).IsEqualTo("m.notice");
-        await Assert.That(messages[0].EventId).IsEqualTo("$notice1");
+        await Assert.That(messages[0].Kind).IsEqualTo(MessageKind.Notice);
+        await Assert.That(messages[0].Id).IsEqualTo("$notice1");
     }
 
-    // ── Non-text messages ignored ──
+    // ── Other message kinds ──
 
     [Test]
-    public async Task NonTextMessages_AreNotDelivered()
+    public async Task NonTextMessages_AreDeliveredWithTheirKind()
     {
         var messages = await ProcessSyncAndCollectMessagesAsync("sync_non_text_ignored.json");
 
-        await Assert.That(messages.Count).IsEqualTo(0);
+        await Assert.That(messages.Select(message => message.Kind)).IsEquivalentTo([MessageKind.Image, MessageKind.File]);
     }
 
     // ── Room state ──
@@ -196,7 +188,7 @@ public class SyncHandlerTests
         var messages = await ProcessSyncAndCollectMessagesAsync("sync_message_in_thread.json");
 
         await Assert.That(messages.Count).IsEqualTo(1);
-        await Assert.That(messages[0].ThreadId).IsEqualTo("$thread_root1");
+        await Assert.That(messages[0].ThreadRootId).IsEqualTo("$thread_root1");
     }
 
     [Test]
@@ -204,7 +196,7 @@ public class SyncHandlerTests
     {
         var messages = await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
 
-        await Assert.That(messages[0].ThreadId).IsNull();
+        await Assert.That(messages[0].ThreadRootId).IsNull();
     }
 
     // ── Presence ──
@@ -298,8 +290,8 @@ public class SyncHandlerTests
     {
         var messages = await ProcessSyncAndCollectMessagesAsync("sync_multiple_rooms.json");
 
-        var textMsgs = messages.Where(m => m.MsgType == "m.text").ToList();
-        var noticeMsgs = messages.Where(m => m.MsgType == "m.notice").ToList();
+        var textMsgs = messages.Where(m => m.Kind == MessageKind.Text).ToList();
+        var noticeMsgs = messages.Where(m => m.Kind == MessageKind.Notice).ToList();
 
         await Assert.That(textMsgs.Count).IsEqualTo(2);
         await Assert.That(noticeMsgs.Count).IsEqualTo(1);
@@ -315,12 +307,12 @@ public class SyncHandlerTests
         await _client.HandleSyncResponseForTestingAsync(syncResponse);
 
         // No room should be created for the invite when auto-join is off
-        // (GetOrAddRoom would create one, so we check messages channel is empty)
-        var messages = new List<ReceivedTextMessage>();
-        while (_client.Messages.TryRead(out var msg))
-            messages.Add(msg);
+        // (GetOrAddRoom would create one, so we check the update channel is empty)
+        var updates = new List<Update>();
+        while (_client.Updates.TryRead(out var update))
+            updates.Add(update);
 
-        await Assert.That(messages.Count).IsEqualTo(0);
+        await Assert.That(updates.Count).IsEqualTo(0);
     }
 
     [Test]
@@ -330,12 +322,12 @@ public class SyncHandlerTests
         var syncResponse = await LoadFixtureAsync("sync_invite_direct.json");
         await _client.HandleSyncResponseForTestingAsync(syncResponse);
 
-        // Should not crash, and no messages should be produced
-        var messages = new List<ReceivedTextMessage>();
-        while (_client.Messages.TryRead(out var msg))
-            messages.Add(msg);
+        // Should not crash, and no updates should be produced
+        var updates = new List<Update>();
+        while (_client.Updates.TryRead(out var update))
+            updates.Add(update);
 
-        await Assert.That(messages.Count).IsEqualTo(0);
+        await Assert.That(updates.Count).IsEqualTo(0);
     }
 
     // ── Sequential syncs ──

@@ -81,12 +81,13 @@ public class MatrixDiagnosticsTests
         await context.Process("""
         {"next_batch":"next","account_data":{"events":[{"type":"m.push_rules","content":{}}]},
          "rooms":{"join":{"!room:example.org":{"timeline":{"events":[
-          {"type":"m.reaction","sender":"@alice:example.org","event_id":"$r","origin_server_ts":1700000000000,"content":{}},
+          {"type":"m.sticker","sender":"@alice:example.org","event_id":"$s","origin_server_ts":1700000000000,"content":{"body":"cat"}},
           {"type":"m.room.message","sender":"@alice:example.org","event_id":"$i","origin_server_ts":1700000000000,
            "content":{"msgtype":"m.image","body":"cat.png","url":"mxc://example.org/cat"}},
-          {"type":"m.room.message","sender":"@alice:example.org","event_id":"$e","origin_server_ts":1700000000000,
-           "content":{"msgtype":"m.text","body":"* hi","m.new_content":{"msgtype":"m.text","body":"hi"},
-                      "m.relates_to":{"rel_type":"m.replace","event_id":"$i"}}},
+          {"type":"m.room.message","sender":"@alice:example.org","event_id":"$c","origin_server_ts":1700000000000,
+           "content":{"msgtype":"org.example.custom","body":"custom"}},
+          {"type":"m.room.message","sender":"@alice:example.org","event_id":"$r","origin_server_ts":1700000000000,
+           "content":{"msgtype":"m.text","body":"see above","m.relates_to":{"rel_type":"m.reference","event_id":"$i"}}},
           {"type":"m.room.topic","state_key":"","sender":"@alice:example.org","event_id":"$t","origin_server_ts":1700000000000,
            "content":{"topic":"Cats"}}]}}},
           "leave":{"!old:example.org":{}}}}
@@ -95,10 +96,10 @@ public class MatrixDiagnosticsTests
         var warnings = context.Logs.Where(l => l.Level == LogLevel.Warning).Select(l => l.Message).ToList();
         await Assert.That(warnings).IsEquivalentTo([
             "Unhandled AccountData: m.push_rules",
-            "Unhandled TimelineEvent: m.reaction",
-            "Unhandled MsgType: m.image",
+            "Unhandled TimelineEvent: m.sticker",
             "Unhandled Field: RoomMessageContent.url",
-            "Unhandled Relation: m.replace",
+            "Unhandled MsgType: org.example.custom",
+            "Unhandled Relation: m.reference",
             "Unhandled StateEvent: m.room.topic",
             "Unhandled SyncSection: rooms.leave",
         ]);

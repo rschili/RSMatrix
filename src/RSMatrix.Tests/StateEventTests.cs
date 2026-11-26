@@ -82,7 +82,7 @@ public class StateEventTests
             Event("m.room.message", "", """{"msgtype":"m.text","body":"not a message"}"""),
             Event("m.space.child", "!child:example.org", """{"via":["example.org"]}""")
         ]));
-        await Assert.That(client.Messages.TryRead(out _)).IsFalse();
+        await Assert.That(client.Updates.TryRead(out _)).IsFalse();
         await Assert.That(RoomFor(client).StateEvents.Count).IsEqualTo(2);
     }
 
@@ -110,8 +110,10 @@ public class StateEventTests
             Event("m.room.message", null, """{"msgtype":"m.text","body":"hello"}""")
         ]));
         await Assert.That(RoomFor(client).DisplayName).IsEqualTo("Valid name");
-        await Assert.That(client.Messages.TryRead(out var message)).IsTrue();
-        await Assert.That(message!.Body).IsEqualTo("hello");
+        await Assert.That(client.Updates.TryRead(out var update)).IsTrue();
+        await Assert.That(update!.Value is NewMessage).IsTrue();
+        var message = ((NewMessage)update.Value).Message;
+        await Assert.That(message.Body).IsEqualTo("hello");
         await Assert.That(log.Levels.Contains(LogLevel.Error)).IsFalse();
     }
 

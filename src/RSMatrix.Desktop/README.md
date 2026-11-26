@@ -42,14 +42,14 @@ The app works around these, and each would make it simpler or better:
 - **Room list**: no public list of joined rooms or change notifications. Rooms appear once a text message from them arrives.
 - **Members**: the sync lazy-loads members, and the full list from `/members` is only used inside the encryption code. The member list shows only the people RSMatrix has seen in the room's state and timeline.
 - **Room names**: no computed display name. The app follows the spec's order, but without the member counts from the room summary.
-- **Formatted messages**: `ReceivedTextMessage` has `Body` only, so `formatted_body` is lost.
-- **Images and other media**: `m.image` events are dropped, and there is no media download.
+- **Formatted messages**: RSMatrix exposes `Message.Html`, but the app currently renders only the plain-text body.
+- **Images and other media**: image and other media messages arrive, but there is no media download.
 - **Sign out**: there is no logout, so disconnecting leaves the device signed in.
 - **Connection state**: `IsSyncing` and `LastSyncAt` have no change notifications, so they are polled.
-- **Read state**: no unread counts or read markers from the server. Only messages after the initial sync count as unread.
-- **Reactions and read receipts**: not delivered. Your own reactions are sent and removed, but only the ones sent in this session can be removed, and other people's reactions only show in the sample.
-- **Replies**: received messages don't say what they reply to. Sending replies works.
-- **Threads**: received messages carry their thread. Sending to a thread needs the received message object, so replying in threads only works in the sample.
+- **Read state**: no unread counts or read markers from the server. The app does not mark messages as read yet, so only messages after the initial sync count as unread.
+- **Reactions and read receipts**: reactions arrive and are shown, but read receipts are not delivered. Only reactions sent in this session can be removed.
+- **Replies**: received messages expose their reply target, but the app does not display reply previews yet. Sending replies works.
+- **Threads**: received messages carry their thread, and sending to a thread works. There is no list of a room's threads yet.
 - **Event source**: no raw event JSON, so "View source" only works in the sample.
 - **Rate limit**: all requests except sync share one local bucket of 10 requests, refilled at 600 per hour. History pages and quick replies wait several seconds once it is empty.
 - **Cancellation**: sending and loading history only stop with the whole client.

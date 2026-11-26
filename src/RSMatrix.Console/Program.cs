@@ -57,9 +57,17 @@ try
             logger: logger,
             recoveryKey: string.IsNullOrWhiteSpace(recoveryKey) ? null : recoveryKey);
 
-    await foreach (var message in client.Messages.ReadAllAsync(cancellationTokenSource.Token))
+    await foreach (var update in client.Updates.ReadAllAsync(cancellationTokenSource.Token))
     {
-        await MessageReceivedAsync(message);
+        switch (update.Value)
+        {
+            case NewMessage { Message: var message } when !message.IsOwn:
+                await MessageReceivedAsync(message);
+                break;
+            case ClientIssue issue:
+                Console.WriteLine($"{issue.Kind}: {issue.Message}");
+                break;
+        }
     }
     Console.WriteLine("Sync has ended.");
 }
@@ -74,14 +82,14 @@ catch (Exception ex)
 Console.WriteLine("Goodbye!");
 
 
-async Task MessageReceivedAsync(ReceivedTextMessage message)
+async Task MessageReceivedAsync(Message message)
 {
     Console.WriteLine(message);
     var age = DateTimeOffset.Now - message.Timestamp;
-    if(message.Body?.Contains("ping") == true && age.TotalSeconds < 10)
+    if(message.Body.Contains("ping") && age.TotalSeconds < 10)
     {
         await message.Room.SendTypingNotificationAsync();
         await Task.Delay(2000);
-        await message.SendResponseAsync("pong!");
+        await message.ReplyAsync("pong!");
     }
 }

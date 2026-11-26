@@ -31,8 +31,7 @@ public class SyncResilienceTests
              {"type":"m.room.member","state_key":"@bot:example.org","sender":"@alice:example.org","content":{"membership":"invite","is_direct":true}}]}}}}}
         """.Replace("{{Message}}", Message));
 
-        var messages = new List<Models.ReceivedTextMessage>();
-        while (context.Client.Messages.TryRead(out var message)) messages.Add(message);
+        var messages = context.ReadMessages();
         await Assert.That(messages.Count).IsEqualTo(2);
         await Assert.That(messages[0].Sender.User.Presence).IsEqualTo(Models.Presence.Online);
         await Assert.That(context.Room("!invite:example.org").IsDirect).IsTrue();
@@ -45,36 +44,31 @@ public class SyncResilienceTests
         using var context = new MatrixTestContext();
         context.Client.AutoJoinOnInvite = true;
         context.Send = (request, _) => Task.FromResult(
-            Uri.UnescapeDataString(request.RequestUri!.AbsolutePath).Contains("!broken:") || request.RequestUri.AbsolutePath.EndsWith("/read_markers")
+            Uri.UnescapeDataString(request.RequestUri!.AbsolutePath).Contains("!broken:")
                 ? MatrixTestContext.Json("""{"errcode":"M_FORBIDDEN"}""", HttpStatusCode.Forbidden)
                 : MatrixTestContext.Json("""{"room_id":"!invite:example.org"}"""));
         await context.Process("""
         {"next_batch":"next","rooms":{"join":{"!room:example.org":{"timeline":{"events":[{{Message}}]}}},
         "invite":{"!broken:example.org":{},"!invite:example.org":{}}}}
         """.Replace("{{Message}}", Message));
-        await Assert.That(context.Client.Messages.TryRead(out _)).IsTrue();
+        await Assert.That(context.ReadMessages().Count).IsEqualTo(1);
         await Assert.That(context.Requests.Count(r => r.Path.EndsWith("/join"))).IsEqualTo(2);
-        await Assert.That(context.Requests.Any(r => r.Path.EndsWith("/read_markers"))).IsTrue();
-        await Assert.That(context.Room().LastReceiptEventId).IsNull();
+        await Assert.That(context.Requests.Any(r => r.Path.EndsWith("/read_markers"))).IsFalse();
     }
 
     [Test]
-    [Arguments(true)]
-    [Arguments(false)]
-    public async Task CallerCancellationDuringSideEffects_Propagates(bool invite)
+    public async Task CallerCancellationDuringAutoJoin_Propagates()
     {
         using var context = new MatrixTestContext();
-        context.Client.AutoJoinOnInvite = invite;
+        context.Client.AutoJoinOnInvite = true;
         context.Send = (_, _) =>
         {
             context.Lifetime.Cancel();
             // Deliberately a plain OCE, not just TaskCanceledException.
             throw new OperationCanceledException(context.Lifetime.Token);
         };
-        var json = invite
-            ? """{"next_batch":"next","rooms":{"invite":{"!invite:example.org":{}}}}"""
-            : """{"next_batch":"next","rooms":{"join":{"!room:example.org":{"timeline":{"events":[{{Message}}]}}}}} """.Replace("{{Message}}", Message);
-        await Assert.ThrowsAsync<OperationCanceledException>(() => context.Process(json));
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            context.Process("""{"next_batch":"next","rooms":{"invite":{"!invite:example.org":{}}}}"""));
         await Assert.That(context.Requests.Count).IsEqualTo(1);
     }
 
@@ -104,7 +98,7 @@ public class SyncResilienceTests
               """.Replace("{{Message}}", Message))
             : MatrixTestContext.Json("""{"errcode":"M_UNKNOWN_TOKEN"}""", HttpStatusCode.Unauthorized));
         await context.Client.SyncAsync();
-        await Assert.That(context.Client.Messages.TryRead(out _)).IsTrue();
+        await Assert.That(context.ReadMessages().Count).IsEqualTo(1);
         var syncs = context.Requests.Where(r => r.Path.Contains("/sync")).ToList();
         await Assert.That(syncs.Count).IsEqualTo(2);
         await Assert.That(syncs[1].Path.Contains("since=after_bad_presence")).IsTrue();
@@ -118,7 +112,7 @@ public class SyncResilienceTests
             {"next_batch":"must_not_advance","presence":{"events":[{"type":"m.presence","sender":"@alice:example.org"}]}}
             """));
         await context.Client.SyncAsync();
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => await context.Client.Messages.Completion);
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await context.Client.Updates.Completion);
         await Assert.That(context.Requests.Count).IsEqualTo(1);
     }
 

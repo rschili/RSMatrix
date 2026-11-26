@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using RSMatrix.Http;
 using RSMatrix.Models;
+using static RSMatrix.IntegrationTests.UpdateReader;
 
 namespace RSMatrix.IntegrationTests;
 
@@ -67,7 +68,7 @@ public class HomeserverTests
         await Assert.That(received.Room.StateEvents.ContainsKey(("io.rsmatrix.test", ""))).IsTrue();
 
         var replyBody = $"pong {marker}";
-        var replyId = await received.SendResponseAsync(replyBody, isReply: true);
+        var replyId = await received.ReplyAsync(replyBody);
         var reply = await LocalHomeserver.RequestAsync(alice,
             $"{roomPath}/event/{Uri.EscapeDataString(replyId)}", HttpMethod.Get);
         await Assert.That(reply.GetProperty("sender").GetString()).IsEqualTo("@bob:localhost");
@@ -77,24 +78,14 @@ public class HomeserverTests
         await Assert.That(replyContent.GetProperty("m.relates_to").GetProperty("m.in_reply_to")
             .GetProperty("event_id").GetString()).IsEqualTo(seedId);
 
-        var noticeId = await received.Room.SendNoticeAsync($"notice {marker}", null, null);
+        var noticeId = await received.Room.SendMessageAsync($"notice {marker}", notice: true);
         var notice = await ReceiveAsync(bob, noticeId, server.CancellationToken);
-        await Assert.That(notice.MsgType).IsEqualTo("m.notice");
+        await Assert.That(notice.Kind).IsEqualTo(MessageKind.Notice);
         await Assert.That(notice.Body).IsEqualTo($"notice {marker}");
         var history = await received.Room.FetchMessagesAsync(limit: 20);
-        await Assert.That(history.Messages.Any(message => message.EventId == replyId && message.Body == replyBody))
+        await Assert.That(history.Messages.Any(message => message.Id == replyId && message.Body == replyBody))
             .IsTrue();
-        await Assert.That(history.Messages.Any(message => message.EventId == noticeId)).IsTrue();
+        await Assert.That(history.Messages.Any(message => message.Id == noticeId)).IsTrue();
     }
 
-    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client,
-        string eventId, CancellationToken cancellationToken)
-    {
-        await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
-        {
-            if (message.EventId == eventId)
-                return message;
-        }
-        throw new InvalidOperationException($"Sync ended before receiving event {eventId}.");
-    }
 }

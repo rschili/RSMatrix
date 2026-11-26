@@ -37,14 +37,8 @@ public class ThreadReplyTests
         var message = CreateMessage(handler, threaded);
         var mentions = new List<MatrixId> { ParseUserId("@Alice:example.org"), ParseUserId("@bob:example.org") };
 
-        var eventId = await (kind switch
-        {
-            "text" => message.SendResponseAsync(Body, isReply, mentions),
-            "html" => message.SendHtmlResponseAsync(Body, HtmlBody, isReply, mentions),
-            "notice" => message.SendNoticeResponseAsync(Body, isReply, mentions),
-            "htmlnotice" => message.SendHtmlNoticeResponseAsync(Body, HtmlBody, isReply, mentions),
-            _ => throw new ArgumentOutOfRangeException(nameof(kind))
-        });
+        var (html, notice) = Options(kind);
+        var eventId = await message.ReplyAsync(Body, html, notice, quote: isReply, mentions);
 
         await Assert.That(eventId).IsEqualTo("$sent");
         using var json = await ReadRequestAsync(handler);
@@ -61,24 +55,18 @@ public class ThreadReplyTests
     [Arguments("html", false)]
     [Arguments("notice", false)]
     [Arguments("htmlnotice", false)]
-    public async Task DefaultResponses_KeepThreadWithoutAddingMentions(string kind, bool threaded)
+    public async Task DefaultReplies_QuoteAndKeepThreadWithoutAddingMentions(string kind, bool threaded)
     {
         using var handler = new CaptureHandler();
         var message = CreateMessage(handler, threaded);
 
-        var eventId = await (kind switch
-        {
-            "text" => message.SendResponseAsync(Body),
-            "html" => message.SendHtmlResponseAsync(Body, HtmlBody),
-            "notice" => message.SendNoticeResponseAsync(Body),
-            "htmlnotice" => message.SendHtmlNoticeResponseAsync(Body, HtmlBody),
-            _ => throw new ArgumentOutOfRangeException(nameof(kind))
-        });
+        var (html, notice) = Options(kind);
+        var eventId = await message.ReplyAsync(Body, html, notice);
 
         await Assert.That(eventId).IsEqualTo("$sent");
         using var json = await ReadRequestAsync(handler);
         await AssertMessageAsync(json.RootElement, kind, withMentions: false);
-        await AssertRelationAsync(json.RootElement, threaded, isReply: false);
+        await AssertRelationAsync(json.RootElement, threaded, isReply: true);
     }
 
     [Test]
@@ -96,20 +84,75 @@ public class ThreadReplyTests
         var room = CreateMessage(handler, threaded: true).Room;
         var inReplyTo = isReply ? ReceivedEvent : null;
 
-        var eventId = await (kind switch
-        {
-            "text" => room.SendTextMessageAsync(Body, inReplyTo, null),
-            "html" => room.SendHtmlMessageAsync(Body, HtmlBody, inReplyTo, null),
-            "notice" => room.SendNoticeAsync(Body, inReplyTo, null),
-            "htmlnotice" => room.SendHtmlNoticeAsync(Body, HtmlBody, inReplyTo, null),
-            _ => throw new ArgumentOutOfRangeException(nameof(kind))
-        });
+        var (html, notice) = Options(kind);
+        var eventId = await room.SendMessageAsync(Body, html, notice, replyToId: inReplyTo);
 
         await Assert.That(eventId).IsEqualTo("$sent");
         using var json = await ReadRequestAsync(handler);
         await AssertMessageAsync(json.RootElement, kind, withMentions: false);
         await AssertRelationAsync(json.RootElement, threaded: false, isReply: isReply);
     }
+
+    [Test]
+    public async Task RoomSend_ToThread_FallsBackToTheRoot_WhenNoThreadMessageIsLoaded()
+    {
+        using var handler = new CaptureHandler();
+        var room = CreateMessage(handler, threaded: false).Room;
+
+        await room.SendMessageAsync(Body, threadRootId: ThreadRoot);
+
+        using var json = await ReadRequestAsync(handler);
+        var relation = json.RootElement.GetProperty("m.relates_to");
+        await Assert.That(relation.GetProperty("rel_type").GetString()).IsEqualTo("m.thread");
+        await Assert.That(relation.GetProperty("event_id").GetString()).IsEqualTo(ThreadRoot);
+        await Assert.That(relation.GetProperty("is_falling_back").GetBoolean()).IsTrue();
+        await Assert.That(relation.GetProperty("m.in_reply_to").GetProperty("event_id").GetString()).IsEqualTo(ThreadRoot);
+    }
+
+    [Test]
+    public async Task RoomSend_ToThread_FallsBackToTheLatestThreadMessage()
+    {
+        using var handler = new CaptureHandler();
+        var message = CreateMessage(handler, threaded: true);
+        message.Room.Window.Add(message);
+
+        await message.Room.SendMessageAsync(Body, threadRootId: ThreadRoot);
+
+        using var json = await ReadRequestAsync(handler);
+        await AssertRelationAsync(json.RootElement, threaded: true, isReply: false);
+    }
+
+    [Test]
+    [Arguments(MessageKind.Text, "m.text")]
+    [Arguments(MessageKind.Notice, "m.notice")]
+    [Arguments(MessageKind.Emote, "m.emote")]
+    public async Task Edit_KeepsTheMessageType(MessageKind kind, string msgType)
+    {
+        using var handler = new CaptureHandler();
+        var original = CreateMessage(handler, threaded: false);
+        var message = new Message(original.Id, original.Room, original.Sender, original.Timestamp, true, false, null, null,
+            new MessageContent(kind, "old", null, []));
+
+        await message.EditAsync("new", "<b>new</b>");
+
+        using var json = await ReadRequestAsync(handler);
+        await Assert.That(json.RootElement.GetProperty("msgtype").GetString()).IsEqualTo(msgType);
+        await Assert.That(json.RootElement.GetProperty("body").GetString()).IsEqualTo("* new");
+        await Assert.That(json.RootElement.GetProperty("formatted_body").GetString()).IsEqualTo("* <b>new</b>");
+        var newContent = json.RootElement.GetProperty("m.new_content");
+        await Assert.That(newContent.GetProperty("msgtype").GetString()).IsEqualTo(msgType);
+        await Assert.That(newContent.GetProperty("body").GetString()).IsEqualTo("new");
+        await Assert.That(newContent.GetProperty("formatted_body").GetString()).IsEqualTo("<b>new</b>");
+    }
+
+    private static (string? Html, bool Notice) Options(string kind) => kind switch
+    {
+        "text" => (null, false),
+        "html" => (HtmlBody, false),
+        "notice" => (null, true),
+        "htmlnotice" => (HtmlBody, true),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+    };
 
     private static async Task AssertMessageAsync(JsonElement content, string kind, bool withMentions)
     {
@@ -168,7 +211,7 @@ public class ThreadReplyTests
         }
     }
 
-    private static ReceivedTextMessage CreateMessage(HttpMessageHandler handler, bool threaded)
+    private static Message CreateMessage(HttpMessageHandler handler, bool threaded)
     {
         var parameters = new HttpClientParameters(new HttpClient(handler, disposeHandler: false), "https://example.org", "test-token",
             NullLogger.Instance, CancellationToken.None);
@@ -176,8 +219,8 @@ public class ThreadReplyTests
         RoomId.TryParse("!room:example.org", out var roomId);
         var room = new Room(roomId!, client);
         var sender = new RoomUser(new User(ParseUserId("@sender:example.org")));
-        return new ReceivedTextMessage("Incoming message", room, sender, ReceivedEvent,
-            DateTimeOffset.UnixEpoch, threaded ? ThreadRoot : null, "m.text", client);
+        return new Message(ReceivedEvent, room, sender, DateTimeOffset.UnixEpoch, false, false, null,
+            threaded ? ThreadRoot : null, new MessageContent(MessageKind.Text, "Incoming message", null, []));
     }
 
     private static MatrixId ParseUserId(string value)

@@ -1,5 +1,6 @@
 using RSMatrix.Http;
 using RSMatrix.Models;
+using static RSMatrix.IntegrationTests.UpdateReader;
 
 namespace RSMatrix.IntegrationTests;
 
@@ -94,22 +95,15 @@ public class SessionTests
     {
         while (client.LastSyncAt == null)
         {
-            if (client.Messages.Completion.IsCompleted)
-                await client.Messages.Completion; // surfaces a sync failure
+            if (!client.IsSyncing)
+            {
+                ReadIssues(client); // the channel only completes once everything was read
+                await client.Updates.Completion; // surfaces a sync failure
+            }
             await Task.Delay(100, cancellationToken);
         }
     }
 
-    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, string eventId,
-        CancellationToken cancellationToken)
-    {
-        await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
-        {
-            if (message.EventId == eventId)
-                return message;
-        }
-        throw new InvalidOperationException($"Sync ended before receiving event {eventId}.");
-    }
 
     private static void DeleteDirectory(string directory)
     {

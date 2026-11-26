@@ -31,7 +31,7 @@ public class SessionResumeTests
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using var client = await starting;
-        await Assert.ThrowsAsync<MatrixResponseException>(() => client.Messages.Completion.WaitAsync(timeout.Token));
+        await Assert.ThrowsAsync<MatrixResponseException>(() => client.Updates.Completion.WaitAsync(timeout.Token));
     }
 
     private static void StoreSession(string directory, string? syncToken = "stored-batch")
@@ -237,7 +237,7 @@ public class SessionResumeTests
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await using (var client = await LoginAsync(server, directory))
             {
-                await Assert.ThrowsAsync<SessionEndedException>(() => client.Messages.Completion.WaitAsync(timeout.Token));
+                await Assert.ThrowsAsync<SessionEndedException>(() => client.Updates.Completion.WaitAsync(timeout.Token));
                 await Assert.That(server.LoginCount).IsEqualTo(1);
             }
             await Assert.That(MatrixClient.GetStoredSession(directory, User)).IsNull();
@@ -299,7 +299,7 @@ public class SessionResumeTests
             var server = new FakeServer { SoftLogoutOnSync = 2 };
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await using var client = await ResumeAsync(server, directory, password: null);
-            await Assert.ThrowsAsync<PasswordRequiredException>(() => client.Messages.Completion.WaitAsync(timeout.Token));
+            await Assert.ThrowsAsync<PasswordRequiredException>(() => client.Updates.Completion.WaitAsync(timeout.Token));
             await Assert.That(server.LoginCount).IsEqualTo(0);
         }
         finally
@@ -321,7 +321,7 @@ public class SessionResumeTests
             connecting.Cancel();
 
             // The client keeps syncing until the fake server's terminal error on the second sync.
-            await Assert.ThrowsAsync<MatrixResponseException>(() => client.Messages.Completion.WaitAsync(timeout.Token));
+            await Assert.ThrowsAsync<MatrixResponseException>(() => client.Updates.Completion.WaitAsync(timeout.Token));
             await Assert.That(server.SyncQueries.Count).IsEqualTo(2);
         }
         finally
@@ -342,14 +342,14 @@ public class SessionResumeTests
             await server.SyncHanging.Task.WaitAsync(timeout.Token);
 
             await client.DisposeAsync().AsTask().WaitAsync(timeout.Token);
-            await client.Messages.Completion.WaitAsync(timeout.Token);
+            await client.Updates.Completion.WaitAsync(timeout.Token);
             // Reading to the end shows that the channel completed.
-            await foreach (var unused in client.Issues.ReadAllAsync(timeout.Token)) { }
+            await foreach (var unused in client.Updates.ReadAllAsync(timeout.Token)) { }
             await Assert.That(client.IsSyncing).IsFalse();
             await client.DisposeAsync();
 
             RoomId.TryParse("!room:example.org", out var roomId);
-            await Assert.ThrowsAsync<ObjectDisposedException>(() => client.GetOrAddRoom(roomId!).SendTextMessageAsync("hi", null, null));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => client.GetOrAddRoom(roomId!).SendMessageAsync("hi"));
 
             using var store = SessionStore.Open(directory, User);
             await Assert.That(store.Session!.SyncToken).IsEqualTo("batch-1");

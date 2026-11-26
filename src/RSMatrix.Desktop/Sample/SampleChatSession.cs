@@ -196,10 +196,10 @@ public sealed class SampleChatSession : IChatSession
         var code = Html(General, Me, today.AddMinutes(1), "Code blocks keep their whitespace:",
             """
             <p>Code blocks keep their whitespace:</p>
-            <pre><code class="language-csharp">await foreach (var message in client.Messages.ReadAllAsync(token))
+            <pre><code class="language-csharp">await foreach (var update in client.Updates.ReadAllAsync(token))
             {
-                if (message.Body == "ping")
-                    await message.SendResponseAsync("pong");
+                if (update is NewMessage { Message.Body: "ping" } ping)
+                    await ping.Message.ReplyAsync("pong");
             }
             </code></pre>
             """);

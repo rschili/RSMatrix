@@ -45,6 +45,13 @@ internal class RoomEvent
     [JsonPropertyName("room_id")]
     public string? RoomId { get; set; }
 
+    /// <summary>
+    /// The redacted event, for redactions in rooms before version 11. Later versions put it into the content.
+    /// Servers set both for compatibility.
+    /// </summary>
+    [JsonPropertyName("redacts")]
+    public string? Redacts { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
 }
@@ -264,8 +271,17 @@ internal class ReactionRelatesTo
     public required string Key { get; set; }
 }
 
-internal class ReactionRequest
+internal class ReactionContent
 {
     [JsonPropertyName("m.relates_to")]
     public required ReactionRelatesTo RelatesTo { get; set; }
+}
+
+internal class RedactionContent
+{
+    [JsonPropertyName("redacts")]
+    public string? Redacts { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 }

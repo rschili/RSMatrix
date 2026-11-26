@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using RSMatrix.Models;
+using static RSMatrix.IntegrationTests.UpdateReader;
 
 namespace RSMatrix.IntegrationTests;
 
@@ -42,7 +43,7 @@ public class RustInteropTests
             var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId)}";
 
             var marker = Guid.NewGuid().ToString("N");
-            bool fromPeer(ReceivedTextMessage m) => m.Room.RoomId.Full == roomId && m.Sender.User.UserId.Full == $"@{peerUser}:localhost";
+            bool fromPeer(Message m) => m.Room.RoomId.Full == roomId && m.Sender.User.UserId.Full == $"@{peerUser}:localhost";
             using var process = Process.Start(new ProcessStartInfo(peer!,
                 [server.BaseUri.AbsoluteUri.TrimEnd('/'), peerUser, LocalHomeserver.Password, roomId, marker, mode])
             {
@@ -60,17 +61,17 @@ public class RustInteropTests
                     // A plaintext ping hands bob the Room with its synced encryption state.
                     var ping = await LocalHomeserver.RequestAsync(alice, $"{roomPath}/send/m.room.message/{Guid.NewGuid():N}",
                         HttpMethod.Put, new { msgtype = "m.text", body = "ping" });
-                    var room = (await ReceiveAsync(bob, m => m.EventId == ping.GetProperty("event_id").GetString(), server.CancellationToken)).Room;
-                    await room.SendTextMessageAsync($"bob says {marker}", null, null);
+                    var room = (await ReceiveAsync(bob, m => m.Id == ping.GetProperty("event_id").GetString(), server.CancellationToken)).Room;
+                    await room.SendMessageAsync($"bob says {marker}");
                     var echo = await ReceiveAsync(bob, fromPeer, server.CancellationToken);
                     await Assert.That(echo.Body).IsEqualTo($"rust echo: bob says {marker}");
-                    await echo.SendResponseAsync($"bob ack {marker}");
+                    await echo.ReplyAsync($"bob ack {marker}", quote: false);
                 }
                 else
                 {
                     var hello = await ReceiveAsync(bob, fromPeer, server.CancellationToken);
                     await Assert.That(hello.Body).IsEqualTo($"rust says {marker}");
-                    await hello.SendResponseAsync($"bob ack {marker}");
+                    await hello.ReplyAsync($"bob ack {marker}", quote: false);
                 }
 
                 using var exitTimeout = CancellationTokenSource.CreateLinkedTokenSource(server.CancellationToken);
@@ -105,14 +106,4 @@ public class RustInteropTests
         }
     }
 
-    private static async Task<ReceivedTextMessage> ReceiveAsync(MatrixClient client, Func<ReceivedTextMessage, bool> match,
-        CancellationToken cancellationToken)
-    {
-        await foreach (var message in client.Messages.ReadAllAsync(cancellationToken))
-        {
-            if (match(message))
-                return message;
-        }
-        throw new InvalidOperationException("Sync ended before receiving the expected message.");
-    }
 }
