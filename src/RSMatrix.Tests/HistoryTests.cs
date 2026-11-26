@@ -57,6 +57,7 @@ public class HistoryTests
         await Assert.That(Ids(history)).IsEqualTo("$1,$gone,$2,$3");
         await Assert.That(history[1].IsDeleted).IsTrue();
         await Assert.That(history[2].Body).IsEqualTo("two!");
+        await Assert.That(history[2].EditedAt).IsEqualTo(DateTimeOffset.FromUnixTimeMilliseconds(1700000002500));
         await Assert.That(history[2].Reactions.Single().Key).IsEqualTo("👍");
 
         // The page joined the room's cache, so live changes to its messages come out.
@@ -122,20 +123,6 @@ public class HistoryTests
         var old = (await context.Room().GetMessagesAsync(limit: 1)).Single();
 
         await Assert.That(old.Reactions.Single().Key).IsEqualTo("👍");
-    }
-
-    [Test]
-    public async Task BundledEdit_IsApplied()
-    {
-        using var context = new MatrixTestContext();
-        var edit = Edit("$e", "$m", "hello", ts: 1700000005000);
-        Serve(context, ("/messages", Page(null,
-            Event("$m", "m.room.message", """{"msgtype":"m.text","body":"helo"}""", extra: $$$""","unsigned":{"m.relations":{"m.replace":{{{edit}}}}}"""))));
-
-        var message = (await context.Room().GetMessagesAsync(limit: 1)).Single();
-
-        await Assert.That(message.Body).IsEqualTo("hello");
-        await Assert.That(message.EditedAt).IsEqualTo(DateTimeOffset.FromUnixTimeMilliseconds(1700000005000));
     }
 
     [Test]
@@ -322,8 +309,12 @@ public class HistoryTests
         await context.Process(Sync(Texts(150, 100)));
         await Assert.That(room.Cache.MessageCount).IsEqualTo(250);
 
+        // The ceiling applies even while the room is being read.
+        await context.Process(Sync(Texts(250, TimelineCache.CeilingMessages - 249)));
+        await Assert.That(room.Cache.MessageCount).IsEqualTo(TimelineCache.MessagesAfterCeilingCut);
+
         time.Now += TimelineCache.ReadTimeout;
-        await context.Process(Sync(Texts(250, 1)));
+        await context.Process(Sync(Texts(TimelineCache.CeilingMessages + 1, 1)));
         await Assert.That(room.Cache.MessageCount).IsEqualTo(TimelineCache.MessagesAfterCut);
     }
 
@@ -344,5 +335,24 @@ public class HistoryTests
 
         await Assert.That(string.Join(",", reactions.Select(r => r.Key))).IsEqualTo("👍,🎉");
         await Assert.That(context.Requests.Count).IsEqualTo(2);
+    }
+    [Test]
+    public async Task Walk_DoesNotJoinTheCache_WhenTheSyncSkippedEventsMeanwhile()
+    {
+        using var context = new MatrixTestContext();
+        var room = context.Room();
+        context.Send = async (_, _) =>
+        {
+            // The sync skips events while the page is on its way. Its timeline has no message, so the cache stays empty.
+            await context.Process(LimitedSync("p9"));
+            return MatrixTestContext.Json(Page(null, Text("$2", "two"), Text("$1", "one")));
+        };
+
+        var history = await room.GetMessagesAsync(limit: 3);
+
+        await Assert.That(Ids(history)).IsEqualTo("$1,$2");
+        await Assert.That(history[0].HasAllReactions).IsFalse();
+        await Assert.That(room.Cache.IsEmpty).IsTrue();
+        await Assert.That(room.Cache.OlderToken).IsEqualTo("p9");
     }
 }

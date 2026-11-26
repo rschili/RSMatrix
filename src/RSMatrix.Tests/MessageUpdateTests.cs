@@ -51,6 +51,7 @@ public class MessageUpdateTests
         await Assert.That(message.Sender.User.UserId.Full).IsEqualTo("@alice:example.org");
         await Assert.That(message.IsOwn).IsFalse();
         await Assert.That(message.EditedAt).IsNull();
+        await Assert.That(message.Timestamp).IsEqualTo(DateTimeOffset.FromUnixTimeMilliseconds(1700000000000));
 
         var own = await ReceiveAsync(context, Text("$own", "mine", sender: "@bot:example.org"));
         await Assert.That(own.IsOwn).IsTrue();
@@ -129,6 +130,28 @@ public class MessageUpdateTests
         await ReceiveAsync(context, Text("$m", "original"));
         await Assert.That(await ProcessAsync(context, Edit("$e", "$m", "forged", sender: "@mallory:example.org"))).IsEmpty();
         await Assert.That((await CurrentAsync(context, "$m")).Body).IsEqualTo("original");
+    }
+
+    [Test]
+    public async Task EncryptedMessage_IgnoresUnencryptedEdits()
+    {
+        using var context = new MatrixTestContext();
+        var room = context.Room();
+        UserId.TryParse("@alice:example.org", out var aliceId);
+        var alice = context.Client.GetOrAddUser(context.Client.GetOrAddUser(aliceId!), room);
+        var content = new MessageContent(MessageKind.Text, "secret", null, []);
+        var message = new MessageEntry("$m", alice, DateTimeOffset.UnixEpoch, false, IsEncrypted: true, null, null, content,
+            IsDeleted: false, BundledEdit: null, BundledThread: null);
+        room.Cache.Append(message);
+
+        // The server could add an unencrypted edit to an encrypted room.
+        room.Cache.Append(new EditEntry("$forged", "$m", "@alice:example.org", IsEncrypted: false,
+            new MessageEdit("$forged", DateTimeOffset.UnixEpoch.AddSeconds(1), content with { Body = "forged" })));
+        await Assert.That(room.Cache.Build(message).Body).IsEqualTo("secret");
+
+        room.Cache.Append(new EditEntry("$edit", "$m", "@alice:example.org", IsEncrypted: true,
+            new MessageEdit("$edit", DateTimeOffset.UnixEpoch.AddSeconds(1), content with { Body = "edited" })));
+        await Assert.That(room.Cache.Build(message).Body).IsEqualTo("edited");
     }
 
     [Test]

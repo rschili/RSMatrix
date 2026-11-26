@@ -119,18 +119,19 @@ public class RoomTimelineTests
     }
 
     [Test]
-    public async Task Reactions_And_Receipts_Wait_For_Messages_From_History()
+    public async Task Receipts_Wait_For_Messages_From_History_And_Reactions_Come_With_Them()
     {
         var timeline = CreateTimeline();
         timeline.Append(Message("$2", Alice, Noon));
         timeline.Messages.AddReaction("$1", "👍", Bob);
         timeline.Messages.ApplyReceipt("$1", Bob);
 
-        var older = Message("$1", Bob, Noon.AddMinutes(-10));
+        var older = Message("$1", Bob, Noon.AddMinutes(-10), reactions: [new ChatReaction("🎉", [Alice, Me])]);
         timeline.Prepend([older]);
 
-        await Assert.That(older.Reactions.Single().Key).IsEqualTo("👍");
         await Assert.That(older.ReadBy.Single()).IsEqualTo(Bob);
+        await Assert.That(older.Reactions.Single().Key).IsEqualTo("🎉");
+        await Assert.That(older.Reactions.Single().IncludesMe).IsTrue();
     }
 
     [Test]
@@ -179,19 +180,6 @@ public class RoomTimelineTests
     }
 
     [Test]
-    public async Task A_Sent_Message_Picks_Up_Reactions_That_Arrived_Before_Its_Event_Id()
-    {
-        var timeline = CreateTimeline();
-        var pending = Message("", Me, Noon);
-        timeline.Append(pending);
-        timeline.Messages.AddReaction("$sent", "👍", Bob);
-
-        timeline.ConfirmSent(pending, "$sent");
-
-        await Assert.That(pending.Reactions.Single().Key).IsEqualTo("👍");
-    }
-
-    [Test]
     public async Task A_Reply_Links_To_Its_Target_Even_When_The_Target_Loads_Later()
     {
         var timeline = CreateTimeline();
@@ -209,7 +197,8 @@ public class RoomTimelineTests
     private static RoomTimeline CreateTimeline()
         => new(new RoomMessages(Me.UserId), () => DateOnly.FromDateTime(Noon.LocalDateTime));
 
-    private static MessageViewModel Message(string eventId, ChatUser sender, DateTimeOffset timestamp, string? replyTo = null)
+    private static MessageViewModel Message(string eventId, ChatUser sender, DateTimeOffset timestamp, string? replyTo = null,
+        IReadOnlyList<ChatReaction>? reactions = null)
         => new(new ChatMessage("!room:example.org", eventId, sender, timestamp, ChatMessageKind.Text, "text",
-            PlainTextParser.Parse("text"), IsEncrypted: false, ReplyToEventId: replyTo), isOwn: false);
+            PlainTextParser.Parse("text"), IsEncrypted: false, ReplyToEventId: replyTo, Reactions: reactions), Me.UserId);
 }

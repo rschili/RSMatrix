@@ -15,82 +15,67 @@ public class ThreadReplyTests
     private const string HtmlBody = "<p>Hello &lt;world&gt; &amp; <strong>friends</strong></p>";
 
     [Test]
-    [Arguments("text", true, false)]
-    [Arguments("text", true, true)]
-    [Arguments("html", true, false)]
-    [Arguments("html", true, true)]
-    [Arguments("notice", true, false)]
-    [Arguments("notice", true, true)]
-    [Arguments("htmlnotice", true, false)]
-    [Arguments("htmlnotice", true, true)]
-    [Arguments("text", false, false)]
-    [Arguments("text", false, true)]
-    [Arguments("html", false, false)]
-    [Arguments("html", false, true)]
-    [Arguments("notice", false, false)]
-    [Arguments("notice", false, true)]
-    [Arguments("htmlnotice", false, false)]
-    [Arguments("htmlnotice", false, true)]
-    public async Task Responses_PreserveThreadAndReplySemantics(string kind, bool threaded, bool isReply)
+    [Arguments(false, false)]
+    [Arguments(false, true)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
+    public async Task Reply_StaysInTheThread_AndQuotesOnlyWhenAsked(bool threaded, bool quote)
     {
         using var handler = new CaptureHandler();
         var message = CreateMessage(handler, threaded);
         var mentions = new List<MatrixId> { ParseUserId("@Alice:example.org"), ParseUserId("@bob:example.org") };
 
-        var (html, notice) = Options(kind);
-        var eventId = await message.ReplyAsync(Body, html, notice, quote: isReply, mentions);
+        var eventId = await message.ReplyAsync(Body, quote: quote, mentions: mentions);
 
         await Assert.That(eventId).IsEqualTo("$sent");
         using var json = await ReadRequestAsync(handler);
-        await AssertMessageAsync(json.RootElement, kind, withMentions: true);
-        await AssertRelationAsync(json.RootElement, threaded, isReply);
+        await AssertMessageAsync(json.RootElement, "text", withMentions: true);
+        await AssertRelationAsync(json.RootElement, threaded, isReply: quote);
     }
 
     [Test]
-    [Arguments("text", true)]
-    [Arguments("html", true)]
-    [Arguments("notice", true)]
-    [Arguments("htmlnotice", true)]
-    [Arguments("text", false)]
-    [Arguments("html", false)]
-    [Arguments("notice", false)]
-    [Arguments("htmlnotice", false)]
-    public async Task DefaultReplies_QuoteAndKeepThreadWithoutAddingMentions(string kind, bool threaded)
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task Reply_QuotesByDefault_WithoutMentions(bool threaded)
     {
         using var handler = new CaptureHandler();
         var message = CreateMessage(handler, threaded);
 
-        var (html, notice) = Options(kind);
-        var eventId = await message.ReplyAsync(Body, html, notice);
+        await message.ReplyAsync(Body);
 
-        await Assert.That(eventId).IsEqualTo("$sent");
         using var json = await ReadRequestAsync(handler);
-        await AssertMessageAsync(json.RootElement, kind, withMentions: false);
+        await AssertMessageAsync(json.RootElement, "text", withMentions: false);
         await AssertRelationAsync(json.RootElement, threaded, isReply: true);
     }
 
     [Test]
-    [Arguments("text", false)]
-    [Arguments("text", true)]
-    [Arguments("html", false)]
-    [Arguments("html", true)]
-    [Arguments("notice", false)]
-    [Arguments("notice", true)]
-    [Arguments("htmlnotice", false)]
-    [Arguments("htmlnotice", true)]
-    public async Task RoomSendMethods_DoNotTreatRichReplyTargetAsThreadRoot(string kind, bool isReply)
+    [Arguments("text")]
+    [Arguments("html")]
+    [Arguments("notice")]
+    [Arguments("htmlnotice")]
+    public async Task RoomSend_SetsTypeAndHtml(string kind)
+    {
+        using var handler = new CaptureHandler();
+        var room = CreateMessage(handler, threaded: false).Room;
+
+        var (html, notice) = Options(kind);
+        await room.SendMessageAsync(Body, html, notice);
+
+        using var json = await ReadRequestAsync(handler);
+        await AssertMessageAsync(json.RootElement, kind, withMentions: false);
+        await AssertRelationAsync(json.RootElement, threaded: false, isReply: false);
+    }
+
+    [Test]
+    public async Task RoomSend_WithReplyTarget_DoesNotTreatItAsThreadRoot()
     {
         using var handler = new CaptureHandler();
         var room = CreateMessage(handler, threaded: true).Room;
-        var inReplyTo = isReply ? ReceivedEvent : null;
 
-        var (html, notice) = Options(kind);
-        var eventId = await room.SendMessageAsync(Body, html, notice, replyToId: inReplyTo);
+        await room.SendMessageAsync(Body, replyToId: ReceivedEvent);
 
-        await Assert.That(eventId).IsEqualTo("$sent");
         using var json = await ReadRequestAsync(handler);
-        await AssertMessageAsync(json.RootElement, kind, withMentions: false);
-        await AssertRelationAsync(json.RootElement, threaded: false, isReply: isReply);
+        await AssertRelationAsync(json.RootElement, threaded: false, isReply: true);
     }
 
     [Test]

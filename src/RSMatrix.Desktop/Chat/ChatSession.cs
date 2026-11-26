@@ -41,6 +41,9 @@ public sealed record ChatUser(string UserId, string DisplayName);
 
 public sealed record ChatMember(ChatUser User, bool IsInvited);
 
+/// <param name="Key">Usually an emoji. A user reacts at most once with the same key.</param>
+public sealed record ChatReaction(string Key, IReadOnlyList<ChatUser> Users);
+
 public sealed record ChatRoomInfo(string RoomId, string Name, bool IsEncrypted, bool IsDirect);
 
 public enum ChatMessageKind
@@ -55,6 +58,7 @@ public enum ChatMessageKind
 /// <param name="ThreadRootId">Event ID of the thread's first message when this is a reply in a thread.</param>
 /// <param name="ReplyToEventId">The message this one replies to.</param>
 /// <param name="Source">The event as JSON, when the session has it.</param>
+/// <param name="Reactions">The reactions when the session delivered the message. Later ones come as events.</param>
 public sealed record ChatMessage(
     string RoomId,
     string EventId,
@@ -66,7 +70,8 @@ public sealed record ChatMessage(
     bool IsEncrypted,
     string? ThreadRootId = null,
     string? ReplyToEventId = null,
-    string? Source = null);
+    string? Source = null,
+    IReadOnlyList<ChatReaction>? Reactions = null);
 
 /// <param name="Messages">Oldest first.</param>
 /// <param name="HasMore">False when the page reached the start of the room.</param>

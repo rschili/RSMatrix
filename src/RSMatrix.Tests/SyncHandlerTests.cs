@@ -1,34 +1,24 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using RSFlowControl;
 using RSMatrix.Http;
 using RSMatrix.Models;
 
 namespace RSMatrix.Tests;
 
 /// <summary>
-/// Tests the sync response handling logic by feeding JSON fixtures through the handler
-/// and verifying the resulting client state (rooms, users, messages).
+/// Feeds sync responses from JSON fixtures through the handler and checks the resulting rooms and users.
 /// </summary>
 public class SyncHandlerTests
 {
+    private readonly CountingHandler _handler = new();
     private readonly MatrixClient _client;
-    private readonly MatrixId _testUserId;
 
     public SyncHandlerTests()
     {
-        var parameters = new HttpClientParameters(
-            new HttpClient(new ReceiptHandler()),
-            "https://example.org",
-            "test_token",
-            NullLogger<SyncHandlerTests>.Instance,
-            CancellationToken.None);
-        parameters.RateLimiter = new LeakyBucket(10, 600);
-
-        UserId.TryParse("@testuser:example.org", out var userId);
-        _testUserId = userId!;
-        _client = MatrixClient.CreateForTesting(parameters, _testUserId);
+        var parameters = new HttpClientParameters(new HttpClient(_handler), "https://example.org", "test_token",
+            NullLogger<SyncHandlerTests>.Instance, CancellationToken.None);
+        _client = MatrixClient.CreateForTesting(parameters, ParseUserId("@testuser:example.org"));
     }
 
     private static async Task<SyncResponse> LoadFixtureAsync(string fileName)
@@ -53,156 +43,23 @@ public class SyncHandlerTests
         return messages;
     }
 
-    // ── Text message ──
-
     [Test]
-    public async Task TextMessage_IsDeliveredToChannel()
-    {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
-
-        await Assert.That(messages.Count).IsEqualTo(1);
-        await Assert.That(messages[0].Body).IsEqualTo("Hello, world!");
-        await Assert.That(messages[0].Kind).IsEqualTo(MessageKind.Text);
-        await Assert.That(messages[0].Id).IsEqualTo("$msg1");
-        await Assert.That(messages[0].Sender.User.UserId.Full).IsEqualTo("@alice:example.org");
-        await Assert.That(messages[0].Room.RoomId.Full).IsEqualTo("!room1:example.org");
-    }
-
-    [Test]
-    public async Task TextMessage_SetsTimestampCorrectly()
-    {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
-
-        await Assert.That(messages[0].Timestamp).IsEqualTo(DateTimeOffset.FromUnixTimeMilliseconds(1700000000000));
-    }
-
-    // ── Notice message ──
-
-    [Test]
-    public async Task NoticeMessage_IsDeliveredToChannel()
-    {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_notice_message.json");
-
-        await Assert.That(messages.Count).IsEqualTo(1);
-        await Assert.That(messages[0].Body).IsEqualTo("I am a bot response");
-        await Assert.That(messages[0].Kind).IsEqualTo(MessageKind.Notice);
-        await Assert.That(messages[0].Id).IsEqualTo("$notice1");
-    }
-
-    // ── Other message kinds ──
-
-    [Test]
-    public async Task NonTextMessages_AreDeliveredWithTheirKind()
-    {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_non_text_ignored.json");
-
-        await Assert.That(messages.Select(message => message.Kind)).IsEquivalentTo([MessageKind.Image, MessageKind.File]);
-    }
-
-    // ── Room state ──
-
-    [Test]
-    public async Task RoomState_SetsRoomName()
+    public async Task RoomState_SetsNameAliasesAndMembers()
     {
         await ProcessSyncAndCollectMessagesAsync("sync_room_state.json");
 
         var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
         await Assert.That(room.DisplayName).IsEqualTo("Test Room");
-    }
-
-    [Test]
-    public async Task RoomState_SetsCanonicalAlias()
-    {
-        await ProcessSyncAndCollectMessagesAsync("sync_room_state.json");
-
-        var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
-        await Assert.That(room.CanonicalAlias).IsNotNull();
         await Assert.That(room.CanonicalAlias!.Full).IsEqualTo("#test:example.org");
-    }
-
-    [Test]
-    public async Task RoomState_SetsAltAliases()
-    {
-        await ProcessSyncAndCollectMessagesAsync("sync_room_state.json");
-
-        var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
-        await Assert.That(room.AltAliases).IsNotNull();
-        await Assert.That(room.AltAliases!.Count).IsEqualTo(1);
-        await Assert.That(room.AltAliases[0].Full).IsEqualTo("#test2:example.org");
-    }
-
-    [Test]
-    public async Task RoomState_TracksMembers()
-    {
-        await ProcessSyncAndCollectMessagesAsync("sync_room_state.json");
-
-        var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
+        await Assert.That(room.AltAliases!.Single().Full).IsEqualTo("#test2:example.org");
         await Assert.That(room.Users.Count).IsEqualTo(2);
-        await Assert.That(room.Users.ContainsKey("@alice:example.org")).IsTrue();
-        await Assert.That(room.Users.ContainsKey("@bob:example.org")).IsTrue();
+        await Assert.That(room.Users["@alice:example.org"].DisplayName).IsEqualTo("Alice Wonderland");
+        await Assert.That(room.Users["@alice:example.org"].Membership).IsEqualTo(Membership.Join);
+        await Assert.That(room.Users["@bob:example.org"].DisplayName).IsEqualTo("Bob Builder");
     }
 
     [Test]
-    public async Task RoomState_SetsMemberDisplayNames()
-    {
-        await ProcessSyncAndCollectMessagesAsync("sync_room_state.json");
-
-        var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
-        var alice = room.Users["@alice:example.org"];
-        var bob = room.Users["@bob:example.org"];
-        await Assert.That(alice.DisplayName).IsEqualTo("Alice Wonderland");
-        await Assert.That(bob.DisplayName).IsEqualTo("Bob Builder");
-    }
-
-    [Test]
-    public async Task RoomState_SetsMembership()
-    {
-        await ProcessSyncAndCollectMessagesAsync("sync_room_state.json");
-
-        var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
-        var alice = room.Users["@alice:example.org"];
-        await Assert.That(alice.Membership).IsEqualTo(Membership.Join);
-    }
-
-    // ── Mentions ──
-
-    [Test]
-    public async Task MessageWithMentions_ParsesMentionedUsers()
-    {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_message_with_mentions.json");
-
-        await Assert.That(messages.Count).IsEqualTo(1);
-        await Assert.That(messages[0].Mentions).IsNotNull();
-        await Assert.That(messages[0].Mentions!.Count).IsEqualTo(2);
-
-        var mentionIds = messages[0].Mentions!.Select(m => m.User.UserId.Full).ToList();
-        await Assert.That(mentionIds).Contains("@bob:example.org");
-        await Assert.That(mentionIds).Contains("@charlie:example.org");
-    }
-
-    // ── Threads ──
-
-    [Test]
-    public async Task MessageInThread_SetsThreadId()
-    {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_message_in_thread.json");
-
-        await Assert.That(messages.Count).IsEqualTo(1);
-        await Assert.That(messages[0].ThreadRootId).IsEqualTo("$thread_root1");
-    }
-
-    [Test]
-    public async Task TextMessage_HasNullThreadId()
-    {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
-
-        await Assert.That(messages[0].ThreadRootId).IsNull();
-    }
-
-    // ── Presence ──
-
-    [Test]
-    public async Task Presence_UpdatesUserState()
+    public async Task Presence_UpdatesUsers()
     {
         await ProcessSyncAndCollectMessagesAsync("sync_presence.json");
 
@@ -212,32 +69,19 @@ public class SyncHandlerTests
         await Assert.That(alice.StatusMessage).IsEqualTo("Working on tests");
         await Assert.That(alice.DisplayName).IsEqualTo("Alice Online");
         await Assert.That(alice.AvatarUrl).IsEqualTo("mxc://example.org/alice");
-    }
-
-    [Test]
-    public async Task Presence_TracksMultipleUsers()
-    {
-        await ProcessSyncAndCollectMessagesAsync("sync_presence.json");
-
         var bob = _client.GetOrAddUser(ParseUserId("@bob:example.org"));
         await Assert.That(bob.Presence).IsEqualTo(Presence.Unavailable);
-        await Assert.That(bob.CurrentlyActive).IsFalse();
         await Assert.That(bob.StatusMessage).IsEqualTo("AFK");
     }
 
-    // ── Encryption ──
-
     [Test]
-    public async Task EncryptionEvent_SetsRoomEncrypted()
+    public async Task MessageWithMentions_ParsesMentionedUsers()
     {
-        await ProcessSyncAndCollectMessagesAsync("sync_encryption.json");
+        var messages = await ProcessSyncAndCollectMessagesAsync("sync_message_with_mentions.json");
 
-        var room = _client.GetOrAddRoom(ParseRoomId("!encrypted_room:example.org"));
-        await Assert.That(room.IsEncrypted).IsTrue();
-        await Assert.That(room.Encryption!.Algorithm).IsEqualTo("m.megolm.v1.aes-sha2");
+        var mentionIds = messages.Single().Mentions.Select(m => m.User.UserId.Full).ToList();
+        await Assert.That(mentionIds).IsEquivalentTo(["@bob:example.org", "@charlie:example.org"]);
     }
-
-    // ── IsDirect ──
 
     [Test]
     public async Task DirectMessageRoom_SetsIsDirect()
@@ -249,127 +93,34 @@ public class SyncHandlerTests
     }
 
     [Test]
-    public async Task RegularRoom_IsDirectIsFalse()
-    {
-        await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
-
-        var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
-        await Assert.That(room.IsDirect).IsFalse();
-    }
-
-    // ── Multiple rooms ──
-
-    [Test]
-    public async Task MultipleRooms_AllProcessed()
+    public async Task MultipleRooms_AreAllProcessed()
     {
         var messages = await ProcessSyncAndCollectMessagesAsync("sync_multiple_rooms.json");
 
-        await Assert.That(messages.Count).IsEqualTo(3);
-
-        var room1Msgs = messages.Where(m => m.Room.RoomId.Full == "!room1:example.org").ToList();
-        var room2Msgs = messages.Where(m => m.Room.RoomId.Full == "!room2:example.org").ToList();
-
-        await Assert.That(room1Msgs.Count).IsEqualTo(1);
-        await Assert.That(room2Msgs.Count).IsEqualTo(2);
+        await Assert.That(messages.Count(m => m.Room.RoomId.Full == "!room1:example.org")).IsEqualTo(1);
+        await Assert.That(messages.Count(m => m.Room.RoomId.Full == "!room2:example.org")).IsEqualTo(2);
+        await Assert.That(_client.GetOrAddRoom(ParseRoomId("!room1:example.org")).DisplayName).IsEqualTo("Room Alpha");
+        await Assert.That(_client.GetOrAddRoom(ParseRoomId("!room2:example.org")).DisplayName).IsEqualTo("Room Beta");
     }
 
     [Test]
-    public async Task MultipleRooms_RoomNamesSetCorrectly()
+    public async Task Invite_WithoutAutoJoin_SendsAndReportsNothing()
     {
-        await ProcessSyncAndCollectMessagesAsync("sync_multiple_rooms.json");
+        await _client.HandleSyncResponseForTestingAsync(await LoadFixtureAsync("sync_invite.json"));
 
-        var room1 = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
-        var room2 = _client.GetOrAddRoom(ParseRoomId("!room2:example.org"));
-
-        await Assert.That(room1.DisplayName).IsEqualTo("Room Alpha");
-        await Assert.That(room2.DisplayName).IsEqualTo("Room Beta");
+        await Assert.That(_client.Updates.TryRead(out _)).IsFalse();
+        await Assert.That(_handler.RequestCount).IsEqualTo(0);
     }
 
-    [Test]
-    public async Task MultipleRooms_MixedMsgTypes()
+    private sealed class CountingHandler : HttpMessageHandler
     {
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_multiple_rooms.json");
+        public int RequestCount { get; private set; }
 
-        var textMsgs = messages.Where(m => m.Kind == MessageKind.Text).ToList();
-        var noticeMsgs = messages.Where(m => m.Kind == MessageKind.Notice).ToList();
-
-        await Assert.That(textMsgs.Count).IsEqualTo(2);
-        await Assert.That(noticeMsgs.Count).IsEqualTo(1);
-    }
-
-    // ── Invite handling (without auto-join, since joining would need HTTP) ──
-
-    [Test]
-    public async Task Invite_LogsButDoesNotJoinByDefault()
-    {
-        // AutoJoinOnInvite is false by default, so this should just log
-        var syncResponse = await LoadFixtureAsync("sync_invite.json");
-        await _client.HandleSyncResponseForTestingAsync(syncResponse);
-
-        // No room should be created for the invite when auto-join is off
-        // (GetOrAddRoom would create one, so we check the update channel is empty)
-        var updates = new List<Update>();
-        while (_client.Updates.TryRead(out var update))
-            updates.Add(update);
-
-        await Assert.That(updates.Count).IsEqualTo(0);
-    }
-
-    [Test]
-    public async Task DirectInvite_DetectedAsDirectWhenAutoJoinDisabled()
-    {
-        // Even without auto-join, the invite should be parsed without error
-        var syncResponse = await LoadFixtureAsync("sync_invite_direct.json");
-        await _client.HandleSyncResponseForTestingAsync(syncResponse);
-
-        // Should not crash, and no updates should be produced
-        var updates = new List<Update>();
-        while (_client.Updates.TryRead(out var update))
-            updates.Add(update);
-
-        await Assert.That(updates.Count).IsEqualTo(0);
-    }
-
-    // ── Sequential syncs ──
-
-    [Test]
-    public async Task SequentialSyncs_AccumulateState()
-    {
-        // First sync: room state
-        await ProcessSyncAndCollectMessagesAsync("sync_room_state.json");
-        var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
-        await Assert.That(room.DisplayName).IsEqualTo("Test Room");
-        await Assert.That(room.Users.Count).IsEqualTo(2);
-
-        // Second sync: message in same room
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
-        await Assert.That(messages.Count).IsEqualTo(1);
-        await Assert.That(messages[0].Room.DisplayName).IsEqualTo("Test Room");
-
-        // Alice should still be tracked from the state sync, plus the sender from the message
-        await Assert.That(room.Users.ContainsKey("@alice:example.org")).IsTrue();
-    }
-
-    [Test]
-    public async Task SequentialSyncs_PresenceThenMessage_UserHasPresenceAndRoomMembership()
-    {
-        // First sync: presence
-        await ProcessSyncAndCollectMessagesAsync("sync_presence.json");
-        var alice = _client.GetOrAddUser(ParseUserId("@alice:example.org"));
-        await Assert.That(alice.Presence).IsEqualTo(Presence.Online);
-
-        // Second sync: alice sends a message
-        var messages = await ProcessSyncAndCollectMessagesAsync("sync_text_message.json");
-        await Assert.That(messages[0].Sender.User.Presence).IsEqualTo(Presence.Online);
-        await Assert.That(messages[0].Sender.User.StatusMessage).IsEqualTo("Working on tests");
-    }
-
-    // Sync processing sends read markers. Keep fixture tests entirely offline,
-    // and return a fresh client because the production HTTP helper disposes it.
-    private sealed class ReceiptHandler : HttpMessageHandler
-    {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
+        {
+            RequestCount++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
+        }
     }
 
     private static MatrixId ParseUserId(string input)

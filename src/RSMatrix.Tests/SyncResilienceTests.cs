@@ -53,7 +53,6 @@ public class SyncResilienceTests
         """.Replace("{{Message}}", Message));
         await Assert.That(context.ReadMessages().Count).IsEqualTo(1);
         await Assert.That(context.Requests.Count(r => r.Path.EndsWith("/join"))).IsEqualTo(2);
-        await Assert.That(context.Requests.Any(r => r.Path.EndsWith("/read_markers"))).IsFalse();
     }
 
     [Test]

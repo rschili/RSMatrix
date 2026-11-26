@@ -34,7 +34,7 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
     private readonly Func<MessageViewModel, string, Task>? _toggleReaction;
 
     /// <param name="toggleReaction">Adds or takes back the current user's reaction with the given key.</param>
-    public MessageViewModel(ChatMessage message, bool isOwn, IAsyncRelayCommand<MessageViewModel?>? retryCommand = null,
+    public MessageViewModel(ChatMessage message, string currentUserId, IAsyncRelayCommand<MessageViewModel?>? retryCommand = null,
         Func<MessageViewModel, string, Task>? toggleReaction = null)
     {
         _toggleReaction = toggleReaction;
@@ -48,8 +48,10 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
         ThreadRootId = message.ThreadRootId;
         ReplyToEventId = message.ReplyToEventId;
         Source = message.Source;
-        IsOwn = isOwn;
+        IsOwn = message.Sender.UserId == currentUserId;
         RetryCommand = retryCommand;
+        foreach (var reaction in message.Reactions ?? [])
+            Reactions.Add(new ReactionViewModel(reaction.Key, reaction.Users, currentUserId));
     }
 
     /// <summary>Empty while a sent message waits for the server.</summary>
@@ -253,12 +255,12 @@ public sealed class RecentReactions
 
 /// <summary>
 /// The messages of one room by event ID, from its main timeline and its threads. Reactions, read receipts
-/// and reply targets are attached to their message here, and wait for it when it isn't loaded yet.
+/// and reply targets are attached to their message here. Receipts and replies wait for their message when it
+/// isn't loaded yet. Reactions don't need to: a message from history brings its own.
 /// </summary>
 public sealed class RoomMessages(string currentUserId)
 {
     private readonly Dictionary<string, MessageViewModel> _messagesByEventId = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, List<(string Key, ChatUser Sender)>> _waitingReactionsByEventId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<MessageViewModel>> _waitingRepliesByEventId = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string EventId, ChatUser User)> _receiptsByUserId = new(StringComparer.Ordinal);
 
@@ -269,22 +271,13 @@ public sealed class RoomMessages(string currentUserId)
     public void AddReaction(string targetEventId, string key, ChatUser sender)
     {
         if (_messagesByEventId.TryGetValue(targetEventId, out var message))
-        {
             message.AddReaction(key, sender, currentUserId);
-            return;
-        }
-        if (!_waitingReactionsByEventId.TryGetValue(targetEventId, out var waiting))
-            _waitingReactionsByEventId[targetEventId] = waiting = [];
-        if (!waiting.Any(r => r.Key == key && r.Sender.UserId == sender.UserId))
-            waiting.Add((key, sender));
     }
 
     public void RemoveReaction(string targetEventId, string key, ChatUser sender)
     {
         if (_messagesByEventId.TryGetValue(targetEventId, out var message))
             message.RemoveReaction(key, sender.UserId, currentUserId);
-        else if (_waitingReactionsByEventId.TryGetValue(targetEventId, out var waiting))
-            waiting.RemoveAll(r => r.Key == key && r.Sender.UserId == sender.UserId);
     }
 
     /// <summary>Moves the user's avatar to the message they read last. The current user's receipts are not shown.</summary>
@@ -320,11 +313,6 @@ public sealed class RoomMessages(string currentUserId)
     {
         if (!_messagesByEventId.TryAdd(message.EventId, message))
             return false;
-        if (_waitingReactionsByEventId.Remove(message.EventId, out var reactions))
-        {
-            foreach (var (key, sender) in reactions)
-                message.AddReaction(key, sender, currentUserId);
-        }
         if (_waitingRepliesByEventId.Remove(message.EventId, out var replies))
         {
             foreach (var reply in replies)

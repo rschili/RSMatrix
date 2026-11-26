@@ -161,7 +161,7 @@ public abstract partial class ConversationViewModel : ObservableObject
     }
 
     internal MessageViewModel CreateMessageViewModel(ChatMessage message)
-        => new(message, message.Sender.UserId == Chat.CurrentUser.UserId, RetryCommand, ToggleReactionAsync);
+        => new(message, Chat.CurrentUser.UserId, RetryCommand, ToggleReactionAsync);
 
     // The change shows up once the session echoes it back.
     private async Task ToggleReactionAsync(MessageViewModel message, string key)

@@ -268,7 +268,8 @@ public sealed class MatrixChatSession : IChatSession
         var kind = message.Kind == MessageKind.Notice ? ChatMessageKind.Notice : ChatMessageKind.Text;
         var sender = ToChatUser(message.Sender);
         return new ChatMessage(message.Room.RoomId.Full, message.Id, sender, message.Timestamp, kind,
-            message.Body, PlainTextParser.Parse(message.Body), message.IsEncrypted, message.ThreadRootId, message.ReplyToId);
+            message.Body, PlainTextParser.Parse(message.Body), message.IsEncrypted, message.ThreadRootId, message.ReplyToId,
+            Reactions: message.Reactions.Select(r => new ChatReaction(r.Key, r.Users.Select(ToChatUser).ToList())).ToList());
     }
 
     private static ChatUser ToChatUser(RoomUser user)
