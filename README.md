@@ -44,9 +44,7 @@ await foreach (var update in client.Updates.ReadAllAsync(cancellationToken))
 A `Message` holds the snapshot of a message at the time the event occurred.
 
 Things that need a response like room invites also come though this same channel as a `Request`.
-Doing nothing ignores a request; the server still holds an invite, so it comes again on the next start.
 It makes sense to handle requests in their own method, so the update loop stays short.
-A switch expression over `Request` gets compiler warnings when a new kind of request is added.
 
 ```cs
 // in the update loop
