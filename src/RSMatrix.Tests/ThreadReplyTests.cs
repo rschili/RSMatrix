@@ -131,6 +131,47 @@ public class ThreadReplyTests
         await Assert.That(newContent.GetProperty("formatted_body").GetString()).IsEqualTo("<b>new</b>");
     }
 
+    [Test]
+    public async Task Mentions_LeaveOutOurOwnId()
+    {
+        using var handler = new CaptureHandler();
+        var message = CreateMessage(handler, threaded: false);
+
+        await message.Room.SendMessageAsync("hi", mentions: [ParseUserId("@bot:example.org"), ParseUserId("@bob:example.org")]);
+
+        using var json = await ReadRequestAsync(handler);
+        await Assert.That(json.RootElement.GetProperty("m.mentions").GetRawText()).IsEqualTo("""{"user_ids":["@bob:example.org"]}""");
+    }
+
+    [Test]
+    public async Task Edit_NotifiesOnlyNewlyMentionedUsers()
+    {
+        using var handler = new CaptureHandler();
+        var original = CreateMessage(handler, threaded: false);
+        var alice = new RoomUser(new User(ParseUserId("@alice:example.org")));
+        var message = new Message(original.Id, original.Room, original.Sender, original.Timestamp, true, false, null, null,
+            new MessageContent(MessageKind.Text, "Hello Alice", null, [alice]));
+
+        await message.EditAsync("Hello Alice and Bob", mentions: [ParseUserId("@alice:example.org"), ParseUserId("@bob:example.org")]);
+
+        using var json = await ReadRequestAsync(handler);
+        await Assert.That(json.RootElement.GetProperty("m.mentions").GetRawText()).IsEqualTo("""{"user_ids":["@bob:example.org"]}""");
+        await Assert.That(json.RootElement.GetProperty("m.new_content").GetProperty("m.mentions").GetRawText())
+            .IsEqualTo("""{"user_ids":["@alice:example.org","@bob:example.org"]}""");
+    }
+
+    [Test]
+    public async Task Edit_OfAnUnknownMessage_NotifiesEveryoneMentioned()
+    {
+        using var handler = new CaptureHandler();
+        var room = CreateMessage(handler, threaded: false).Room;
+
+        await room.EditMessageAsync("$unknown", "Hello Alice", mentions: [ParseUserId("@alice:example.org")]);
+
+        using var json = await ReadRequestAsync(handler);
+        await Assert.That(json.RootElement.GetProperty("m.mentions").GetRawText()).IsEqualTo("""{"user_ids":["@alice:example.org"]}""");
+    }
+
     private static (string? Html, bool Notice) Options(string kind) => kind switch
     {
         "text" => (null, false),
@@ -166,7 +207,8 @@ public class ThreadReplyTests
         }
         else
         {
-            await Assert.That(content.TryGetProperty("m.mentions", out _)).IsFalse();
+            // Always present, so servers don't look for names in the body.
+            await Assert.That(content.GetProperty("m.mentions").GetRawText()).IsEqualTo("{}");
         }
     }
 

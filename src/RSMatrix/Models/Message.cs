@@ -176,7 +176,8 @@ public sealed class Message
 
     /// <summary>
     /// Marks the room as read up to this message: sets our read receipt, which other members see,
-    /// and the read marker our other devices use. Calls for several messages of one room are combined,
+    /// and the read marker our other devices use. Our own messages only move the read marker; the spec says not to send
+    /// read receipts for them. Calls for several messages of one room are combined,
     /// so this can be called for every message without running into rate limits.
     /// </summary>
     public Task MarkAsReadAsync() => Room.MarkAsReadAsync(this);
@@ -186,7 +187,7 @@ public sealed class Message
     /// </summary>
     /// <returns>The event ID of the edit event</returns>
     public Task<string> EditAsync(string newBody, string? newHtml = null, IList<MatrixId>? mentions = null)
-        => Room.EditMessageInternalAsync(Id, Kind, newBody, newHtml, mentions);
+        => Room.EditMessageInternalAsync(Id, Kind, newBody, newHtml, mentions, Mentions);
 
     /// <summary>
     /// Deletes this message. Others still see that a message was there.

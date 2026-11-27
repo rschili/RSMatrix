@@ -136,24 +136,28 @@ public class Room
     /// <returns>The event ID of the edit event</returns>
     public Task<string> EditMessageAsync(string originalEventId, string newBody, string? newHtml = null, IList<MatrixId>? mentions = null)
     {
-        MessageKind kind;
+        Message? original;
         lock (TimelineLock)
-            kind = Cache.FindMessage(originalEventId) is { } original ? Cache.Build(original).Kind : MessageKind.Text;
-        return EditMessageInternalAsync(originalEventId, kind, newBody, newHtml, mentions);
+            original = Cache.FindMessage(originalEventId) is { } entry ? Cache.Build(entry) : null;
+        return EditMessageInternalAsync(originalEventId, original?.Kind ?? MessageKind.Text, newBody, newHtml, mentions, original?.Mentions);
     }
 
+    /// <param name="previousMentions">
+    /// The mentions of the current version, or null when unknown. Only users mentioned for the first time are notified again.
+    /// </param>
     internal async Task<string> EditMessageInternalAsync(string originalEventId, MessageKind kind, string newBody, string? newHtml,
-        IList<MatrixId>? mentions)
+        IList<MatrixId>? mentions, IReadOnlyList<RoomUser>? previousMentions)
     {
         ArgumentException.ThrowIfNullOrEmpty(originalEventId);
         ArgumentException.ThrowIfNullOrEmpty(newBody);
         var msgType = kind switch { MessageKind.Notice => "m.notice", MessageKind.Emote => "m.emote", _ => "m.text" };
         var newContent = new NewMessageContent { MsgType = msgType, Body = newBody, Mentions = ToMentions(mentions) };
+        var previous = previousMentions?.Select(user => user.User.UserId.Full).ToHashSet(StringComparer.Ordinal);
         var content = new RoomMessageContent
         {
             MsgType = msgType,
             Body = $"* {newBody}",
-            Mentions = newContent.Mentions,
+            Mentions = ToMentions(previous == null ? mentions : mentions?.Where(id => !previous.Contains(id.Full)).ToList()),
             NewContent = newContent,
             RelatesTo = new RelatesTo { RelType = "m.replace", EventId = originalEventId }
         };
@@ -168,8 +172,15 @@ public class Room
 
     private const string HtmlFormat = "org.matrix.custom.html";
 
-    private static Mentions? ToMentions(IList<MatrixId>? mentions)
-        => mentions == null ? null : new Mentions { UserIds = mentions.Select(m => m.Full).ToList() };
+    /// <summary>
+    /// The spec recommends m.mentions on every message, empty without mentions, so servers don't fall back to finding
+    /// names in the body. Our own ID is left out, since a message can't notify its sender.
+    /// </summary>
+    private Mentions ToMentions(IList<MatrixId>? mentions)
+    {
+        var userIds = mentions?.Select(id => id.Full).Where(id => id != Client.CurrentUser.Full).Distinct(StringComparer.Ordinal).ToList();
+        return new Mentions { UserIds = userIds is { Count: > 0 } ? userIds : null };
+    }
 
     /// <summary>
     /// Sends a reaction (annotation) to the specified event.
@@ -459,7 +470,8 @@ public class Room
                 if (target.Id == _readMarkerSent?.Id)
                     return;
             }
-            await MatrixHelper.PostReadMarkersAsync(Client.HttpClientParameters, RoomId, target.Id, sendReceipt: true).ConfigureAwait(false);
+            // The spec says not to send read receipts for our own messages; the fully read marker still moves.
+            await MatrixHelper.PostReadMarkersAsync(Client.HttpClientParameters, RoomId, target.Id, sendReceipt: !target.IsOwn).ConfigureAwait(false);
             lock (_readMarkerLock)
                 _readMarkerSent = target;
         }

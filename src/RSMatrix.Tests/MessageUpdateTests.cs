@@ -336,6 +336,18 @@ public class MessageUpdateTests
     }
 
     [Test]
+    public async Task MarkAsRead_OfOurOwnMessage_OnlyMovesTheReadMarker()
+    {
+        using var context = new MatrixTestContext();
+        var own = await ReceiveAsync(context, Text("$own", "mine", sender: "@bot:example.org"));
+
+        await own.MarkAsReadAsync();
+
+        var request = context.Requests.Single(r => r.Path.Contains("/read_markers"));
+        await Assert.That(request.Body).IsEqualTo("""{"m.fully_read":"$own"}""");
+    }
+
+    [Test]
     public async Task RemoveReaction_RedactsOurReaction()
     {
         using var context = new MatrixTestContext();
