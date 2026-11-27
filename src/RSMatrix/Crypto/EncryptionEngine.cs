@@ -1138,9 +1138,8 @@ internal sealed class EncryptionEngine
 
     private Task<JsonElement> RequestAsync(string operation, string path, HttpMethod method, JsonNode? body, bool retry)
     {
-        // Key requests only happen alongside syncs and sends, which are limited already.
         Task<JsonElement> Send() => HttpClientHelper.SendAsync<JsonElement>(_http, path, method,
-            body == null ? null : JsonContent.Create(body), ignoreRateLimit: true);
+            body == null ? null : JsonContent.Create(body));
         return retry ? MatrixRetry.ExecuteAsync(_http, operation, Send) : Send();
     }
 

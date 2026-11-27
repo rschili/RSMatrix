@@ -25,6 +25,7 @@ await using MatrixClient client = await MatrixClient.LoginAsync(userId, password
 
 Without a `homeserver` URL, the client looks it up through the `.well-known` file of the user ID's domain.
 `LoginAsync` and `ResumeAsync` return after the first sync, so `client.Rooms` is filled.
+A bot that doesn't need read receipts, typing or presence can pass `optionalUpdates: OptionalUpdates.None`, so the server leaves them out of the sync.
 
 To handle incoming updates:
 I arrived at a central unbounded channel `client.Updates` for everything (new messages, edits, deletions, reactions and issues...).
@@ -61,7 +62,6 @@ Task HandleRequestAsync(Request request) => request switch
 
 `room.GetMessagesAsync(limit, before)` returns older messages, oldest first. Matrix servers don't send reactions along with a message, so a message loaded on its own, like a reply target, may miss some. `message.HasAllReactions` indicates that state, `message.GetReactionsAsync()` fetches them from the server, which needs an extra request.
 
-The client did previously send read receipts on its own, which I changed in 2.0. `message.MarkAsReadAsync()` marks a room as read up to that message. Try and not use this too chatty, as it can generate a lot of requests if called frequently. You will want to rate limit this for a bot which may handle thousands of incoming messages per second.
 
 The cancellation token cancels logging in or resuming.
 To stop the sync, dispose the client. That stops sync, waits until it has ended and completes `client.Updates`. If the session ends with an error, reading `client.Updates` throws it.
@@ -87,7 +87,7 @@ The store holds one session per user: the access token, the sync position and th
 
 ## Issues and health
 
-`ClientIssue` updates report problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, a device the account's identity hasn't signed, changed identities of other users, failed auto-joins and interrupted syncs.
+`ClientIssue` updates report problems the client keeps running through: messages it could not decrypt, devices that can't read our encrypted messages, a device the account's identity hasn't signed, and changed identities of other users.
 
 ```cs
 if (update is ClientIssue issue)

@@ -89,7 +89,7 @@ internal class TypingRequest
     public required bool Typing { get; set; }
 
     [JsonPropertyName("timeout")]
-    public uint Timeout { get; set; }
+    public uint? Timeout { get; set; }
 }
 
 internal class NewMessageContent

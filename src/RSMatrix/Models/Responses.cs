@@ -97,17 +97,8 @@ internal class Capabilities
     [JsonPropertyName("m.room_versions")]
     public RoomVersionsCapability? RoomVersions { get; set; }
 
-    [JsonPropertyName("com.example.custom.ratelimit")]
-    public RateLimit? RateLimit { get; set; }
-
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalProps { get; set; }
-}
-
-internal class RateLimit
-{
-    [JsonPropertyName("max_requests_per_hour")]
-    public required int MaxRequestsPerHour { get; set; }
 }
 
 internal class BooleanCapability

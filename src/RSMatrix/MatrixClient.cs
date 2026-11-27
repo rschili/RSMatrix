@@ -7,7 +7,6 @@ using RSMatrix.Http;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
-using RSFlowControl;
 using RSMatrix.Crypto;
 
 namespace RSMatrix;
@@ -88,20 +87,20 @@ public sealed class MatrixClient : IAsyncDisposable
     /// </summary>
     public ChannelReader<Update> Updates => _updates.Reader;
 
-    private long _lastSyncAtUnixMilliseconds;
+    private volatile bool _isOnline = true;
 
     /// <summary>
-    /// When the last sync with the server succeeded, or null before the first one.
-    /// A sync is a long poll that returns at least every minute, so an older value means the connection is down.
+    /// Whether the last sync with the server succeeded. <see cref="ConnectionChanged"/> reports each change. False once
+    /// the client stopped.
     /// </summary>
-    public DateTimeOffset? LastSyncAt => Interlocked.Read(ref _lastSyncAtUnixMilliseconds) is var value and > 0
-        ? DateTimeOffset.FromUnixTimeMilliseconds(value)
-        : null;
+    public bool IsOnline => _isOnline;
 
-    public bool IsSyncing { get; private set;}
+    // Completes with true when the server confirmed a logout, false when the logout failed.
+    private TaskCompletionSource<bool>? _logout;
 
     // Kept to log in again after a soft logout.
     private string? _password;
+    private OptionalUpdates _optionalUpdates = OptionalUpdates.All;
     // Null for clients created for tests, which don't own their lifetime.
     private CancellationTokenSource? _lifetime;
     private Task? _syncTask;
@@ -201,16 +200,17 @@ public sealed class MatrixClient : IAsyncDisposable
     /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
     public static Task<MatrixClient> LoginAsync(string userId, string password, CancellationToken cancellationToken,
         string? deviceId = null, string? deviceDisplayName = null, string? storeDirectory = null, Uri? homeserver = null,
-        ILogger? logger = null, string? recoveryKey = null)
+        ILogger? logger = null, string? recoveryKey = null, OptionalUpdates optionalUpdates = OptionalUpdates.All)
         => LoginAsync(userId, password, cancellationToken, deviceId, deviceDisplayName, storeDirectory, homeserver, logger,
-            recoveryKey, CreateHttpClient(), (delay, token) => Task.Delay(delay, token));
+            recoveryKey, CreateHttpClient(), (delay, token) => Task.Delay(delay, token), optionalUpdates);
 
     /// <summary>Takes ownership of <paramref name="httpClient"/>, also when logging in fails.</summary>
     internal static Task<MatrixClient> LoginAsync(string userId, string password, CancellationToken cancellationToken,
         string? deviceId, string? deviceDisplayName, string? storeDirectory, Uri? homeserver, ILogger? logger,
-        string? recoveryKey, HttpClient httpClient, Func<TimeSpan, CancellationToken, Task> retryDelayAsync)
+        string? recoveryKey, HttpClient httpClient, Func<TimeSpan, CancellationToken, Task> retryDelayAsync,
+        OptionalUpdates optionalUpdates = OptionalUpdates.All)
         => StartAsync(httpClient, retryDelayAsync, logger, cancellationToken, (http, lifetime) => LoginCoreAsync(http, lifetime,
-            userId, password, deviceId, deviceDisplayName, storeDirectory, homeserver, recoveryKey));
+            userId, password, deviceId, deviceDisplayName, storeDirectory, homeserver, recoveryKey, optionalUpdates));
 
     /// <summary>
     /// Continues a stored session without logging in, at the stored sync position: messages sent while the client was
@@ -243,22 +243,19 @@ public sealed class MatrixClient : IAsyncDisposable
     /// <exception cref="SessionEndedException">The server deleted the device.</exception>
     /// <exception cref="InvalidOperationException">Mostly if connection fails</exception>
     public static Task<MatrixClient> ResumeAsync(StoredSession session, CancellationToken cancellationToken,
-        string? password = null, ILogger? logger = null, string? recoveryKey = null)
+        string? password = null, ILogger? logger = null, string? recoveryKey = null, OptionalUpdates optionalUpdates = OptionalUpdates.All)
         => ResumeAsync(session, cancellationToken, password, logger, recoveryKey, CreateHttpClient(),
-            (delay, token) => Task.Delay(delay, token));
+            (delay, token) => Task.Delay(delay, token), optionalUpdates);
 
     /// <summary>Takes ownership of <paramref name="httpClient"/>, also when resuming fails.</summary>
     internal static Task<MatrixClient> ResumeAsync(StoredSession session, CancellationToken cancellationToken,
         string? password, ILogger? logger, string? recoveryKey, HttpClient httpClient,
-        Func<TimeSpan, CancellationToken, Task> retryDelayAsync)
+        Func<TimeSpan, CancellationToken, Task> retryDelayAsync, OptionalUpdates optionalUpdates = OptionalUpdates.All)
         => StartAsync(httpClient, retryDelayAsync, logger, cancellationToken, (http, lifetime) => ResumeCoreAsync(http, lifetime,
-            session, password, recoveryKey));
+            session, password, recoveryKey, optionalUpdates));
 
     private static HttpClient CreateHttpClient()
-        => new(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) })
-        {
-            MaxResponseContentBufferSize = 1024 * 1024 * 2 // 2 MB
-        };
+        => new(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
 
     private static async Task<MatrixClient> StartAsync(HttpClient httpClient, Func<TimeSpan, CancellationToken, Task> retryDelayAsync,
         ILogger? logger, CancellationToken cancellationToken,
@@ -292,7 +289,7 @@ public sealed class MatrixClient : IAsyncDisposable
 
     private static async Task<MatrixClient> LoginCoreAsync(HttpClientParameters http, CancellationTokenSource lifetime,
         string userId, string password, string? deviceId, string? deviceDisplayName, string? storeDirectory, Uri? homeserver,
-        string? recoveryKey)
+        string? recoveryKey, OptionalUpdates optionalUpdates)
     {
         var requestedUserId = ParseUserId(userId);
         ArgumentException.ThrowIfNullOrEmpty(password);
@@ -344,7 +341,7 @@ public sealed class MatrixClient : IAsyncDisposable
                 store.Save(CreateSessionData(http, confirmedUserId, login.DeviceId, syncToken: null));
             }
             return await CreateClientAsync(http, lifetime, confirmedUserId, login.DeviceId, password, recoveryKey, store,
-                encryptionStore, syncToken: null).ConfigureAwait(false);
+                encryptionStore, syncToken: null, optionalUpdates).ConfigureAwait(false);
         }
         catch
         {
@@ -354,7 +351,7 @@ public sealed class MatrixClient : IAsyncDisposable
     }
 
     private static async Task<MatrixClient> ResumeCoreAsync(HttpClientParameters http, CancellationTokenSource lifetime,
-        StoredSession session, string? password, string? recoveryKey)
+        StoredSession session, string? password, string? recoveryKey, OptionalUpdates optionalUpdates)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (string.IsNullOrEmpty(password))
@@ -390,7 +387,7 @@ public sealed class MatrixClient : IAsyncDisposable
             store.Save(CreateSessionData(http, userId, deviceId, stored.SyncToken));
             var encryptionStore = EncryptionStore.Open(store.Directory, userId.Full, deviceId);
             return await CreateClientAsync(http, lifetime, userId, deviceId, password, recoveryKey, store, encryptionStore,
-                stored.SyncToken).ConfigureAwait(false);
+                stored.SyncToken, optionalUpdates).ConfigureAwait(false);
         }
         catch
         {
@@ -422,7 +419,7 @@ public sealed class MatrixClient : IAsyncDisposable
 
     private static async Task<MatrixClient> CreateClientAsync(HttpClientParameters http, CancellationTokenSource lifetime,
         MatrixId userId, string deviceId, string? password, string? recoveryKey, SessionStore? sessionStore,
-        EncryptionStore? encryptionStore, string? syncToken)
+        EncryptionStore? encryptionStore, string? syncToken, OptionalUpdates optionalUpdates)
     {
         var logger = http.Logger;
         var versions = await MatrixRetry.ExecuteAsync(http, "Fetching spec versions",
@@ -442,7 +439,6 @@ public sealed class MatrixClient : IAsyncDisposable
 
         var serverCapabilities = await MatrixRetry.ExecuteAsync(http, "Fetching capabilities",
             () => MatrixHelper.FetchCapabilitiesAsync(http)).ConfigureAwait(false);
-        http.RateLimiter = new LeakyBucket(10, serverCapabilities.Capabilities.RateLimit?.MaxRequestsPerHour ?? 600);
         var client = new MatrixClient(http, userId, parsedVersions, serverCapabilities.Capabilities)
         {
             _password = password,
@@ -450,11 +446,11 @@ public sealed class MatrixClient : IAsyncDisposable
             _sessionStore = sessionStore,
             _resumeSyncToken = syncToken,
             _lifetime = lifetime,
+            _optionalUpdates = optionalUpdates,
         };
         if (encryptionStore != null)
             client.Encryption = await EncryptionEngine.StartAsync(encryptionStore, client, recoveryKey).ConfigureAwait(false);
         await MatrixRetry.ExecuteAsync(http, "Initializing Matrix", client.InitAsync).ConfigureAwait(false);
-        client.IsSyncing = true;
         client._syncTask = client.SyncAsync();
         if (await client._firstSyncHandled.Task.ConfigureAwait(false) is { } failure)
         {
@@ -480,6 +476,37 @@ public sealed class MatrixClient : IAsyncDisposable
         if (_syncTask != null)
             await _syncTask.ConfigureAwait(false);
         HttpClientParameters.HttpClient.Dispose();
+    }
+
+    /// <summary>
+    /// Logs out this device on the server, deletes the stored session and encryption keys, and disposes the client.
+    /// <see cref="Updates"/> completes without an error. If the server can't be reached, this throws and the client keeps
+    /// running.
+    /// </summary>
+    public async Task LogoutAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var logout = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _logout = logout;
+        try
+        {
+            await MatrixHelper.LogoutAsync(HttpClientParameters, cancellationToken).ConfigureAwait(false);
+        }
+        catch (MatrixResponseException ex) when (ex.ErrorCode == "M_UNKNOWN_TOKEN")
+        {
+            if (ex.SoftLogout)
+                Logger.LogWarning("The server had already ended the session, so device {DeviceId} stays on the account.", _deviceId);
+        }
+        catch
+        {
+            _logout = null;
+            logout.SetResult(false);
+            throw;
+        }
+        logout.SetResult(true);
+        Logger.LogInformation("Logged out device {DeviceId}.", _deviceId);
+        await DisposeAsync().ConfigureAwait(false);
+        _sessionStore?.Delete();
     }
 
     private static async Task<string> DiscoverHomeserverAsync(HttpClientParameters http, MatrixId userId)
@@ -592,17 +619,20 @@ public sealed class MatrixClient : IAsyncDisposable
 
     private async Task InitAsync()
     {
-        await MatrixHelper.PutPresenceAsync(HttpClientParameters, CurrentUser, new PresenceRequest() {Presence = Presence.Online }).ConfigureAwait(false);
+        if (_optionalUpdates.HasFlag(OptionalUpdates.Presence))
+            await MatrixHelper.PutPresenceAsync(HttpClientParameters, CurrentUser, new PresenceRequest() {Presence = Presence.Online }).ConfigureAwait(false);
+        List<string> ephemeralNotTypes = [];
+        if (!_optionalUpdates.HasFlag(OptionalUpdates.Receipts))
+            ephemeralNotTypes.Add("m.receipt");
+        if (!_optionalUpdates.HasFlag(OptionalUpdates.Typing))
+            ephemeralNotTypes.Add("m.typing");
         // We only want to receive text messages, filter out spam we're not interested in
         Filter filter = new()
         {
+            Presence = _optionalUpdates.HasFlag(OptionalUpdates.Presence) ? null : new() { NotTypes = ["*"] },
             Room = new()
             {
-                Ephemeral = new()
-                {
-                    NotTypes = new() { "m.typing", "m.receipt" },
-                    //LazyLoadMembers = true
-                },
+                Ephemeral = ephemeralNotTypes.Count == 0 ? null : new() { NotTypes = ephemeralNotTypes },
                 Timeline = new()
                 {
                     //LazyLoadMembers = true,
@@ -637,7 +667,6 @@ public sealed class MatrixClient : IAsyncDisposable
         };
 
         Exception? failure = null;
-        IsSyncing = true;
         var loggedInSinceLastSync = false;
         var isFirstResumedSync = _resumeSyncToken != null;
         try
@@ -649,12 +678,14 @@ public sealed class MatrixClient : IAsyncDisposable
                 {
                     response = await MatrixRetry.ExecuteAsync(HttpClientParameters, "Matrix sync",
                         () => MatrixHelper.GetSyncAsync(HttpClientParameters, request),
-                        onFirstTransientFailure: ex => ReportIssue(ClientIssueKind.SyncInterrupted,
-                            $"Sync with the server failed, retrying until it works again: {ex.Message}", exception: ex)).ConfigureAwait(false);
+                        onFirstTransientFailure: ex => SetOnline(false, ex)).ConfigureAwait(false);
                 }
                 // A token rejected right after logging in again won't get better with another login.
                 catch (MatrixResponseException ex) when (ex.ErrorCode == "M_UNKNOWN_TOKEN" && !loggedInSinceLastSync)
                 {
+                    // LogoutAsync stops the sync once the server confirmed the logout.
+                    if (_logout is { } logout && await logout.Task.ConfigureAwait(false))
+                        await Task.Delay(Timeout.Infinite, HttpClientParameters.CancellationToken).ConfigureAwait(false);
                     await LoginAgainAsync(ex, request).ConfigureAwait(false);
                     loggedInSinceLastSync = true;
                     continue;
@@ -676,7 +707,7 @@ public sealed class MatrixClient : IAsyncDisposable
                 request.Since = response.NextBatch;
                 request.FullState = false;
                 SaveSession(request.Since);
-                Interlocked.Exchange(ref _lastSyncAtUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                SetOnline(true, null);
                 _firstSyncHandled.TrySetResult(null);
             }
         }
@@ -691,7 +722,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
         finally
         {
-            IsSyncing = false;
+            _isOnline = false;
             _sessionStore?.Dispose();
             _firstSyncHandled.TrySetResult(failure ?? new OperationCanceledException(HttpClientParameters.CancellationToken));
             if (!_updates.Writer.TryComplete(failure))
@@ -708,6 +739,16 @@ public sealed class MatrixClient : IAsyncDisposable
         Logger.LogWarning("The server ended the session but allows logging in again (soft logout). Logging in with the same device.");
         await PasswordLoginAsync(HttpClientParameters, CurrentUser, _password, _deviceId!, deviceDisplayName: null, retry: true).ConfigureAwait(false);
         SaveSession(request.Since);
+    }
+
+    private void SetOnline(bool isOnline, Exception? error)
+    {
+        if (_isOnline == isOnline)
+            return;
+        _isOnline = isOnline;
+        if (isOnline)
+            Logger.LogInformation("Sync works again.");
+        _updates.Writer.TryWrite(new ConnectionChanged(isOnline, error));
     }
 
     private void SaveSession(string? syncToken)
@@ -758,12 +799,21 @@ public sealed class MatrixClient : IAsyncDisposable
                     membersChanged |= HandleRoomSummaryReceived(room, roomEvents.Summary);
                 if (roomEvents.AccountData?.Events is { } roomAccountData)
                     HandleAccountDataReceived(roomId, roomAccountData);
-                if (roomEvents.Ephemeral?.Events is { } ephemeral)
-                    HandleEphemeralReceived(roomId, ephemeral);
                 if (roomEvents.State?.Events is { } state)
                     membersChanged |= HandleStateReceived(roomId, state, fromTimeline: false);
                 if (roomEvents.Timeline != null)
                     membersChanged |= HandleTimelineReceived(roomId, roomEvents.Timeline, messageUpdates);
+                // After the timeline, so a receipt finds the event it points at.
+                if (roomEvents.Ephemeral?.Events is { } ephemeral)
+                    HandleEphemeralReceived(room, ephemeral);
+                if (roomEvents.UnreadNotifications is { } unread)
+                {
+                    lock (room.TimelineLock)
+                    {
+                        room.ReadState.NotificationCount = unread.NotificationCount ?? 0;
+                        room.ReadState.MentionCount = unread.HighlightCount ?? 0;
+                    }
+                }
                 var newlyJoined = !room.IsJoined;
                 if (newlyJoined)
                 {
@@ -851,12 +901,20 @@ public sealed class MatrixClient : IAsyncDisposable
             updates.Add(new RoomChanged(room, RoomChange.Members));
         if (after.IsEncrypted != before.IsEncrypted)
             updates.Add(new RoomChanged(room, RoomChange.Encryption));
+        if (after.Unread != before.Unread)
+            updates.Add(new RoomChanged(room, RoomChange.Unread));
+        if (!after.TypingUsers.SequenceEqual(before.TypingUsers))
+            updates.Add(new RoomChanged(room, RoomChange.Typing));
     }
 
-    private sealed record RoomSnapshot(string DisplayName, string? Topic, string? AvatarUrl, bool IsEncrypted)
+    private sealed record RoomSnapshot(string DisplayName, string? Topic, string? AvatarUrl, bool IsEncrypted,
+        (int, int, bool) Unread, IReadOnlyList<RoomUser> TypingUsers)
     {
-        public static RoomSnapshot Of(Room room) => new(room.DisplayName, room.Topic, room.AvatarUrl, room.IsEncrypted);
+        public static RoomSnapshot Of(Room room) => new(room.DisplayName, room.Topic, room.AvatarUrl, room.IsEncrypted,
+            (room.NotificationCount, room.MentionCount, room.HasUnread), room.TypingUsers);
     }
+
+    internal void ReportRoomChange(Room room, RoomChange change) => _updates.Writer.TryWrite(new RoomChanged(room, change));
 
     private void HandlePresenceReceived(List<BasicEvent> events)
     {
@@ -927,12 +985,57 @@ public sealed class MatrixClient : IAsyncDisposable
     }
 
     
-    private void HandleEphemeralReceived(MatrixId roomId, List<BasicEvent> events)
+    private void HandleEphemeralReceived(Room room, List<BasicEvent> events)
     {
-        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
-        ArgumentNullException.ThrowIfNull(events, nameof(events));
         foreach (var e in events.Where(ev => ev != null))
-            Diagnostics.ReportUnhandled(Logger, UnhandledKind.EphemeralEvent, e.Type, e);
+        {
+            if (e.Type == "m.receipt")
+                HandleReceiptsReceived(room, e.Content);
+            else if (e.Type == "m.typing")
+                HandleTypingReceived(room, e.Content);
+            else
+                Diagnostics.ReportUnhandled(Logger, UnhandledKind.EphemeralEvent, e.Type, e);
+        }
+    }
+
+    /// <summary>Each typing event replaces the whole list of users who are typing.</summary>
+    private void HandleTypingReceived(Room room, JsonElement? content)
+    {
+        if (content is not { ValueKind: JsonValueKind.Object } typing
+            || !typing.TryGetProperty("user_ids", out var userIds) || userIds.ValueKind != JsonValueKind.Array)
+            return;
+        List<RoomUser> users = [];
+        foreach (var id in userIds.EnumerateArray())
+        {
+            if (id.ValueKind == JsonValueKind.String && UserId.TryParse(id.GetString(), out var userId) && userId != null
+                && !userId.Equals(CurrentUser))
+                users.Add(GetOrAddUser(GetOrAddUser(userId), room));
+        }
+        room.TypingUsers = users;
+    }
+
+    /// <summary>Takes the current user's receipts that cover the whole room. Other users' receipts aren't used yet.</summary>
+    private void HandleReceiptsReceived(Room room, JsonElement? content)
+    {
+        if (content is not { ValueKind: JsonValueKind.Object } receipts)
+            return;
+        foreach (var target in receipts.EnumerateObject())
+        {
+            if (target.Value.ValueKind != JsonValueKind.Object)
+                continue;
+            foreach (var type in target.Value.EnumerateObject())
+            {
+                if (type.Name is not ("m.read" or "m.read.private") || type.Value.ValueKind != JsonValueKind.Object
+                    || !type.Value.TryGetProperty(CurrentUser.Full, out var receipt))
+                    continue;
+                // Receipts for a single thread don't mark the rest of the room as read.
+                if (receipt.ValueKind == JsonValueKind.Object && receipt.TryGetProperty("thread_id", out var thread)
+                    && thread.ValueKind == JsonValueKind.String && thread.GetString() != "main")
+                    continue;
+                lock (room.TimelineLock)
+                    room.ReadState.SetReceipt(target.Name);
+            }
+        }
     }
 
     
@@ -1205,7 +1308,10 @@ public sealed class MatrixClient : IAsyncDisposable
             // A limited timeline skipped events since the previous sync. The cache holds no gaps, so it starts over,
             // and a history walk crosses the gap.
             if (timeline.Limited == true)
+            {
                 cache.Clear();
+                room.ReadState.Clear();
+            }
             var wasEmpty = cache.IsEmpty;
             foreach (var e in timeline.Events ?? [])
             {
@@ -1214,6 +1320,8 @@ public sealed class MatrixClient : IAsyncDisposable
                     Logger.LogWarning("Received null timeline event in room {RoomId}.", roomId.Full);
                     continue;
                 }
+                var isOwn = e.Sender == CurrentUser.Full;
+                var makesUnread = false;
                 try
                 {
                     // The presence of state_key (including "") identifies state, not
@@ -1221,12 +1329,16 @@ public sealed class MatrixClient : IAsyncDisposable
                     if (e.StateKey != null)
                         membersChanged |= HandleStateReceived(roomId, [e], fromTimeline: true);
                     else if (!cache.Contains(e.EventId) && ReadEntry(room, e, live: true) is { } entry)
+                    {
                         AddLiveEntry(room, entry, updates);
+                        makesUnread = !isOwn && entry is MessageEntry { IsDeleted: false };
+                    }
                 }
                 catch (Exception ex) when (ex is JsonException or ArgumentOutOfRangeException)
                 {
                     Logger.LogWarning(ex, "Could not interpret timeline event {Type} in room {RoomId}.", e.Type, roomId.Full);
                 }
+                room.ReadState.Add(e.EventId, isOwn, makesUnread);
             }
             // History walks continue from the first events the sync delivers for a room.
             if (wasEmpty)

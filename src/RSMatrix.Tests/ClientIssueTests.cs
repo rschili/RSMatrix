@@ -50,7 +50,7 @@ public class ClientIssueTests
     }
 
     [Test]
-    public async Task SyncInterruption_IsReportedOncePerOutage_AndLastSyncAtUpdates()
+    public async Task SyncInterruption_IsReportedOncePerOutage_AndWhenItEnds()
     {
         using var context = new MatrixTestContext();
         // Two failures, a success, one failure, then a terminal error that stops syncing.
@@ -60,17 +60,16 @@ public class ClientIssueTests
         context.Send = (_, _) => Task.FromResult(responses[syncCount++] is { } status
             ? MatrixTestContext.Json(status == HttpStatusCode.Unauthorized ? """{"errcode":"M_UNKNOWN_TOKEN"}""" : "{}", status)
             : MatrixTestContext.Json("""{"next_batch":"next"}"""));
-        await Assert.That(context.Client.LastSyncAt).IsNull();
-        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        await Assert.That(context.Client.IsOnline).IsTrue();
 
         await context.Client.SyncAsync();
 
         await Assert.That(syncCount).IsEqualTo(5);
-        await Assert.That(context.Client.LastSyncAt).IsNotNull();
-        await Assert.That(context.Client.LastSyncAt!.Value > before).IsTrue();
-        var issues = ReadAll(context.Client);
-        await Assert.That(issues.Count).IsEqualTo(2);
-        await Assert.That(issues.All(i => i.Kind == ClientIssueKind.SyncInterrupted && i.Exception != null)).IsTrue();
+        var changes = context.ReadUpdates().Select(update => update.Value).OfType<ConnectionChanged>().ToList();
+        await Assert.That(changes.Select(change => change.IsOnline).SequenceEqual([false, true, false])).IsTrue();
+        await Assert.That(changes[0].Error).IsNotNull();
+        await Assert.That(changes[1].Error).IsNull();
+        await Assert.That(context.Client.IsOnline).IsFalse();
         await Assert.That(context.Client.Updates.Completion.IsCompleted).IsTrue();
     }
 

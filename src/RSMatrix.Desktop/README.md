@@ -8,7 +8,8 @@ A small Matrix text client for Windows, Linux and macOS, built with Avalonia on 
 make desktop-sample                 # built-in sample data, no server needed
 make matrix-up && make matrix-seed  # local Synapse with rooms and messages
 make desktop                        # signs in as alice on the local server
-make desktop DESKTOP_USER=bob       # a second instance, e.g. to try encryption
+make desktop-bob                    # a second instance as bob, e.g. to chat with alice
+make desktop DESKTOP_USER=carol     # any other seeded user
 ```
 
 `make matrix-seed` creates rooms for alice, bob and carol, with formatted messages, a direct chat, an encrypted room, an image and a room with 150 messages for scrolling back. All users have the password `rsmatrix-test-password`.
@@ -41,12 +42,10 @@ The app works around these, and each would make it simpler or better:
 
 - **Formatted messages**: RSMatrix exposes `Message.Html`, but the app currently renders only the plain-text body.
 - **Images and other media**: image and other media messages arrive, but there is no media download.
-- **Sign out**: there is no logout, so disconnecting leaves the device signed in.
-- **Connection state**: `IsSyncing` and `LastSyncAt` have no change notifications, so they are polled.
-- **Read state**: no unread counts or read markers from the server. The app does not mark messages as read yet, so only messages after the initial sync count as unread.
+- **Sign out**: RSMatrix has `LogoutAsync`, but the app only disconnects, which leaves the device signed in.
+- **Read state**: RSMatrix offers the server's counts and `HasUnread`, but the app still counts unread messages itself, only from the start of the session, and doesn't mark rooms as read yet.
 - **Reactions and read receipts**: reactions arrive and are shown, but read receipts are not delivered. Only reactions sent in this session can be removed.
 - **Replies**: received messages expose their reply target, but the app does not display reply previews yet. Sending replies works.
 - **Threads**: received messages carry their thread, and sending to a thread works. There is no list of a room's threads yet.
 - **Event source**: no raw event JSON, so "View source" only works in the sample.
-- **Rate limit**: all requests except sync share one local bucket of 10 requests, refilled at 600 per hour. History pages and quick replies wait several seconds once it is empty.
 - **Cancellation**: sending only stops with the whole client.

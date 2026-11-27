@@ -3,11 +3,31 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using RSMatrix.Http;
+using RSMatrix.Models;
 
 namespace RSMatrix.Tests;
 
 public class LoginTests
 {
+    [Test]
+    [Arguments(OptionalUpdates.All, null, false)]
+    [Arguments(OptionalUpdates.None, "m.receipt\",\"m.typing", true)]
+    [Arguments(OptionalUpdates.Typing, "m.receipt", true)]
+    public async Task OptionalUpdates_LeaveThemOutOfTheFilter(OptionalUpdates optionalUpdates, string? ephemeralNotTypes, bool withoutPresence)
+    {
+        using var handler = new LoginHandler(failInitialization: false);
+        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var client = await MatrixClient.LoginAsync("@bot:example.org", "test-password", lifetime.Token,
+            "fixed-device", null, null, null, NullLogger.Instance, null, new HttpClient(handler, disposeHandler: false),
+            (_, _) => Task.CompletedTask, optionalUpdates);
+
+        using var filter = JsonDocument.Parse(handler.FilterBody!);
+        var ephemeral = filter.RootElement.GetProperty("room").TryGetProperty("ephemeral", out var e) ? e.GetRawText() : null;
+        await Assert.That(ephemeral).IsEqualTo(ephemeralNotTypes == null ? null : $$"""{"not_types":["{{ephemeralNotTypes}}"]}""");
+        await Assert.That(filter.RootElement.TryGetProperty("presence", out _)).IsEqualTo(withoutPresence);
+        await Assert.That(handler.PresenceCount).IsEqualTo(withoutPresence ? 0 : 1);
+    }
+
     [Test]
     [Arguments(false)]
     [Arguments(true)]
@@ -40,7 +60,7 @@ public class LoginTests
         await Assert.That(handler.SyncQueries[0].Contains("since=")).IsFalse();
         await Assert.That(handler.SyncQueries.Skip(1).All(q => q.Contains("since=cursor%26one"))).IsTrue();
         await Assert.That(handler.AuthenticatedTokens.All(t => t == "session-token")).IsTrue();
-        await Assert.That(client.IsSyncing).IsFalse();
+        await Assert.That(client.IsOnline).IsFalse();
         await Assert.That(client.HttpClientParameters.BearerToken).IsEqualTo("session-token");
         await Assert.That(client.Filter!.FilterId).IsEqualTo("filter1");
 
@@ -59,6 +79,7 @@ public class LoginTests
         public string? LoginBody { get; private set; }
         public List<string?> AuthenticatedTokens { get; } = [];
         public List<string> SyncQueries { get; } = [];
+        public string? FilterBody { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -92,7 +113,10 @@ public class LoginTests
                 return Json("{}");
             }
             if (path.EndsWith("/filter", StringComparison.Ordinal) && request.Method == HttpMethod.Post)
+            {
+                FilterBody = await request.Content!.ReadAsStringAsync(cancellationToken);
                 return Json("""{"filter_id":"filter1"}""");
+            }
             if (path.EndsWith("/filter/filter1", StringComparison.Ordinal))
                 return Json("{}");
             if (path == "/_matrix/client/v3/sync")

@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Net.Mime;
 using System.Text.Json;
-using RSFlowControl;
 
 namespace RSMatrix.Http;
 internal record HttpClientParameters
@@ -12,7 +11,6 @@ internal record HttpClientParameters
     public string BaseUri { get; set; }
     public string? BearerToken { get; set; }
     public ILogger Logger { get; init; }
-    public LeakyBucket? RateLimiter { get; set; }
 
     public CancellationToken CancellationToken { get; init; }
 
@@ -47,11 +45,11 @@ internal static class HttpClientHelper
 {
     /// <param name="cancellationToken">Cancels this request in addition to the client's own token.</param>
     public static async Task<TResponse> SendAsync<TResponse>(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null,
-        bool ignoreRateLimit = false, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         using var linked = Link(parameters, cancellationToken);
         cancellationToken = linked?.Token ?? parameters.CancellationToken;
-        using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit, cancellationToken).ConfigureAwait(false);
+        using var response = await SendRequestAsync(parameters, path, method, content, cancellationToken).ConfigureAwait(false);
         TResponse? result;
         var diagnostics = parameters.Diagnostics;
         if (diagnostics.Mode == DiagnosticsMode.Off)
@@ -77,12 +75,16 @@ internal static class HttpClientHelper
         throw new HttpRequestException($"Failed to deserialize response from {path}.");
     }
 
-    public static async Task SendAsync(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null, bool ignoreRateLimit = false)
+    /// <param name="cancellationToken">Cancels this request in addition to the client's own token.</param>
+    public static async Task SendAsync(HttpClientParameters parameters, string path, HttpMethod? method = null, HttpContent? content = null,
+        CancellationToken cancellationToken = default)
     {
-        using var response = await SendRequestAsync(parameters, path, method, content, ignoreRateLimit, parameters.CancellationToken).ConfigureAwait(false);
+        using var linked = Link(parameters, cancellationToken);
+        cancellationToken = linked?.Token ?? parameters.CancellationToken;
+        using var response = await SendRequestAsync(parameters, path, method, content, cancellationToken).ConfigureAwait(false);
         if (parameters.Diagnostics.Mode == DiagnosticsMode.Verbose)
         {
-            var body = await response.Content.ReadAsByteArrayAsync(parameters.CancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             parameters.Diagnostics.LogBody(parameters.Logger, "Response", path, body);
         }
     }
@@ -91,7 +93,7 @@ internal static class HttpClientHelper
         => cancellationToken.CanBeCanceled ? CancellationTokenSource.CreateLinkedTokenSource(parameters.CancellationToken, cancellationToken) : null;
 
     private static async Task<HttpResponseMessage> SendRequestAsync(HttpClientParameters parameters, string relativePath, HttpMethod? method, HttpContent? content,
-        bool ignoreRateLimit, CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentException.ThrowIfNullOrEmpty(relativePath);
@@ -113,9 +115,6 @@ internal static class HttpClientHelper
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            // Local throttling waits instead of turning a full bucket into a failed request.
-            while (!ignoreRateLimit && parameters.RateLimiter is { } limiter && !limiter.Leak())
-                await MatrixRetry.DelayAsync(parameters, TimeSpan.FromSeconds(1)).ConfigureAwait(false);
 
             using var request = new HttpRequestMessage(requestMethod, fullPath);
             request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));

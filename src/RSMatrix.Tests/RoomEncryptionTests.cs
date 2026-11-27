@@ -105,7 +105,7 @@ public class RoomEncryptionTests
         await Assert.That(await context.Room().SendMessageAsync("hello")).IsEqualTo("$sent");
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""");
         await context.Room().RedactEventAsync("$event");
-        await context.Room().SendTypingNotificationAsync();
+        await context.Room().SetTypingAsync(true);
         await Assert.That(context.Requests.Count).IsEqualTo(3);
     }
 
@@ -122,7 +122,7 @@ public class RoomEncryptionTests
          {"type":"m.room.message","sender":"@a:example.org","event_id":"$plain","origin_server_ts":1700000000000,
           "content":{"msgtype":"m.text","body":"hello"}}]}}}}}
         """);
-        var updates = context.ReadUpdates();
+        var updates = context.ReadUpdates().Where(update => update.Value is not RoomChanged).ToList();
         await Assert.That(updates.Count).IsEqualTo(2);
         await Assert.That(updates[0].Value is ClientIssue { Kind: ClientIssueKind.DecryptionFailed, EventId: "$encrypted" }).IsTrue();
         var message = ((NewMessage)updates[1].Value!).Message;

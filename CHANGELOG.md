@@ -13,7 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Experimental end-to-end encryption, with Olm and Megolm implemented in C#. It is on when the client has a store directory. Messages in encrypted rooms are then decrypted, and messages, replies, edits and reactions are encrypted automatically. Not supported: interactive device verification, key backup, key requests and encrypted attachments.
 - Cross-signing: a recovery key signs a new device, `MatrixClient.SetUpCrossSigningAsync` creates the account's identity, `MatrixClient.EncryptionState` shows where the client stands.
 - `ReceivedTextMessage.IsEncrypted`.
-- `MatrixClient.Issues`: a channel that reports problems the client keeps running through (`DecryptionFailed`, `RoomKeyNotShared`, `AutoJoinFailed`, `SyncInterrupted`, `DeviceNotCrossSigned`, `IdentityChanged`). It keeps the latest 100 issues.
+- `MatrixClient.Issues`: a channel that reports problems the client keeps running through (`DecryptionFailed`, `RoomKeyNotShared`, `AutoJoinFailed`, `DeviceNotCrossSigned`, `IdentityChanged`). It keeps the latest 100 issues.
+- `MatrixClient.LogoutAsync`: logs out the device, deletes the stored session and keys, and disposes the client.
+- `ConnectionChanged` updates and `MatrixClient.IsOnline`, for when the sync fails and when it works again.
+- `OptionalUpdates` on `LoginAsync` and `ResumeAsync`: bots can leave receipts, typing and presence out of the sync.
+- `Room.TypingUsers`, reported as `RoomChange.Typing`.
+- Read state: `Room.NotificationCount`, `Room.MentionCount` and `Room.HasUnread`, reported as `RoomChange.Unread`. `Room.MarkAsReadAsync()` marks the whole room as read.
 - After a soft logout, the client logs in again with the same device and keeps its sync position, while running and when resuming. Without a password it reports `PasswordRequiredException`.
 - After a hard logout, the store discards the session and the client reports `SessionEndedException`.
 - The environment variable `RSMATRIX_DIAGNOSTICS` (`Unhandled`, `Verbose`) logs what the client receives but doesn't handle, and optionally every request and response body.
@@ -21,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Breaking:** `ConnectAsync` is replaced by `LoginAsync` and `ResumeAsync`. The client owns its `HttpClient` instead of taking an `IHttpClientFactory`, and is `IAsyncDisposable`: disposing stops the sync.
 - **Breaking:** the low-level HTTP and protocol types are internal.
+- **Breaking:** `IsSyncing` is replaced by `IsOnline`.
+- **Breaking:** `Room.SendTypingNotificationAsync` is replaced by `Room.SetTypingAsync(bool)`, which can also stop typing.
+- Responses are no longer limited to 2 MB, so a large first sync works.
+- Requests no longer wait for a local rate limiter; the client relies on the server's rate limits.
+- `Message.MarkAsReadAsync()` on our own message puts the receipt on the newest event from someone else before it, and never moves the receipt backwards.
 - **Breaking:** `LoginAsync` and `ResumeAsync` return after the first sync, with `MatrixClient.Rooms` filled. After a login, messages from the first sync aren't reported as updates; they are in the rooms' history.
 
 ## [1.4.0] - 2026-09-30

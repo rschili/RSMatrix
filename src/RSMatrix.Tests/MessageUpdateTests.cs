@@ -35,7 +35,7 @@ public class MessageUpdateTests
     }
 
     private static async Task<Message> ReceiveAsync(MatrixTestContext context, string messageEvent)
-        => ((NewMessage)(await ProcessAsync(context, messageEvent))[0]).Message;
+        => (await ProcessAsync(context, messageEvent)).OfType<NewMessage>().First().Message;
 
     /// <summary>The message of a change to a message the client holds.</summary>
     private static Message Changed(object update, MessageChange expected)
@@ -336,15 +336,16 @@ public class MessageUpdateTests
     }
 
     [Test]
-    public async Task MarkAsRead_OfOurOwnMessage_OnlyMovesTheReadMarker()
+    public async Task MarkAsRead_OfOurOwnMessage_PointsAtTheEventBefore()
     {
         using var context = new MatrixTestContext();
-        var own = await ReceiveAsync(context, Text("$own", "mine", sender: "@bot:example.org"));
+        var updates = await ProcessAsync(context, Text("$theirs", "hi"), Text("$own", "mine", sender: "@bot:example.org"));
+        var own = ((NewMessage)updates[1]).Message;
 
         await own.MarkAsReadAsync();
 
         var request = context.Requests.Single(r => r.Path.Contains("/read_markers"));
-        await Assert.That(request.Body).IsEqualTo("""{"m.fully_read":"$own"}""");
+        await Assert.That(request.Body).IsEqualTo("""{"m.read":"$theirs","m.fully_read":"$theirs"}""");
     }
 
     [Test]

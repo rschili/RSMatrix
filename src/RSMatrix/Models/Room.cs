@@ -73,6 +73,47 @@ public class Room
 
     internal TimelineCache Cache { get; }
 
+    internal ReadState ReadState { get; } = new();
+
+    /// <summary>
+    /// Messages since the user's read receipt that notify under the user's push rules, counted by the server. In a room
+    /// set to mentions only, other messages don't count; <see cref="HasUnread"/> covers them.
+    /// </summary>
+    public int NotificationCount
+    {
+        get
+        {
+            lock (TimelineLock)
+                return ReadState.NotificationCount;
+        }
+    }
+
+    /// <summary>
+    /// Messages since the user's read receipt that mention the user, the whole room or one of the user's keywords,
+    /// counted by the server. In encrypted rooms the server can't see mentions.
+    /// </summary>
+    public int MentionCount
+    {
+        get
+        {
+            lock (TimelineLock)
+                return ReadState.MentionCount;
+        }
+    }
+
+    /// <summary>
+    /// Whether someone else wrote since the user's read receipt or the user's own last event, also in rooms that don't
+    /// notify. Room lists show such rooms in bold.
+    /// </summary>
+    public bool HasUnread
+    {
+        get
+        {
+            lock (TimelineLock)
+                return ReadState.HasUnread;
+        }
+    }
+
     /// <summary>Serialises the sync with history walks and guards <see cref="Cache"/>.</summary>
     internal Lock TimelineLock { get; } = new();
 
@@ -90,9 +131,16 @@ public class Room
     /// </summary>
     public bool IsDirect { get; internal set; }
 
-    public Task SendTypingNotificationAsync(uint? timeoutMS = null)
+    /// <summary>Other members who are typing right now, as the server reported last. Empty without <see cref="OptionalUpdates.Typing"/>.</summary>
+    public IReadOnlyList<RoomUser> TypingUsers { get; internal set; } = [];
+
+    /// <summary>
+    /// Tells the room whether the user is typing. Typing lasts 30 seconds unless it is sent again or stopped; stop it
+    /// after sending the message or when the input is cleared.
+    /// </summary>
+    public Task SetTypingAsync(bool isTyping, CancellationToken cancellationToken = default)
     {
-        return MatrixHelper.PutTypingNotificationAsync(Client.HttpClientParameters, RoomId, Client.CurrentUser, timeoutMS);
+        return MatrixHelper.PutTypingAsync(Client.HttpClientParameters, RoomId, Client.CurrentUser, isTyping, cancellationToken);
     }
 
     /// <summary>
@@ -458,35 +506,60 @@ public class Room
         return newestFirst;
     }
 
-    private readonly Lock _readMarkerLock = new();
     private readonly SemaphoreSlim _readMarkerRequest = new(1, 1);
-    private Message? _readMarkerTarget;
-    private Message? _readMarkerSent;
+    // The newest event waiting to be marked as read, guarded by TimelineLock.
+    private string? _readMarkerTarget;
 
-    internal async Task MarkAsReadAsync(Message message)
+    /// <summary>
+    /// Marks the room as read: puts the read receipt and the read marker on the newest event from someone else, of any
+    /// type, so the server's counts drop to zero. Call it when the user sees the newest message, for example for each
+    /// new message while the room is open and the window has focus. Calls are combined while a request runs.
+    /// </summary>
+    public Task MarkAsReadAsync(CancellationToken cancellationToken = default)
     {
-        lock (_readMarkerLock)
+        string? target;
+        lock (TimelineLock)
+            target = ReadState.NewestFromOthers;
+        return target == null ? Task.CompletedTask : SendReadMarkersAsync(target, cancellationToken);
+    }
+
+    internal Task MarkAsReadUpToAsync(Message message, CancellationToken cancellationToken)
+    {
+        string? target;
+        // The spec says not to send read receipts for our own events, so ours point at the newest one before it.
+        lock (TimelineLock)
+            target = message.IsOwn ? ReadState.FromOthersUpTo(message.Id) : message.Id;
+        return target == null ? Task.CompletedTask : SendReadMarkersAsync(target, cancellationToken);
+    }
+
+    private async Task SendReadMarkersAsync(string eventId, CancellationToken cancellationToken)
+    {
+        lock (TimelineLock)
         {
-            // A newer message was marked already, so the request for it covers this one.
-            if (_readMarkerTarget != null && message.Timestamp < _readMarkerTarget.Timestamp)
+            // Receipts only move forward, past the one the user has and the one waiting to be sent.
+            if (ReadState.IsBefore(eventId, ReadState.ReceiptEventId) || ReadState.IsBefore(eventId, _readMarkerTarget))
                 return;
-            _readMarkerTarget = message;
+            _readMarkerTarget = eventId;
         }
 
-        await _readMarkerRequest.WaitAsync(Client.HttpClientParameters.CancellationToken).ConfigureAwait(false);
+        await _readMarkerRequest.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            Message target;
-            lock (_readMarkerLock)
+            string? target;
+            lock (TimelineLock)
             {
                 target = _readMarkerTarget;
-                if (target.Id == _readMarkerSent?.Id)
+                _readMarkerTarget = null;
+                // The request before this one may have moved the receipt past it.
+                if (target == null || target == ReadState.ReceiptEventId || ReadState.IsBefore(target, ReadState.ReceiptEventId))
                     return;
             }
-            // The spec says not to send read receipts for our own messages; the fully read marker still moves.
-            await MatrixHelper.PostReadMarkersAsync(Client.HttpClientParameters, RoomId, target.Id, sendReceipt: !target.IsOwn).ConfigureAwait(false);
-            lock (_readMarkerLock)
-                _readMarkerSent = target;
+            await MatrixHelper.PostReadMarkersAsync(Client.HttpClientParameters, RoomId, target, cancellationToken).ConfigureAwait(false);
+            bool changed;
+            lock (TimelineLock)
+                changed = ReadState.MarkAsRead(target);
+            if (changed)
+                Client.ReportRoomChange(this, RoomChange.Unread);
         }
         finally
         {

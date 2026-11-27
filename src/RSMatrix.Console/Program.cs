@@ -88,8 +88,9 @@ async Task MessageReceivedAsync(Message message)
     var age = DateTimeOffset.Now - message.Timestamp;
     if(message.Body.Contains("ping") && age.TotalSeconds < 10)
     {
-        await message.Room.SendTypingNotificationAsync();
+        await message.Room.SetTypingAsync(true);
         await Task.Delay(2000);
         await message.ReplyAsync("pong!");
+        await message.Room.SetTypingAsync(false);
     }
 }

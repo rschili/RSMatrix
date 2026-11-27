@@ -175,12 +175,11 @@ public sealed class Message
     }
 
     /// <summary>
-    /// Marks the room as read up to this message: sets our read receipt, which other members see,
-    /// and the read marker our other devices use. Our own messages only move the read marker; the spec says not to send
-    /// read receipts for them. Calls for several messages of one room are combined,
-    /// so this can be called for every message without running into rate limits.
+    /// Marks the room as read up to this message, for a user who scrolled up and reads older messages. Like
+    /// <see cref="Room.MarkAsReadAsync"/>, it never moves the read receipt backwards, and on our own message it points at
+    /// the newest event from someone else before it.
     /// </summary>
-    public Task MarkAsReadAsync() => Room.MarkAsReadAsync(this);
+    public Task MarkAsReadAsync(CancellationToken cancellationToken = default) => Room.MarkAsReadUpToAsync(this, cancellationToken);
 
     /// <summary>
     /// Edits this message, which only works for our own messages. Clients without edit support show the new text with a "* " in front.

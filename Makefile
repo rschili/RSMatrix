@@ -1,4 +1,4 @@
-.PHONY: default build test ide clean-release publish matrix-up matrix-down matrix-logs matrix-status matrix-seed test-integration test-integration-disposable test-matrix-scripts desktop desktop-sample desktop-snapshots test-desktop
+.PHONY: default build test ide clean-release publish matrix-up matrix-down matrix-logs matrix-status matrix-seed test-integration test-integration-disposable test-matrix-scripts desktop desktop-bob desktop-sample desktop-snapshots test-desktop
 
 MATRIX_PORT ?= 8008
 export MATRIX_PORT
@@ -43,6 +43,9 @@ desktop:
 	dotnet run --project $(DESKTOP_PROJECT) -- --data-dir $(DESKTOP_DATA) \
 		--homeserver http://127.0.0.1:$(MATRIX_PORT) --user @$(DESKTOP_USER):localhost --password rsmatrix-test-password \
 		--recovery-key-file $(DESKTOP_RECOVERY_KEY_FILE)
+
+desktop-bob:
+	$(MAKE) desktop DESKTOP_USER=bob
 
 desktop-sample:
 	dotnet run --project $(DESKTOP_PROJECT) -- --sample

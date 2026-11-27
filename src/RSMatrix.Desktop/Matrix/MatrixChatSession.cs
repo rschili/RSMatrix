@@ -6,6 +6,7 @@ using RSMatrix.Desktop.Chat;
 using RSMatrix.Desktop.Content;
 using RSMatrix.Desktop.Storage;
 using RSMatrix.Models;
+using ConnectionChanged = RSMatrix.Desktop.Chat.ConnectionChanged;
 
 namespace RSMatrix.Desktop.Matrix;
 
@@ -20,10 +21,6 @@ public sealed record MatrixLogin(string UserId, string? Password, Uri? Homeserve
 /// </summary>
 public sealed class MatrixChatSession : IChatSession
 {
-    private static readonly TimeSpan StatusPollInterval = TimeSpan.FromSeconds(2);
-    // A sync long poll returns at least once a minute, so a longer silence means the connection is gone.
-    private static readonly TimeSpan SyncSilenceLimit = TimeSpan.FromSeconds(90);
-
     private readonly MatrixClient _client;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ILogger _logger;
@@ -33,7 +30,6 @@ public sealed class MatrixChatSession : IChatSession
     private readonly ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
     // RSMatrix doesn't deliver reactions, so only the ones sent here are known, and only they can be taken back.
     private readonly ConcurrentDictionary<(string RoomId, string TargetEventId, string Key), string> _sentReactionIds = new();
-    private long _syncInterruptedAtUnixMilliseconds;
 
     private MatrixChatSession(MatrixClient client, ILogger logger)
     {
@@ -41,9 +37,10 @@ public sealed class MatrixChatSession : IChatSession
         _logger = logger;
         CurrentUser = new ChatUser(client.CurrentUser.Full, client.CurrentUser.Localpart.ToString());
         ServerName = client.CurrentUser.Domain.ToString();
+        _events.Writer.TryWrite(new ConnectionChanged(ConnectionState.Online, null));
         foreach (var room in client.Rooms)
             AddRoom(room);
-        _pumps = Task.WhenAll(ForwardUpdatesAsync(), PollConnectionStateAsync());
+        _pumps = ForwardUpdatesAsync();
     }
 
     public ChatUser CurrentUser { get; }
@@ -164,13 +161,11 @@ public sealed class MatrixChatSession : IChatSession
                         break;
                     case ClientIssue issue:
                         _logger.LogWarning("{Issue}", issue);
-                        if (issue.Kind == ClientIssueKind.SyncInterrupted)
-                        {
-                            Interlocked.Exchange(ref _syncInterruptedAtUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-                            _events.Writer.TryWrite(new ConnectionChanged(ConnectionState.Reconnecting, issue.Message));
-                            continue;
-                        }
                         _events.Writer.TryWrite(new IssueReported(issue.Message, issue.Room?.RoomId.Full));
+                        break;
+                    case Models.ConnectionChanged changed:
+                        _events.Writer.TryWrite(new ConnectionChanged(
+                            changed.IsOnline ? ConnectionState.Online : ConnectionState.Reconnecting, changed.Error?.Message));
                         break;
                     case MessageChanged { Change: MessageChange.Reactions } changed:
                         _events.Writer.TryWrite(new ReactionsChanged(changed.Reference.Room.RoomId.Full, changed.Reference.Id,
@@ -203,41 +198,6 @@ public sealed class MatrixChatSession : IChatSession
         }
         _events.Writer.TryWrite(new ConnectionChanged(ConnectionState.Stopped, failure));
         _events.Writer.TryComplete();
-    }
-
-    // RSMatrix offers connection health as properties without change notifications, so they are polled.
-    private async Task PollConnectionStateAsync()
-    {
-        var reported = (ConnectionState?)null;
-        using var timer = new PeriodicTimer(StatusPollInterval);
-        try
-        {
-            do
-            {
-                var state = GetConnectionState();
-                if (state == ConnectionState.Stopped)
-                    return; // ForwardMessagesAsync reports why.
-                if (state != reported)
-                    _events.Writer.TryWrite(new ConnectionChanged(state, null));
-                reported = state;
-            }
-            while (await timer.WaitForNextTickAsync(_lifetime.Token).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
-        {
-        }
-    }
-
-    private ConnectionState GetConnectionState()
-    {
-        if (!_client.IsSyncing)
-            return ConnectionState.Stopped;
-        if (_client.LastSyncAt is not { } lastSync)
-            return ConnectionState.Connecting;
-        var interruptedAt = DateTimeOffset.FromUnixTimeMilliseconds(Interlocked.Read(ref _syncInterruptedAtUnixMilliseconds));
-        if (interruptedAt > lastSync || DateTimeOffset.UtcNow - lastSync > SyncSilenceLimit)
-            return ConnectionState.Reconnecting;
-        return ConnectionState.Online;
     }
 
     private void AddRoom(Room room)

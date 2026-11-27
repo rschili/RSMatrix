@@ -81,6 +81,31 @@ public class SessionTests
         }
     }
 
+    [Test]
+    public async Task Logout_EndsSessionOnServer_AndDeletesStore()
+    {
+        await using var server = new LocalHomeserver();
+        var store = NewDirectory();
+        try
+        {
+            var bob = await server.LoginAsync("bob");
+            var client = await server.LoginClientAsync("alice", store, crossSign: false);
+            var token = ReadSession(store).AccessToken;
+
+            await client.LogoutAsync();
+
+            await client.Updates.Completion.WaitAsync(server.CancellationToken);
+            await Assert.That(SessionStore.Read(store, "@alice:localhost")).IsNull();
+            var error = await Assert.ThrowsAsync<MatrixResponseException>(() =>
+                LocalHomeserver.RequestAsync(bob with { BearerToken = token }, "/_matrix/client/v3/account/whoami", HttpMethod.Get));
+            await Assert.That(error!.ErrorCode).IsEqualTo("M_UNKNOWN_TOKEN");
+        }
+        finally
+        {
+            DeleteDirectory(store);
+        }
+    }
+
     private static SessionData ReadSession(string store) => SessionStore.Read(store, "@alice:localhost")!;
 
     private static async Task<string> SendTextAsync(HttpClientParameters sender, string roomPath, string body)

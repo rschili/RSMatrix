@@ -63,7 +63,7 @@ public class RoomChangeTests
         ]));
 
         var updates = context.ReadUpdates();
-        await Assert.That(Changes(updates)).IsEquivalentTo([RoomChange.Name, RoomChange.Topic, RoomChange.Avatar, RoomChange.Encryption]);
+        await Assert.That(Changes(updates)).IsEquivalentTo([RoomChange.Name, RoomChange.Topic, RoomChange.Avatar, RoomChange.Encryption, RoomChange.Unread]);
         await Assert.That(updates[^1].Value is NewMessage).IsTrue();
         await Assert.That(context.Room().DisplayName).IsEqualTo("Lounge");
     }
@@ -96,7 +96,7 @@ public class RoomChangeTests
 
         // The state section brings members the client didn't know yet, like the sender of a new message.
         await context.Process(RoomSync(state: [Member("$m1", "@carol:example.org", "join", "Carol")], timeline: [Text("$1", "hi", "@carol:example.org")]));
-        await Assert.That(Changes(context.ReadUpdates())).IsEmpty();
+        await Assert.That(Changes(context.ReadUpdates())).IsEquivalentTo([RoomChange.Unread]);
 
         await context.Process(RoomSync(timeline: [Member("$m2", "@dave:example.org", "join", "Dave")]));
         await Assert.That(Changes(context.ReadUpdates())).IsEquivalentTo([RoomChange.Members]);

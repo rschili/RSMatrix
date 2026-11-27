@@ -99,13 +99,13 @@ internal sealed class LocalHomeserver : IAsyncDisposable
     /// gets signed: with the user's key from <see cref="RecoveryKeys"/>, or by setting up an identity for a user without one.
     /// </summary>
     internal async Task<MatrixClient> LoginClientAsync(string user, string? storeDirectory, string? deviceId = null,
-        bool crossSign = true, string? recoveryKey = null)
+        bool crossSign = true, string? recoveryKey = null, OptionalUpdates optionalUpdates = OptionalUpdates.All)
     {
         if (crossSign)
             recoveryKey ??= RecoveryKeys.GetValueOrDefault(user);
         var client = await MatrixClient.LoginAsync($"@{user}:localhost", Password, CancellationToken, deviceId, null,
             storeDirectory, BaseUri, CreateLogger(user, deviceId ?? "new"), recoveryKey, CreateHttpClient(),
-            (delay, token) => Task.Delay(delay, token));
+            (delay, token) => Task.Delay(delay, token), optionalUpdates);
         return await TrackAsync(user, client, crossSign);
     }
 

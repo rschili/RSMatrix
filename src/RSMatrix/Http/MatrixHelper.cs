@@ -59,10 +59,10 @@ internal static class MatrixHelper
     }
 
     /// <summary>Invalidates the access token and deletes its device.</summary>
-    internal static Task LogoutAsync(HttpClientParameters parameters)
+    internal static Task LogoutAsync(HttpClientParameters parameters, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
-        return HttpClientHelper.SendAsync(parameters, "/_matrix/client/v3/logout", HttpMethod.Post, JsonContent.Create(new { }));
+        return HttpClientHelper.SendAsync(parameters, "/_matrix/client/v3/logout", HttpMethod.Post, cancellationToken: cancellationToken);
     }
 
     internal static async Task<WhoAmIResponse> GetWhoAmIAsync(HttpClientParameters parameters)
@@ -121,19 +121,16 @@ internal static class MatrixHelper
         await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
     }
 
-    public static async Task PostReadMarkersAsync(HttpClientParameters parameters, MatrixId room, string eventId, bool sendReceipt = false)
+    public static async Task PostReadMarkersAsync(HttpClientParameters parameters, MatrixId room, string eventId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(room);
         ArgumentNullException.ThrowIfNull(eventId);
-        var request = new ReadMarkerRequest { FullyRead = eventId };
-        if(sendReceipt)
-         request.Read = eventId;
-
+        var request = new ReadMarkerRequest { FullyRead = eventId, Read = eventId };
         var content = JsonContent.Create(
             request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
         string path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(room.Full)}/read_markers";
-        await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content).ConfigureAwait(false);
+        await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Post, content, cancellationToken).ConfigureAwait(false);
     }
 
 
@@ -156,22 +153,22 @@ internal static class MatrixHelper
 
         var path = HttpParameterHelper.AppendParameters("/_matrix/client/v3/sync", parameters.GetAsParameters());
 
-        return await HttpClientHelper.SendAsync<SyncResponse>(httpClientParameters, path, HttpMethod.Get,
-            ignoreRateLimit: true).ConfigureAwait(false);
+        return await HttpClientHelper.SendAsync<SyncResponse>(httpClientParameters, path, HttpMethod.Get).ConfigureAwait(false);
     }
 
-    internal static async Task PutTypingNotificationAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MatrixId userId, uint? timeoutMS = null)
+    internal static async Task PutTypingAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MatrixId userId, bool isTyping,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(userId, nameof(userId)); // UserId is provided here, but it only makes sense to provide the current user
 
-        var typingRequest = new TypingRequest { Typing = true, Timeout = timeoutMS ?? 2000 };
+        var typingRequest = new TypingRequest { Typing = isTyping, Timeout = isTyping ? 30000 : null };
         var content = JsonContent.Create(
             typingRequest, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
         var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/typing/{Uri.EscapeDataString(userId.Full)}";
-        await HttpClientHelper.SendAsync(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+        await HttpClientHelper.SendAsync(httpClientParameters, path, HttpMethod.Put, content, cancellationToken).ConfigureAwait(false);
     }
 
     internal static async Task<EventIdResponse> PutRoomEventAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventType, JsonObject content)

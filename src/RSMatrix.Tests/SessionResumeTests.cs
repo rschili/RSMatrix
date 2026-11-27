@@ -385,7 +385,7 @@ public class SessionResumeTests
             await client.Updates.Completion.WaitAsync(timeout.Token);
             // Reading to the end shows that the channel completed.
             await foreach (var unused in client.Updates.ReadAllAsync(timeout.Token)) { }
-            await Assert.That(client.IsSyncing).IsFalse();
+            await Assert.That(client.IsOnline).IsFalse();
             await client.DisposeAsync();
 
             RoomId.TryParse("!room:example.org", out var roomId);
@@ -393,6 +393,56 @@ public class SessionResumeTests
 
             using var store = SessionStore.Open(directory, User);
             await Assert.That(store.Session!.SyncToken).IsEqualTo("batch-1");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task Logout_LogsOutDevice_DeletesStore_AndCompletesUpdates()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var server = new FakeServer { HangOnSync = 2 };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var client = await LoginAsync(server, directory);
+            await server.SyncHanging.Task.WaitAsync(timeout.Token);
+
+            await client.LogoutAsync().WaitAsync(timeout.Token);
+
+            await Assert.That(server.LoggedOutTokens).IsEquivalentTo(["token-1"]);
+            await client.Updates.Completion.WaitAsync(timeout.Token);
+            await Assert.That(client.IsOnline).IsFalse();
+            await Assert.That(MatrixClient.GetStoredSession(directory, User)).IsNull();
+            await Assert.That(Directory.EnumerateFiles(directory, "encryption.json", SearchOption.AllDirectories).Any()).IsFalse();
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => client.LogoutAsync());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task Logout_WhenServerFails_Throws_AndKeepsRunning()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var server = new FakeServer { HangOnSync = 2, FailLogout = true };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var client = await LoginAsync(server, directory);
+            await server.SyncHanging.Task.WaitAsync(timeout.Token);
+
+            await Assert.ThrowsAsync<MatrixResponseException>(() => client.LogoutAsync());
+
+            await Assert.That(client.Updates.Completion.IsCompleted).IsFalse();
+            await Assert.That(client.IsOnline).IsTrue();
+            await client.DisposeAsync();
+            await Assert.That(MatrixClient.GetStoredSession(directory, User)).IsNotNull();
         }
         finally
         {

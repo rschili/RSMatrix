@@ -8,9 +8,6 @@ public enum ClientIssueKind
     /// <summary>A device in the room did not receive the key for our encrypted messages and cannot read them.</summary>
     RoomKeyNotShared,
 
-    /// <summary>A sync request failed and the client keeps retrying. Reported once per interruption.</summary>
-    SyncInterrupted,
-
     /// <summary>
     /// The account has a cross-signing identity, but this device is not signed by it, for example because no recovery key
     /// was given. Clients that follow the spec won't share keys with it. See <see cref="MatrixClient.EncryptionState"/>.
