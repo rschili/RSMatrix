@@ -49,13 +49,13 @@ public class SyncHandlerTests
         await ProcessSyncAndCollectMessagesAsync("sync_room_state.json");
 
         var room = _client.GetOrAddRoom(ParseRoomId("!room1:example.org"));
-        await Assert.That(room.DisplayName).IsEqualTo("Test Room");
+        await Assert.That(room.Name).IsEqualTo("Test Room");
         await Assert.That(room.CanonicalAlias!.Full).IsEqualTo("#test:example.org");
         await Assert.That(room.AltAliases!.Single().Full).IsEqualTo("#test2:example.org");
         await Assert.That(room.Users.Count).IsEqualTo(2);
-        await Assert.That(room.Users["@alice:example.org"].DisplayName).IsEqualTo("Alice Wonderland");
+        await Assert.That(room.Users["@alice:example.org"].RoomName).IsEqualTo("Alice Wonderland");
         await Assert.That(room.Users["@alice:example.org"].Membership).IsEqualTo(Membership.Join);
-        await Assert.That(room.Users["@bob:example.org"].DisplayName).IsEqualTo("Bob Builder");
+        await Assert.That(room.Users["@bob:example.org"].RoomName).IsEqualTo("Bob Builder");
     }
 
     [Test]
@@ -67,7 +67,7 @@ public class SyncHandlerTests
         await Assert.That(alice.Presence).IsEqualTo(Presence.Online);
         await Assert.That(alice.CurrentlyActive).IsTrue();
         await Assert.That(alice.StatusMessage).IsEqualTo("Working on tests");
-        await Assert.That(alice.DisplayName).IsEqualTo("Alice Online");
+        await Assert.That(alice.ProfileName).IsEqualTo("Alice Online");
         await Assert.That(alice.AvatarUrl).IsEqualTo("mxc://example.org/alice");
         var bob = _client.GetOrAddUser(ParseUserId("@bob:example.org"));
         await Assert.That(bob.Presence).IsEqualTo(Presence.Unavailable);
@@ -99,8 +99,8 @@ public class SyncHandlerTests
 
         await Assert.That(messages.Count(m => m.Room.RoomId.Full == "!room1:example.org")).IsEqualTo(1);
         await Assert.That(messages.Count(m => m.Room.RoomId.Full == "!room2:example.org")).IsEqualTo(2);
-        await Assert.That(_client.GetOrAddRoom(ParseRoomId("!room1:example.org")).DisplayName).IsEqualTo("Room Alpha");
-        await Assert.That(_client.GetOrAddRoom(ParseRoomId("!room2:example.org")).DisplayName).IsEqualTo("Room Beta");
+        await Assert.That(_client.GetOrAddRoom(ParseRoomId("!room1:example.org")).Name).IsEqualTo("Room Alpha");
+        await Assert.That(_client.GetOrAddRoom(ParseRoomId("!room2:example.org")).Name).IsEqualTo("Room Beta");
     }
 
     [Test]

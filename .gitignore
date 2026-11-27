@@ -398,6 +398,7 @@ FodyWeavers.xsd
 *.sln.iml
 .env
 temp/
+plans/
 
 # AI instructions
 AGENTS.md

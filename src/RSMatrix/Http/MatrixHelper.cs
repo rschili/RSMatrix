@@ -229,6 +229,17 @@ internal static class MatrixHelper
         return await HttpClientHelper.SendAsync<RoomMessagesResponse>(httpClientParameters, path, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>The room's members, without the ones who left.</summary>
+    internal static async Task<RoomMembersResponse> GetMembersAsync(HttpClientParameters httpClientParameters, MatrixId roomId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/members?not_membership=leave";
+        return await HttpClientHelper.SendAsync<RoomMembersResponse>(httpClientParameters, path, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
     internal static async Task<EventContextResponse> GetEventContextAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string eventId, int limit,
         CancellationToken cancellationToken = default)
     {

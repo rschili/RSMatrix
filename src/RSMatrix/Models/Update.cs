@@ -1,7 +1,7 @@
 namespace RSMatrix.Models;
 
 /// <summary>Everything the client receives, as one of a few small records.</summary>
-public union Update(NewMessage, MessageChanged, ClientIssue);
+public union Update(NewMessage, MessageChanged, RoomChanged, ClientIssue);
 
 public sealed record NewMessage(Message Message);
 
@@ -23,4 +23,26 @@ public enum MessageChange
     Reactions,
     /// <summary>A thread reply to this message was added, edited or deleted.</summary>
     Thread,
+}
+
+/// <summary>
+/// Something changed on a room the client is in. <see cref="Room"/> already holds the new values. The first sync of a
+/// session fills in all rooms without reporting changes; <see cref="MatrixClient.Rooms"/> lists them.
+/// </summary>
+/// <param name="Change">What changed. Most consumers redraw the room and don't need it.</param>
+public sealed record RoomChanged(Room Room, RoomChange Change);
+
+public enum RoomChange
+{
+    /// <summary>The result of <see cref="Room.DisplayName"/> changed.</summary>
+    Name,
+    Topic,
+    Avatar,
+    /// <summary>
+    /// Someone joined, left, was invited or changed their name or avatar in the room. Also comes when the current
+    /// user joined or left the room, see <see cref="Room.IsJoined"/>.
+    /// </summary>
+    Members,
+    /// <summary>The room was encrypted.</summary>
+    Encryption,
 }

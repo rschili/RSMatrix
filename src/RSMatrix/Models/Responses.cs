@@ -290,6 +290,12 @@ internal class RelationsResponse
     public string? PrevBatch { get; set; }
 }
 
+internal class RoomMembersResponse
+{
+    [JsonPropertyName("chunk")]
+    public List<RoomEvent>? Chunk { get; set; }
+}
+
 internal class EventContextResponse
 {
     /// <summary>A token to page backwards from the event with /messages.</summary>

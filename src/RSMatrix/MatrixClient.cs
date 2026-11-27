@@ -57,13 +57,22 @@ public sealed class MatrixClient : IAsyncDisposable
     private ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
 
     private ConcurrentDictionary<string, User> _users = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The rooms the current user is in. Filled by the first sync, which loads no further data per room. Changes
+    /// come as <see cref="RoomChanged"/>.
+    /// </summary>
+    public IReadOnlyList<Room> Rooms => _rooms.Values.Where(room => room.IsJoined).ToList();
+
+    /// <summary>Whether the first sync of this session was handled. It fills in the rooms without reporting changes.</summary>
+    private bool _hasSynced;
     private readonly Channel<Update> _updates = Channel.CreateUnbounded<Update>();
 
     /// <summary>Limits how many messages load their reactions from the server at once.</summary>
     internal SemaphoreSlim ReactionRequests { get; } = new(4, 4);
 
     /// <summary>
-    /// Everything the client receives: new messages, edits, deletions, reactions, and problems the client keeps
+    /// Everything the client receives: new messages, edits, deletions, reactions, room changes, and problems the client keeps
     /// running through, like messages it could not decrypt. Read it continuously; the channel is unbounded and the sync
     /// never waits for the reader. It completes when the client is disposed and throws the error that ended the
     /// session, like <see cref="SessionEndedException"/> or <see cref="PasswordRequiredException"/>.
@@ -592,7 +601,7 @@ public sealed class MatrixClient : IAsyncDisposable
                 },
                 State = new()
                 {
-                    NotTypes = new() { "m.room.join_rules", "m.room.guest_access", "m.room.avatar", "m.room.history_visibility", "m.room.power_levels", "im.vector.modular.widgets" },
+                    NotTypes = new() { "m.room.join_rules", "m.room.guest_access", "m.room.history_visibility", "m.room.power_levels", "im.vector.modular.widgets" },
                     LazyLoadMembers = true
                 },
                 AccountData = new()
@@ -729,16 +738,47 @@ public sealed class MatrixClient : IAsyncDisposable
                 }
 
                 var roomEvents = pair.Value;
+                var room = GetOrAddRoom(roomId);
+                var before = RoomSnapshot.Of(room);
+                var membersChanged = false;
+                List<Update> messageUpdates = [];
                 if (roomEvents.Summary != null)
-                    HandleRoomSummaryReceived(roomId, roomEvents.Summary);
+                    membersChanged |= HandleRoomSummaryReceived(room, roomEvents.Summary);
                 if (roomEvents.AccountData?.Events is { } roomAccountData)
                     HandleAccountDataReceived(roomId, roomAccountData);
                 if (roomEvents.Ephemeral?.Events is { } ephemeral)
                     HandleEphemeralReceived(roomId, ephemeral);
                 if (roomEvents.State?.Events is { } state)
-                    HandleStateReceived(roomId, state);
+                    membersChanged |= HandleStateReceived(roomId, state, fromTimeline: false);
                 if (roomEvents.Timeline != null)
-                    HandleTimelineReceived(roomId, roomEvents.Timeline, updates);
+                    membersChanged |= HandleTimelineReceived(roomId, roomEvents.Timeline, messageUpdates);
+                var newlyJoined = !room.IsJoined;
+                if (newlyJoined)
+                {
+                    lock (room)
+                        room.IsJoined = true;
+                }
+                // The first sync fills in every room, and a room we just joined is new as a whole. Reporting each
+                // detail of that as a change would only be noise.
+                if (_hasSynced && newlyJoined)
+                    updates.Add(new RoomChanged(room, RoomChange.Members));
+                else if (_hasSynced)
+                    AddRoomChanges(room, before, membersChanged, updates);
+                updates.AddRange(messageUpdates);
+            }
+        }
+
+        if (response.Rooms?.Leaves is { } leaves)
+        {
+            foreach (var roomIdString in leaves.Keys)
+            {
+                // Leaving also covers invites that were declined or withdrawn. Those rooms were never joined.
+                if (!_rooms.TryGetValue(roomIdString, out var room) || !room.IsJoined)
+                    continue;
+                lock (room)
+                    room.IsJoined = false;
+                if (_hasSynced)
+                    updates.Add(new RoomChanged(room, RoomChange.Members));
             }
         }
 
@@ -754,6 +794,7 @@ public sealed class MatrixClient : IAsyncDisposable
         // unexpected processing errors must propagate, not advance the sync token.
         foreach (var update in updates)
             await _updates.Writer.WriteAsync(update, cancellationToken).ConfigureAwait(false);
+        _hasSynced = true;
 
         // Optional HTTP side effects cannot discard updates already collected.
         if (response.Rooms?.Invites is { } invites)
@@ -765,30 +806,50 @@ public sealed class MatrixClient : IAsyncDisposable
             }
         }
 
-        if (response.Rooms?.Leaves is { Count: > 0 } leaves)
-            Diagnostics.ReportUnhandled(Logger, UnhandledKind.SyncSection, "rooms.leave", leaves.First().Value);
         if (response.Rooms?.Knocks is { Count: > 0 } knocks)
             Diagnostics.ReportUnhandled(Logger, UnhandledKind.SyncSection, "rooms.knock", knocks.First().Value);
     }
 
-    private void HandleRoomSummaryReceived(MatrixId roomId, RoomSummary? summary)
+    /// <summary>Takes the fields the server sent; it leaves out the ones that didn't change. Returns whether the member counts changed.</summary>
+    private static bool HandleRoomSummaryReceived(Room room, RoomSummary summary)
     {
-        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
-        ArgumentNullException.ThrowIfNull(summary, nameof(summary));
-
-        var users = summary?.Heroes?.Select(s => UserId.TryParse(s, out MatrixId? userId) ? userId : null)
-            ?.Where(id => id != null)?.Select(id => id!)
-            ?.Select(GetOrAddUser)?.ToList();
-
-        var room = GetOrAddRoom(roomId);
-
-        if(users == null || users.Count == 0)
-            return;
-
-        foreach (var user in users)
+        lock (room)
         {
-            var roomUser = GetOrAddUser(user, room);
+            var countsChanged = false;
+            if (summary.Heroes is { } heroes)
+                room.Heroes = [.. heroes.Where(id => UserId.TryParse(id, out _))];
+            if (summary.JoinedMemberCount is { } joined && joined != room.JoinedMemberCount)
+            {
+                room.JoinedMemberCount = joined;
+                countsChanged = true;
+            }
+            if (summary.InvitedMemberCount is { } invited && invited != room.InvitedMemberCount)
+            {
+                room.InvitedMemberCount = invited;
+                countsChanged = true;
+            }
+            return countsChanged;
         }
+    }
+
+    private static void AddRoomChanges(Room room, RoomSnapshot before, bool membersChanged, List<Update> updates)
+    {
+        var after = RoomSnapshot.Of(room);
+        if (after.DisplayName != before.DisplayName)
+            updates.Add(new RoomChanged(room, RoomChange.Name));
+        if (after.Topic != before.Topic)
+            updates.Add(new RoomChanged(room, RoomChange.Topic));
+        if (after.AvatarUrl != before.AvatarUrl)
+            updates.Add(new RoomChanged(room, RoomChange.Avatar));
+        if (membersChanged)
+            updates.Add(new RoomChanged(room, RoomChange.Members));
+        if (after.IsEncrypted != before.IsEncrypted)
+            updates.Add(new RoomChanged(room, RoomChange.Encryption));
+    }
+
+    private sealed record RoomSnapshot(string DisplayName, string? Topic, string? AvatarUrl, bool IsEncrypted)
+    {
+        public static RoomSnapshot Of(Room room) => new(room.DisplayName, room.Topic, room.AvatarUrl, room.IsEncrypted);
     }
 
     private void HandlePresenceReceived(List<BasicEvent> events)
@@ -846,7 +907,7 @@ public sealed class MatrixClient : IAsyncDisposable
                     user.AvatarUrl = parsedPresence.AvatarUrl;
 
                 if(parsedPresence.DisplayName != null)
-                    user.DisplayName = parsedPresence.DisplayName;
+                    user.ProfileName = parsedPresence.DisplayName;
 
                 if(parsedPresence.CurrentlyActive != null)
                     user.CurrentlyActive = parsedPresence.CurrentlyActive;
@@ -869,11 +930,17 @@ public sealed class MatrixClient : IAsyncDisposable
     }
 
     
-    private void HandleStateReceived(MatrixId roomId, List<RoomEvent> events)
+    /// <summary>Returns whether the room's members changed.</summary>
+    /// <param name="fromTimeline">
+    /// Whether the events come from the timeline, where each one is a change. The state section also brings members
+    /// the client just didn't know yet.
+    /// </param>
+    private bool HandleStateReceived(MatrixId roomId, List<RoomEvent> events, bool fromTimeline)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         ArgumentNullException.ThrowIfNull(events, nameof(events));
         var room = GetOrAddRoom(roomId);
+        var membersChanged = false;
 
         foreach (var e in events)
         {
@@ -899,7 +966,7 @@ public sealed class MatrixClient : IAsyncDisposable
 
             try
             {
-                ApplyStateEvent(room, e);
+                membersChanged |= ApplyStateEvent(room, e, fromTimeline);
             }
             catch (JsonException ex)
             {
@@ -907,30 +974,32 @@ public sealed class MatrixClient : IAsyncDisposable
                 Logger.LogWarning(ex, "Could not interpret state event {Type} in room {RoomId}.", e.Type, roomId.Full);
             }
         }
+        return membersChanged;
     }
 
-    private void ApplyStateEvent(Room room, RoomEvent e)
+    /// <summary>Returns whether the room's members changed.</summary>
+    private bool ApplyStateEvent(Room room, RoomEvent e, bool fromTimeline)
     {
-        var roomId = room.RoomId;
         switch (e.Type)
         {
             case "m.room.member":
-                HandleRoomMemberEvent(room, e);
-                break;
-            case "m.room.name":
-                var nameEvent = ParseContent<RoomNameContent>(e.Content!.Value);
-                if (nameEvent == null)
-                {
-                    Logger.LogWarning("Received m.room.name event deserialize returned null in room {RoomId}.", roomId.Full);
-                    break;
-                }
-
+                return HandleRoomMemberEvent(room, e, fromTimeline);
+            case "m.room.name" when e.StateKey == "":
+                var name = ParseContent<RoomNameContent>(e.Content!.Value)?.Name;
                 lock (room)
-                {
-                    room.DisplayName = nameEvent.Name;
-                }
+                    room.Name = string.IsNullOrWhiteSpace(name) ? null : name;
                 break;
-            case "m.room.canonical_alias":
+            case "m.room.topic" when e.StateKey == "":
+                var topic = ParseContent<RoomTopicContent>(e.Content!.Value)?.Topic;
+                lock (room)
+                    room.Topic = string.IsNullOrWhiteSpace(topic) ? null : topic;
+                break;
+            case "m.room.avatar" when e.StateKey == "":
+                var url = ParseContent<RoomAvatarContent>(e.Content!.Value)?.Url;
+                lock (room)
+                    room.AvatarUrl = string.IsNullOrWhiteSpace(url) ? null : url;
+                break;
+            case "m.room.canonical_alias" when e.StateKey == "":
                 var parsed = ParseContent<CanonicalAliasContent>(e.Content!.Value);
                 RoomAlias.TryParse(parsed?.Alias, out MatrixId? alias);
                 var altAliases = parsed?.AltAliases?.Select(a => RoomAlias.TryParse(a, out MatrixId? id) ? id : null).Where(id => id != null).Select(id => id!).ToList();
@@ -950,31 +1019,37 @@ public sealed class MatrixClient : IAsyncDisposable
                 Diagnostics.ReportUnhandled(Logger, UnhandledKind.StateEvent, e.Type, e);
                 break;
         }
+        return false;
     }
 
-    private void HandleRoomMemberEvent(Room room, RoomEvent e)
+    /// <summary>Returns whether this changed the room's members, see <see cref="HandleStateReceived"/>.</summary>
+    private bool HandleRoomMemberEvent(Room room, RoomEvent e, bool fromTimeline)
     {
         var roomMember = ParseContent<RoomMemberContent>((JsonElement)e.Content!);
         if (roomMember == null || !Enum.IsDefined(roomMember.Membership))
         {
             Logger.LogWarning("Received invalid m.room.member content in room {RoomId}.", room.RoomId.Full);
-            return;
+            return false;
         }
         var userIdStr = e.StateKey ?? e.Sender;
         if (!UserId.TryParse(userIdStr, out MatrixId? userId) || userId == null)
         {
             Logger.LogWarning("Received m.room.member event with invalid user ID: {UserId} in room {RoomId}.", userIdStr, room.RoomId.Full);
-            return;
+            return false;
         }
+        var wasKnown = room.Users.TryGetValue(userId.Full, out var known) && known.Membership != null;
         var user = GetOrAddUser(userId);
         RoomUser? roomUser = GetOrAddUser(user, room);
         Encryption?.OnMembershipChanged(room.RoomId.Full, roomMember.Membership);
 
-        if (roomUser.DisplayName != roomMember.DisplayName || roomUser.Membership != roomMember.Membership)
+        var changed = roomUser.RoomName != roomMember.DisplayName || roomUser.AvatarUrl != roomMember.AvatarUrl ||
+            roomUser.Membership != roomMember.Membership;
+        if (changed)
         {
             lock (roomUser)
             {
-                roomUser.DisplayName = roomMember.DisplayName;
+                roomUser.RoomName = roomMember.DisplayName;
+                roomUser.AvatarUrl = roomMember.AvatarUrl;
                 roomUser.Membership = roomMember.Membership;
             }
         }
@@ -984,6 +1059,42 @@ public sealed class MatrixClient : IAsyncDisposable
             lock (room)
             {
                 room.IsDirect = true;
+            }
+        }
+        return fromTimeline || (wasKnown && changed);
+    }
+
+    /// <summary>
+    /// Adds members loaded with <see cref="Room.GetMembersAsync"/>. Members the client already knows stay as they are:
+    /// the sync keeps them current, and the loaded list may be older.
+    /// </summary>
+    internal void AddLoadedMembers(Room room, List<RoomEvent> events)
+    {
+        foreach (var e in events)
+        {
+            if (e?.Type != "m.room.member" || e.StateKey == null || e.Content is not { ValueKind: JsonValueKind.Object } content ||
+                !UserId.TryParse(e.StateKey, out MatrixId? userId) || userId == null)
+                continue;
+            if (room.Users.TryGetValue(userId.Full, out var known) && known.Membership != null)
+                continue;
+            RoomMemberContent? member;
+            try
+            {
+                member = ParseContent<RoomMemberContent>(content);
+            }
+            catch (JsonException ex)
+            {
+                Logger.LogWarning(ex, "Could not interpret loaded member {UserId} in room {RoomId}.", userId.Full, room.RoomId.Full);
+                continue;
+            }
+            if (member == null || !Enum.IsDefined(member.Membership))
+                continue;
+            var roomUser = GetOrAddUser(GetOrAddUser(userId), room);
+            lock (roomUser)
+            {
+                roomUser.RoomName = member.DisplayName;
+                roomUser.AvatarUrl = member.AvatarUrl;
+                roomUser.Membership = member.Membership;
             }
         }
     }
@@ -1075,10 +1186,12 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private void HandleTimelineReceived(MatrixId roomId, SyncTimeline timeline, List<Update> updates)
+    /// <summary>Returns whether the room's members changed.</summary>
+    private bool HandleTimelineReceived(MatrixId roomId, SyncTimeline timeline, List<Update> updates)
     {
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
         var room = GetOrAddRoom(roomId);
+        var membersChanged = false;
 
         lock (room.TimelineLock)
         {
@@ -1100,7 +1213,7 @@ public sealed class MatrixClient : IAsyncDisposable
                     // The presence of state_key (including "") identifies state, not
                     // a hardcoded list of event types. State precedes message dispatch.
                     if (e.StateKey != null)
-                        HandleStateReceived(roomId, [e]);
+                        membersChanged |= HandleStateReceived(roomId, [e], fromTimeline: true);
                     else if (!cache.Contains(e.EventId) && ReadEntry(room, e, live: true) is { } entry)
                         AddLiveEntry(room, entry, updates);
                 }
@@ -1114,6 +1227,7 @@ public sealed class MatrixClient : IAsyncDisposable
                 cache.OlderToken = timeline.PrevBatch;
             cache.Trim();
         }
+        return membersChanged;
     }
 
     /// <summary>Adds an event from the sync to the room's cache and reports what it changed.</summary>

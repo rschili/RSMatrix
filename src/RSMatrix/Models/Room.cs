@@ -33,11 +33,30 @@ public class Room
     public ImmutableDictionary<(string Type, string StateKey), RoomStateEvent> StateEvents { get; internal set; }
         = ImmutableDictionary<(string Type, string StateKey), RoomStateEvent>.Empty;
 
-    // ConcurrentDictionary is expensive, we only use it for the global things. Inside the room we use ImmutableDictionary instead as there is less data and less movement
+    /// <summary>
+    /// The room members the client knows. The sync only delivers members who show up in the timeline, so this is
+    /// incomplete until <see cref="GetMembersAsync"/> loaded the full list.
+    /// </summary>
     public ImmutableDictionary<string, RoomUser> Users { get; internal set; } = ImmutableDictionary<string, RoomUser>.Empty.WithComparers(StringComparer.Ordinal);
-    public string? DisplayName { get; internal set; }
+
+    /// <summary>The name set for the room, or null. <see cref="DisplayName"/> also covers rooms without one.</summary>
+    public string? Name { get; internal set; }
+    public string? Topic { get; internal set; }
+    /// <summary>The room's avatar as an mxc:// URI.</summary>
+    public string? AvatarUrl { get; internal set; }
     public MatrixId? CanonicalAlias { get; internal set; }
     public List<MatrixId>? AltAliases { get; internal set; }
+
+    public int JoinedMemberCount { get; internal set; }
+    public int InvitedMemberCount { get; internal set; }
+
+    /// <summary>User IDs the server picked to name a room without a name, never the current user.</summary>
+    internal ImmutableArray<string> Heroes { get; set; } = [];
+
+    /// <summary>Whether the current user is in the room. False after leaving, being kicked or banned.</summary>
+    public bool IsJoined { get; internal set; }
+
+    private bool _allMembersLoaded;
 
     internal TimelineCache Cache { get; }
 
@@ -470,10 +489,52 @@ public class Room
         return response.EventId ?? "";
     }
 
-    public override string ToString()
+    /// <summary>
+    /// The joined and invited members. The first call loads the full list from the server, later calls return
+    /// <see cref="Users"/>, which the sync keeps up to date.
+    /// </summary>
+    public async Task<IReadOnlyList<RoomUser>> GetMembersAsync(CancellationToken cancellationToken = default)
     {
-        return DisplayName ?? RoomId.Localpart.ToString();
+        if (!_allMembersLoaded)
+        {
+            var response = await MatrixHelper.GetMembersAsync(Client.HttpClientParameters, RoomId, cancellationToken).ConfigureAwait(false);
+            Client.AddLoadedMembers(this, response.Chunk ?? []);
+            _allMembersLoaded = true;
+        }
+        return Users.Values.Where(u => u.Membership is Membership.Join or Membership.Invite).ToList();
     }
+
+    /// <summary>
+    /// The name to show for the room, following the spec: its name, its alias, or the names of a few members.
+    /// Composed names are in English, like "Alice, Bob and 3 others".
+    /// </summary>
+    public string DisplayName => ComposeDisplayName();
+
+    private string ComposeDisplayName()
+    {
+        if (!string.IsNullOrWhiteSpace(Name))
+            return Name;
+        if (CanonicalAlias != null)
+            return CanonicalAlias.Full;
+
+        var users = Users;
+        var names = Heroes.Select(id => users.TryGetValue(id, out var user) ? user.DisplayName : id).ToList();
+        var memberCount = JoinedMemberCount + InvitedMemberCount;
+        if (memberCount <= 1)
+            return names.Count == 0 ? "Empty room" : $"Empty room (was {JoinNames(names, 0)})";
+        if (names.Count == 0)
+            return RoomId.Full;
+        return JoinNames(names, memberCount - 1 - names.Count);
+    }
+
+    private static string JoinNames(List<string> names, int others)
+    {
+        if (others > 0)
+            return $"{string.Join(", ", names)} and {others} {(others == 1 ? "other" : "others")}";
+        return names.Count == 1 ? names[0] : $"{string.Join(", ", names[..^1])} and {names[^1]}";
+    }
+
+    public override string ToString() => DisplayName;
 }
 
 public class RoomUser
@@ -484,21 +545,17 @@ public class RoomUser
     }
 
     public User User { get; }
-    public string? DisplayName { get; internal set; }
+    /// <summary>The name the user set for this room, or null.</summary>
+    public string? RoomName { get; internal set; }
+
+    /// <summary>The name to show: the name in this room, or else the user's <see cref="User.DisplayName"/>.</summary>
+    public string DisplayName => RoomName ?? User.DisplayName;
+
+    /// <summary>The user's avatar in this room as an mxc:// URI.</summary>
+    public string? AvatarUrl { get; internal set; }
     public Membership? Membership { get; internal set; }
 
-    /// <summary>
-    /// RoomUser and User may have display names. This takes care of choosing the right one
-    /// </summary>
-    public string GetDisplayName()
-    {
-        return DisplayName ?? User.DisplayName ?? User.UserId.Localpart.ToString();
-    }
-
-    public override string ToString()
-    {
-        return GetDisplayName();
-    }
+    public override string ToString() => DisplayName;
 }
 
 public class RoomEncryption

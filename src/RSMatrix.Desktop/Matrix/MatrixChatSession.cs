@@ -120,15 +120,12 @@ public sealed class MatrixChatSession : IChatSession
         return message == null ? null : ToChatReactions(await message.GetReactionsAsync(cancellationToken).ConfigureAwait(false));
     }
 
-    // The sync lazy-loads members and RSMatrix has no public call for the full list,
-    // so this only knows the members that showed up in the room's state and timeline.
-    public Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken)
     {
-        IReadOnlyList<ChatMember> members = GetRoom(roomId).Users.Values
-            .Where(u => u.Membership is null or Membership.Join or Membership.Invite)
-            .Select(u => new ChatMember(new ChatUser(u.User.UserId.Full, u.GetDisplayName()), u.Membership == Membership.Invite))
+        var members = await GetRoom(roomId).GetMembersAsync(cancellationToken).ConfigureAwait(false);
+        return members
+            .Select(u => new ChatMember(new ChatUser(u.User.UserId.Full, u.DisplayName), u.Membership == Membership.Invite))
             .ToList();
-        return Task.FromResult(members);
     }
 
     // RSMatrix can't download media yet.
@@ -235,31 +232,7 @@ public sealed class MatrixChatSession : IChatSession
     }
 
     private ChatRoomInfo ToRoomInfo(Room room)
-        => new(room.RoomId.Full, GetRoomName(room), room.IsEncrypted, room.IsDirect);
-
-    /// <summary>
-    /// Room name following the spec's order: name, canonical alias, then members.
-    /// RSMatrix doesn't expose the member counts from the room summary, so the member variant is approximate.
-    /// </summary>
-    private string GetRoomName(Room room)
-    {
-        if (!string.IsNullOrWhiteSpace(room.DisplayName))
-            return room.DisplayName;
-        if (room.CanonicalAlias != null)
-            return room.CanonicalAlias.Full;
-
-        var others = room.Users.Values
-            .Where(u => u.User.UserId.Full != CurrentUser.UserId && u.Membership is null or Membership.Join or Membership.Invite)
-            .Select(u => u.GetDisplayName())
-            .Order(StringComparer.CurrentCulture)
-            .ToList();
-        return others.Count switch
-        {
-            0 => "Empty room",
-            <= 3 => string.Join(", ", others),
-            _ => $"{string.Join(", ", others.Take(3))} and {others.Count - 3} others",
-        };
-    }
+        => new(room.RoomId.Full, room.DisplayName, room.IsEncrypted, room.IsDirect);
 
     private static ChatMessage ToChatMessage(Message message)
     {
@@ -274,5 +247,5 @@ public sealed class MatrixChatSession : IChatSession
         => reactions.Select(r => new ChatReaction(r.Key, r.Users.Select(ToChatUser).ToList())).ToList();
 
     private static ChatUser ToChatUser(RoomUser user)
-        => new(user.User.UserId.Full, user.GetDisplayName());
+        => new(user.User.UserId.Full, user.DisplayName);
 }

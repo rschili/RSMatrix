@@ -109,7 +109,7 @@ public class StateEventTests
             Event("m.room.message", null, "{}"),
             Event("m.room.message", null, """{"msgtype":"m.text","body":"hello"}""")
         ]));
-        await Assert.That(RoomFor(client).DisplayName).IsEqualTo("Valid name");
+        await Assert.That(RoomFor(client).Name).IsEqualTo("Valid name");
         await Assert.That(client.Updates.TryRead(out var update)).IsTrue();
         await Assert.That(update!.Value is NewMessage).IsTrue();
         var message = ((NewMessage)update.Value).Message;

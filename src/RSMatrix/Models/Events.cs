@@ -68,7 +68,26 @@ internal class CanonicalAliasContent
 internal class RoomNameContent
 {
     [JsonPropertyName("name")]
-    public required string Name { get; set; }
+    public string? Name { get; set; }
+}
+
+internal class RoomTopicContent
+{
+    [JsonPropertyName("topic")]
+    public string? Topic { get; set; }
+
+    /// <summary>The topic in several formats. We use the plain <see cref="Topic"/>.</summary>
+    [JsonPropertyName("m.topic")]
+    public JsonElement? RichTopic { get; set; }
+}
+
+internal class RoomAvatarContent
+{
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("info")]
+    public JsonElement? Info { get; set; }
 }
 
 public enum Presence

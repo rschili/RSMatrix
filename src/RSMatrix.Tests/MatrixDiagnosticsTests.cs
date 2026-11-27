@@ -88,8 +88,8 @@ public class MatrixDiagnosticsTests
            "content":{"msgtype":"org.example.custom","body":"custom"}},
           {"type":"m.room.message","sender":"@alice:example.org","event_id":"$r","origin_server_ts":1700000000000,
            "content":{"msgtype":"m.text","body":"see above","m.relates_to":{"rel_type":"m.reference","event_id":"$i"}}},
-          {"type":"m.room.topic","state_key":"","sender":"@alice:example.org","event_id":"$t","origin_server_ts":1700000000000,
-           "content":{"topic":"Cats"}}]}}},
+          {"type":"m.room.server_acl","state_key":"","sender":"@alice:example.org","event_id":"$t","origin_server_ts":1700000000000,
+           "content":{"allow":["*"]}}]}}},
           "leave":{"!old:example.org":{}}}}
         """);
 
@@ -100,8 +100,7 @@ public class MatrixDiagnosticsTests
             "Unhandled Field: RoomMessageContent.url",
             "Unhandled MsgType: org.example.custom",
             "Unhandled Relation: m.reference",
-            "Unhandled StateEvent: m.room.topic",
-            "Unhandled SyncSection: rooms.leave",
+            "Unhandled StateEvent: m.room.server_acl",
         ]);
     }
 
