@@ -30,8 +30,6 @@ public sealed class MatrixChatSession : IChatSession
     private readonly Channel<ChatEvent> _events = Channel.CreateUnbounded<ChatEvent>(new() { SingleReader = true });
     private readonly Task _pumps;
 
-    // RSMatrix has no public room list yet, so rooms are learned from the messages they deliver.
-    // Joined rooms without a text message in the initial sync don't show up until someone writes.
     private readonly ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
     // RSMatrix doesn't deliver reactions, so only the ones sent here are known, and only they can be taken back.
     private readonly ConcurrentDictionary<(string RoomId, string TargetEventId, string Key), string> _sentReactionIds = new();
@@ -43,6 +41,8 @@ public sealed class MatrixChatSession : IChatSession
         _logger = logger;
         CurrentUser = new ChatUser(client.CurrentUser.Full, client.CurrentUser.Localpart.ToString());
         ServerName = client.CurrentUser.Domain.ToString();
+        foreach (var room in client.Rooms)
+            AddRoom(room);
         _pumps = Task.WhenAll(ForwardUpdatesAsync(), PollConnectionStateAsync());
     }
 
@@ -160,7 +160,6 @@ public sealed class MatrixChatSession : IChatSession
                 switch (update.Value)
                 {
                     case NewMessage { Message: var message }:
-                        _rooms.TryAdd(message.Room.RoomId.Full, message.Room);
                         _events.Writer.TryWrite(new MessageReceived(ToRoomInfo(message.Room), ToChatMessage(message)));
                         break;
                     case ClientIssue issue:
@@ -179,6 +178,16 @@ public sealed class MatrixChatSession : IChatSession
                         break;
                     case MessageChanged:
                         // The app does not show edits, deletions or thread changes yet.
+                        break;
+                    case RoomChanged { Room: var room } when !room.IsJoined:
+                        if (_rooms.TryRemove(room.RoomId.Full, out _))
+                            _events.Writer.TryWrite(new RoomLeft(room.RoomId.Full));
+                        break;
+                    case RoomChanged { Room: var room } when !_rooms.ContainsKey(room.RoomId.Full):
+                        AddRoom(room);
+                        break;
+                    case RoomChanged { Room: var room }:
+                        _events.Writer.TryWrite(new RoomUpdated(ToRoomInfo(room)));
                         break;
                 }
             }
@@ -231,7 +240,14 @@ public sealed class MatrixChatSession : IChatSession
         return ConnectionState.Online;
     }
 
-    private ChatRoomInfo ToRoomInfo(Room room)
+    private void AddRoom(Room room)
+    {
+        _rooms[room.RoomId.Full] = room;
+        var latest = room.LatestMessage is { IsDeleted: false } message ? ToChatMessage(message) : null;
+        _events.Writer.TryWrite(new RoomJoined(ToRoomInfo(room), latest));
+    }
+
+    private static ChatRoomInfo ToRoomInfo(Room room)
         => new(room.RoomId.Full, room.DisplayName, room.IsEncrypted, room.IsDirect);
 
     private static ChatMessage ToChatMessage(Message message)

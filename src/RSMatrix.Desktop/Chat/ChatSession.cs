@@ -90,6 +90,15 @@ public enum ConnectionState
 
 public abstract record ChatEvent;
 
+/// <summary>The user is in this room: at the start of the session, or after joining.</summary>
+/// <param name="LatestMessage">The room's newest message, for the room list, or null when the session holds none.</param>
+public sealed record RoomJoined(ChatRoomInfo Room, ChatMessage? LatestMessage) : ChatEvent;
+
+public sealed record RoomUpdated(ChatRoomInfo Room) : ChatEvent;
+
+/// <summary>The user left the room, or was kicked or banned.</summary>
+public sealed record RoomLeft(string RoomId) : ChatEvent;
+
 public sealed record MessageReceived(ChatRoomInfo Room, ChatMessage Message) : ChatEvent;
 
 /// <param name="Key">Usually an emoji. A user reacts at most once with the same key.</param>

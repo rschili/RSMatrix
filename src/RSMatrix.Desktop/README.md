@@ -39,9 +39,6 @@ The `⋯` menu next to the user opens the settings: theme, font, text size, and 
 
 The app works around these, and each would make it simpler or better:
 
-- **Room list**: no public list of joined rooms or change notifications. Rooms appear once a text message from them arrives.
-- **Members**: the sync lazy-loads members, and the full list from `/members` is only used inside the encryption code. The member list shows only the people RSMatrix has seen in the room's state and timeline.
-- **Room names**: no computed display name. The app follows the spec's order, but without the member counts from the room summary.
 - **Formatted messages**: RSMatrix exposes `Message.Html`, but the app currently renders only the plain-text body.
 - **Images and other media**: image and other media messages arrive, but there is no media download.
 - **Sign out**: there is no logout, so disconnecting leaves the device signed in.

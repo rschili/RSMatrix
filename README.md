@@ -24,7 +24,7 @@ await using MatrixClient client = await MatrixClient.LoginAsync(userId, password
 ```
 
 Without a `homeserver` URL, the client looks it up through the `.well-known` file of the user ID's domain.
-The client immediately starts syncing after login or resume.
+`LoginAsync` and `ResumeAsync` return after the first sync, so `client.Rooms` is filled.
 
 To handle incoming updates:
 I arrived at a central unbounded channel `client.Updates` for everything (new messages, edits, deletions, reactions and issues...).

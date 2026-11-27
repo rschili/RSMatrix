@@ -56,6 +56,19 @@ public class Room
     /// <summary>Whether the current user is in the room. False after leaving, being kicked or banned.</summary>
     public bool IsJoined { get; internal set; }
 
+    /// <summary>
+    /// The room's newest message the client holds, for room lists. Thread replies count, deleted messages too
+    /// (<see cref="Message.IsDeleted"/>). Null if the sync brought no message for the room yet. Doesn't ask the server.
+    /// </summary>
+    public Message? LatestMessage
+    {
+        get
+        {
+            lock (TimelineLock)
+                return Cache.TakeOlder(null, 1).FirstOrDefault();
+        }
+    }
+
     private bool _allMembersLoaded;
 
     internal TimelineCache Cache { get; }

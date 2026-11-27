@@ -181,7 +181,7 @@ public class EncryptionTests
     }
 
     [Test]
-    public async Task NewDevice_ReceivesCurrentKey_ReportsOlderHistory_AndLeaveRotatesKey()
+    public async Task NewDevice_ReceivesCurrentKey_CantReadOlderHistory_AndLeaveRotatesKey()
     {
         await using var server = new LocalHomeserver();
         var bobUser = await server.RegisterUserAsync("bob");
@@ -211,10 +211,11 @@ public class EncryptionTests
             await Assert.That(after.IsEncrypted).IsTrue();
             await Assert.That(await GetSessionIdAsync(alice, roomPath, afterId)).IsEqualTo(firstSession);
 
-            // The new device only got the key from its current index on, so older history stays unreadable.
+            // The new device only got the key from its current index on, so older history stays unreadable. The message
+            // came with the first sync after the login, so its decryption failure isn't reported either.
             var history = await after.Room.GetMessagesAsync(limit: 20);
             await Assert.That(history.Any(m => m.Id == beforeId)).IsFalse();
-            await Assert.That(ReadIssues(carolPhone).Any(i => i.Kind == ClientIssueKind.DecryptionFailed && i.EventId == beforeId)).IsTrue();
+            await Assert.That(ReadIssues(carolPhone).Any(i => i.Kind == ClientIssueKind.DecryptionFailed && i.EventId == beforeId)).IsFalse();
 
             // Once Bob has seen Carol leave, his next message uses a new key.
             await LocalHomeserver.RequestAsync(alice, $"{roomPath}/kick", HttpMethod.Post, new { user_id = $"@{carolUser}:localhost" });

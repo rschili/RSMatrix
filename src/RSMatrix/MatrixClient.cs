@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using RSMatrix.Models;
@@ -59,13 +60,20 @@ public sealed class MatrixClient : IAsyncDisposable
     private ConcurrentDictionary<string, User> _users = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The rooms the current user is in. Filled by the first sync, which loads no further data per room. Changes
-    /// come as <see cref="RoomChanged"/>.
+    /// The rooms the current user is in. Filled by the first sync before <see cref="LoginAsync"/> and
+    /// <see cref="ResumeAsync"/> return; it loads no further data per room. Changes come as <see cref="RoomChanged"/>.
     /// </summary>
     public IReadOnlyList<Room> Rooms => _rooms.Values.Where(room => room.IsJoined).ToList();
 
     /// <summary>Whether the first sync of this session was handled. It fills in the rooms without reporting changes.</summary>
     private bool _hasSynced;
+    /// <summary>
+    /// False while handling a sync without a sync position. It fills the rooms' message cache, but its messages and
+    /// their decryption failures happened before the login and aren't reported.
+    /// </summary>
+    private bool _reportMessages = true;
+    /// <summary>Completes with null once the first sync was handled, or with the error that ended the sync before.</summary>
+    private readonly TaskCompletionSource<Exception?> _firstSyncHandled = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Channel<Update> _updates = Channel.CreateUnbounded<Update>();
 
     /// <summary>Limits how many messages load their reactions from the server at once.</summary>
@@ -146,8 +154,9 @@ public sealed class MatrixClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Logs in with the password and creates a new session. The task finishes when the client is connected and ready to
-    /// receive messages through <see cref="Updates"/>. Dispose the client to disconnect.
+    /// Logs in with the password and creates a new session. The task finishes after the first sync: <see cref="Rooms"/>
+    /// is filled, and messages sent from then on come through <see cref="Updates"/>. Older messages, including the ones
+    /// the first sync brings, are in the rooms' history. Dispose the client to disconnect.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -206,8 +215,8 @@ public sealed class MatrixClient : IAsyncDisposable
     /// <summary>
     /// Continues a stored session without logging in, at the stored sync position: messages sent while the client was
     /// offline are delivered after resuming, as many per room as the server includes in one sync. The rest are in the
-    /// room's history. The task finishes when the client is connected and ready to receive
-    /// messages through <see cref="Updates"/>. Dispose the client to disconnect.
+    /// room's history. The task finishes after the first sync, with <see cref="Rooms"/> filled. Dispose the client to
+    /// disconnect.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -447,6 +456,11 @@ public sealed class MatrixClient : IAsyncDisposable
         await MatrixRetry.ExecuteAsync(http, "Initializing Matrix", client.InitAsync).ConfigureAwait(false);
         client.IsSyncing = true;
         client._syncTask = client.SyncAsync();
+        if (await client._firstSyncHandled.Task.ConfigureAwait(false) is { } failure)
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+            ExceptionDispatchInfo.Throw(failure);
+        }
         return client;
     }
 
@@ -656,11 +670,14 @@ public sealed class MatrixClient : IAsyncDisposable
                 }
                 loggedInSinceLastSync = false;
                 isFirstResumedSync = false;
+                _reportMessages = request.Since != null;
                 await HandleSyncResponseAsync(response).ConfigureAwait(false);
+                _reportMessages = true;
                 request.Since = response.NextBatch;
                 request.FullState = false;
                 SaveSession(request.Since);
                 Interlocked.Exchange(ref _lastSyncAtUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                _firstSyncHandled.TrySetResult(null);
             }
         }
         catch (OperationCanceledException) when (HttpClientParameters.CancellationToken.IsCancellationRequested)
@@ -676,6 +693,7 @@ public sealed class MatrixClient : IAsyncDisposable
         {
             IsSyncing = false;
             _sessionStore?.Dispose();
+            _firstSyncHandled.TrySetResult(failure ?? new OperationCanceledException(HttpClientParameters.CancellationToken));
             if (!_updates.Writer.TryComplete(failure))
                 Logger.LogError("Sync ended, but failed to complete the update channel.");
         }
@@ -758,7 +776,8 @@ public sealed class MatrixClient : IAsyncDisposable
                     updates.Add(new RoomChanged(room, RoomChange.Members));
                 else if (_hasSynced)
                     AddRoomChanges(room, before, membersChanged, updates);
-                updates.AddRange(messageUpdates);
+                if (_reportMessages)
+                    updates.AddRange(messageUpdates);
             }
         }
 
@@ -1511,7 +1530,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
 
         // A reaction we can't decrypt isn't worth an issue.
-        if (!IsAnnotation(e))
+        if (_reportMessages && !IsAnnotation(e))
         {
             ReportIssue(ClientIssueKind.DecryptionFailed,
                 $"Could not decrypt event {e.EventId} from {e.Sender} in room {room.RoomId.Full}: {failure}.",

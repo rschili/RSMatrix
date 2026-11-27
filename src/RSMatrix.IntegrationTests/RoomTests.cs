@@ -22,8 +22,6 @@ public class RoomTests
         await LocalHomeserver.RequestAsync(bobRaw, $"{roomPath}/join", HttpMethod.Post, new { });
 
         var bob = await server.LoginClientAsync(bobName);
-        while (bob.LastSyncAt == null)
-            await Task.Delay(50, server.CancellationToken);
 
         var room = bob.Rooms.Single();
         await Assert.That(room.RoomId.Full).IsEqualTo(roomId);

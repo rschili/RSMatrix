@@ -331,6 +331,46 @@ public class SessionResumeTests
     }
 
     [Test]
+    public async Task Login_ThrowsTerminalErrorOfFirstSync_AndReleasesStore()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var server = new FakeServer { HardLogoutOnSync = 1 };
+            await Assert.ThrowsAsync<SessionEndedException>(() => LoginAsync(server, directory));
+            await Assert.That(MatrixClient.GetStoredSession(directory, User)).IsNull();
+            using var store = SessionStore.Open(directory, User);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task LoginToken_CancelsWaitingForFirstSync_AndReleasesStore()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var server = new FakeServer { HangOnSync = 1 };
+            using var connecting = new CancellationTokenSource();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var login = LoginAsync(server, directory, cancellationToken: connecting.Token);
+            await server.SyncHanging.Task.WaitAsync(timeout.Token);
+            await Assert.That(login.IsCompleted).IsFalse();
+
+            connecting.Cancel();
+            await Assert.ThrowsAsync<OperationCanceledException>(() => login.WaitAsync(timeout.Token));
+            using var store = SessionStore.Open(directory, User);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
     public async Task Dispose_CancelsWaitingSync_AndReleasesStore()
     {
         var directory = NewDirectory();

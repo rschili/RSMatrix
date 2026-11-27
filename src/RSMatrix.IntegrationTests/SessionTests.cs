@@ -54,7 +54,6 @@ public class SessionTests
         try
         {
             var first = await server.LoginClientAsync("alice", store, crossSign: false);
-            await WaitForSyncAsync(first, server.CancellationToken);
             await first.DisposeAsync();
 
             using (var session = SessionStore.Open(store, "@alice:localhost"))
@@ -71,7 +70,6 @@ public class SessionTests
             }
 
             var restarted = await server.ResumeClientAsync("alice", store, crossSign: false);
-            await WaitForSyncAsync(restarted, server.CancellationToken);
             await restarted.DisposeAsync();
             var syncToken = ReadSession(store).SyncToken;
             await Assert.That(syncToken).IsNotNull();
@@ -91,20 +89,6 @@ public class SessionTests
             HttpMethod.Put, new { msgtype = "m.text", body });
         return sent.GetProperty("event_id").GetString()!;
     }
-
-    private static async Task WaitForSyncAsync(MatrixClient client, CancellationToken cancellationToken)
-    {
-        while (client.LastSyncAt == null)
-        {
-            if (!client.IsSyncing)
-            {
-                ReadIssues(client); // the channel only completes once everything was read
-                await client.Updates.Completion; // surfaces a sync failure
-            }
-            await Task.Delay(100, cancellationToken);
-        }
-    }
-
 
     private static void DeleteDirectory(string directory)
     {

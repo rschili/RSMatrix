@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `Room.LatestMessage`: the newest message the client holds for a room, for room lists.
 - `MatrixClient.LoginAsync`, `GetStoredSession` and `ResumeAsync`. With a store directory, the client keeps its access token, sync position and encryption keys there, one session per user, and a restarted client resumes, including messages sent while it was offline. If the server rejects the stored sync position, the client syncs from scratch. With a store, the server can create the device ID. A new login replaces the stored session and logs out its device.
 - Experimental end-to-end encryption, with Olm and Megolm implemented in C#. It is on when the client has a store directory. Messages in encrypted rooms are then decrypted, and messages, replies, edits and reactions are encrypted automatically. Not supported: interactive device verification, key backup, key requests and encrypted attachments.
 - Cross-signing: a recovery key signs a new device, `MatrixClient.SetUpCrossSigningAsync` creates the account's identity, `MatrixClient.EncryptionState` shows where the client stands.
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Breaking:** `ConnectAsync` is replaced by `LoginAsync` and `ResumeAsync`. The client owns its `HttpClient` instead of taking an `IHttpClientFactory`, and is `IAsyncDisposable`: disposing stops the sync.
 - **Breaking:** the low-level HTTP and protocol types are internal.
+- **Breaking:** `LoginAsync` and `ResumeAsync` return after the first sync, with `MatrixClient.Rooms` filled. After a login, messages from the first sync aren't reported as updates; they are in the rooms' history.
 
 ## [1.4.0] - 2026-09-30
 

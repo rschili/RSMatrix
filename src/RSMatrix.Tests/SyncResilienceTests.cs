@@ -65,10 +65,72 @@ public class SyncResilienceTests
               """.Replace("{{Message}}", Message))
             : MatrixTestContext.Json("""{"errcode":"M_UNKNOWN_TOKEN"}""", HttpStatusCode.Unauthorized));
         await context.Client.SyncAsync();
-        await Assert.That(context.ReadMessages().Count).IsEqualTo(1);
+        // The first sync has no sync position, so its message only goes to the room's history.
+        await Assert.That(context.ReadMessages()).IsEmpty();
+        await Assert.That((await context.Room().GetMessagesAsync(1)).Single().Id).IsEqualTo("$message");
         var syncs = context.Requests.Where(r => r.Path.Contains("/sync")).ToList();
         await Assert.That(syncs.Count).IsEqualTo(2);
         await Assert.That(syncs[1].Path.Contains("since=after_bad_presence")).IsTrue();
+    }
+
+    [Test]
+    public async Task SyncWithoutPosition_KeepsMessagesInHistory_AndReportsOnlyLaterOnes()
+    {
+        using var context = new MatrixTestContext();
+        const string encrypted = """
+            {"type":"m.room.encrypted","sender":"@alice:example.org","event_id":"$encrypted","origin_server_ts":1700000000001,
+             "content":{"algorithm":"m.megolm.v1.aes-sha2","ciphertext":"x","session_id":"s"}}
+            """;
+        const string reaction = """
+            {"type":"m.reaction","sender":"@alice:example.org","event_id":"$reaction","origin_server_ts":1700000000002,
+             "content":{"m.relates_to":{"rel_type":"m.annotation","event_id":"$message","key":"👍"}}}
+            """;
+        const string invite = """
+            "invite":{"!invite:example.org":{"invite_state":{"events":[
+              {"type":"m.room.member","state_key":"@bot:example.org","sender":"@alice:example.org","content":{"membership":"invite"}}]}}}
+            """;
+        var syncCount = 0;
+        context.Send = (request, _) => Task.FromResult(!request.RequestUri!.AbsolutePath.EndsWith("/sync")
+            ? MatrixTestContext.Json("{}")
+            : ++syncCount switch
+            {
+                1 => MatrixTestContext.Json("""
+                    {"next_batch":"first","rooms":{"join":{"!room:example.org":{"timeline":{"events":[{{Message}},{{Encrypted}},{{Reaction}}]}}},
+                     {{Invite}}}}
+                    """.Replace("{{Message}}", Message).Replace("{{Encrypted}}", encrypted).Replace("{{Reaction}}", reaction).Replace("{{Invite}}", invite)),
+                2 => MatrixTestContext.Json("""
+                    {"next_batch":"second","rooms":{"join":{"!room:example.org":{"timeline":{"events":[{{Message}}]}}}}}
+                    """.Replace("{{Message}}", Message.Replace("$message", "$later"))),
+                _ => MatrixTestContext.Json("""{"errcode":"M_UNKNOWN_TOKEN"}""", HttpStatusCode.Unauthorized),
+            });
+        await context.Client.SyncAsync();
+
+        var updates = context.ReadUpdates().Select(u => u.Value).ToList();
+        await Assert.That(updates.OfType<Models.NewMessage>().Select(m => m.Message.Id)).IsEquivalentTo(["$later"]);
+        await Assert.That(updates.OfType<Models.MessageChanged>().Any()).IsFalse();
+        await Assert.That(updates.OfType<Models.ClientIssue>().Any(i => i.Kind == Models.ClientIssueKind.DecryptionFailed)).IsFalse();
+        await Assert.That(updates.OfType<Models.Request>().Count()).IsEqualTo(1);
+        var history = await context.Room().GetMessagesAsync(2);
+        await Assert.That(history.Select(m => m.Id)).IsEquivalentTo(["$message", "$later"]);
+        await Assert.That(history[0].Reactions.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task LatestMessage_IsTheNewestMessageInTheCache()
+    {
+        using var context = new MatrixTestContext();
+        await Assert.That(context.Room().LatestMessage).IsNull();
+        const string reaction = """
+            {"type":"m.reaction","sender":"@alice:example.org","event_id":"$reaction","origin_server_ts":1700000000002,
+             "content":{"m.relates_to":{"rel_type":"m.annotation","event_id":"$later","key":"👍"}}}
+            """;
+        await context.Process("""
+            {"next_batch":"next","rooms":{"join":{"!room:example.org":{"timeline":{"events":[{{Message}},{{Later}},{{Reaction}}]}}}}}
+            """.Replace("{{Message}}", Message).Replace("{{Later}}", Message.Replace("$message", "$later")).Replace("{{Reaction}}", reaction));
+
+        var latest = context.Room().LatestMessage;
+        await Assert.That(latest!.Id).IsEqualTo("$later");
+        await Assert.That(latest.Reactions.Count).IsEqualTo(1);
     }
 
     [Test]

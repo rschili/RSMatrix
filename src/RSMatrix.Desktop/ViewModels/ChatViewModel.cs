@@ -126,6 +126,15 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     {
         switch (chatEvent)
         {
+            case RoomJoined joined:
+                AddRoom(joined.Room, joined.LatestMessage);
+                break;
+            case RoomUpdated updated when _roomsById.ContainsKey(updated.Room.RoomId):
+                GetOrAddRoom(updated.Room);
+                break;
+            case RoomLeft left when _roomsById.TryGetValue(left.RoomId, out var room):
+                RemoveRoom(room);
+                break;
             case MessageReceived received:
                 AddMessage(received.Room, received.Message);
                 break;
@@ -274,21 +283,42 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         Media.Dispose();
     }
 
-    private void AddMessage(ChatRoomInfo info, ChatMessage message)
+    private RoomViewModel GetOrAddRoom(ChatRoomInfo info)
     {
         if (!_roomsById.TryGetValue(info.RoomId, out var room))
         {
             room = new RoomViewModel(info, this);
             _roomsById.Add(info.RoomId, room);
             Rooms.Add(room);
+            return room;
         }
-        else
-        {
-            room.Update(info);
-            if (room == SelectedConversation?.Room)
-                OnPropertyChanged(nameof(WindowTitle));
-        }
+        room.Update(info);
+        if (room == SelectedConversation?.Room)
+            OnPropertyChanged(nameof(WindowTitle));
+        return room;
+    }
 
+    private void AddRoom(ChatRoomInfo info, ChatMessage? latestMessage)
+    {
+        var room = GetOrAddRoom(info);
+        if (latestMessage != null)
+            room.AddReceivedMessage(latestMessage);
+        MoveToSortedPosition(room);
+        RefreshSidebar();
+    }
+
+    private void RemoveRoom(RoomViewModel room)
+    {
+        _roomsById.Remove(room.RoomId);
+        Rooms.Remove(room);
+        if (SelectedConversation?.Room == room)
+            SelectedConversation = Rooms.FirstOrDefault();
+        RefreshSidebar();
+    }
+
+    private void AddMessage(ChatRoomInfo info, ChatMessage message)
+    {
+        var room = GetOrAddRoom(info);
         if (!room.AddReceivedMessage(message))
             return;
         ConversationViewModel conversation = message.ThreadRootId is { } rootId ? room.GetOrCreateThread(rootId) : room;

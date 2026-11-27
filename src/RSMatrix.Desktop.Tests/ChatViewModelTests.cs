@@ -84,6 +84,29 @@ public class ChatViewModelTests
         await Assert.That(chat.Members.Count).IsEqualTo(0);
     }
 
+    [Test]
+    public async Task Joined_Rooms_Are_Listed_By_Latest_Message_And_Follow_Changes()
+    {
+        await using var chat = CreateChat();
+        var quiet = Room with { RoomId = "!quiet:example.org", Name = "Quiet" };
+        var older = Room with { RoomId = "!older:example.org", Name = "Older" };
+        chat.Apply(new RoomJoined(quiet, null));
+        chat.Apply(new RoomJoined(older, Message("$old", Noon, "Old news") with { RoomId = older.RoomId }));
+        chat.Apply(new RoomJoined(Room, Message("$new", Noon.AddMinutes(1), "Fresh")));
+
+        await Assert.That(string.Join(",", chat.Rooms.Select(r => r.Name))).IsEqualTo("Room,Older,Quiet");
+        await Assert.That(chat.Rooms[0].LastMessagePreview).IsEqualTo("Alice: Fresh");
+        await Assert.That(chat.Rooms.All(r => r.UnreadCount == 0)).IsTrue();
+
+        chat.SelectedConversation = chat.Rooms[0];
+        chat.Apply(new RoomUpdated(Room with { Name = "Renamed" }));
+        await Assert.That(chat.WindowTitle).IsEqualTo("Renamed");
+
+        chat.Apply(new RoomLeft(Room.RoomId));
+        await Assert.That(string.Join(",", chat.Rooms.Select(r => r.Name))).IsEqualTo("Older,Quiet");
+        await Assert.That(chat.SelectedConversation).IsEqualTo(chat.Rooms[0]);
+    }
+
     private static async Task WaitUntil(Func<bool> condition)
     {
         for (var i = 0; i < 100 && !condition(); i++)
