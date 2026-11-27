@@ -116,7 +116,8 @@ internal class RedactionRequest
     public string? Reason { get; set; }
 }
 
-internal class JoinRoomRequest
+/// <summary>The body of joining or leaving a room.</summary>
+internal class MembershipChangeRequest
 {
     [JsonPropertyName("reason")]
     public string? Reason { get; set; }

@@ -50,24 +50,6 @@ public class ClientIssueTests
     }
 
     [Test]
-    public async Task FailedAutoJoin_IsReported()
-    {
-        using var context = new MatrixTestContext();
-        context.Client.AutoJoinOnInvite = true;
-        context.Send = (_, _) => Task.FromResult(MatrixTestContext.Json("""{"errcode":"M_FORBIDDEN"}""", HttpStatusCode.Forbidden));
-        await context.Process("""
-        {"next_batch":"next","rooms":{"invite":{"!invite:example.org":{"invite_state":{"events":[
-         {"type":"m.room.member","state_key":"@bot:example.org","sender":"@alice:example.org","content":{"membership":"invite"}}]}}}}}
-        """);
-
-        var issue = ReadAll(context.Client).Single();
-        await Assert.That(issue.Kind).IsEqualTo(ClientIssueKind.AutoJoinFailed);
-        await Assert.That(issue.Room!.RoomId.Full).IsEqualTo("!invite:example.org");
-        await Assert.That(issue.User!.User.UserId.Full).IsEqualTo("@alice:example.org");
-        await Assert.That(issue.Exception).IsNotNull();
-    }
-
-    [Test]
     public async Task SyncInterruption_IsReportedOncePerOutage_AndLastSyncAtUpdates()
     {
         using var context = new MatrixTestContext();

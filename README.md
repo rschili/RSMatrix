@@ -43,6 +43,24 @@ await foreach (var update in client.Updates.ReadAllAsync(cancellationToken))
 
 A `Message` holds the snapshot of a message at the time the event occurred.
 
+Things that need a response like room invites also come though this same channel as a `Request`.
+Doing nothing ignores a request; the server still holds an invite, so it comes again on the next start.
+It makes sense to handle requests in their own method, so the update loop stays short.
+A switch expression over `Request` gets compiler warnings when a new kind of request is added.
+
+```cs
+// in the update loop
+case Request request:
+    await HandleRequestAsync(request);
+    break;
+
+Task HandleRequestAsync(Request request) => request switch
+{
+    RoomInvite invite when invite.From.User.UserId.Full == ownerId => invite.AcceptAsync(),
+    RoomInvite invite => invite.DeclineAsync("I only join rooms my owner invites me to."),
+};
+```
+
 `room.GetMessagesAsync(limit, before)` returns older messages, oldest first. Matrix servers don't send reactions along with a message, so a message loaded on its own, like a reply target, may miss some. `message.HasAllReactions` indicates that state, `message.GetReactionsAsync()` fetches them from the server, which needs an extra request.
 
 The client did previously send read receipts on its own, which I changed in 2.0. `message.MarkAsReadAsync()` marks a room as read up to that message. Try and not use this too chatty, as it can generate a lot of requests if called frequently. You will want to rate limit this for a bot which may handle thousands of incoming messages per second.

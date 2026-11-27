@@ -30,12 +30,11 @@ public class HomeserverTests
     }
 
     [Test]
-    public async Task Invite_AutoJoin_Sync_TextReply_Notice_AndHistory()
+    public async Task Invite_Accept_Sync_TextReply_Notice_AndHistory()
     {
         await using var server = new LocalHomeserver();
         var alice = await server.LoginAsync("alice");
         var bob = await server.LoginClientAsync("bob");
-        bob.AutoJoinOnInvite = true;
 
         var marker = Guid.NewGuid().ToString("N");
         // Room creation/invites are fixture setup, not yet high-level library APIs.
@@ -53,6 +52,7 @@ public class HomeserverTests
             });
         var roomId = created.GetProperty("room_id").GetString()!;
         var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId)}";
+        await AcceptInviteAsync(bob, roomId, server.CancellationToken);
         var body = $"ping {marker} — Grüße 👋";
         var seed = await LocalHomeserver.RequestAsync(alice,
             $"{roomPath}/send/m.room.message/{Guid.NewGuid():N}", HttpMethod.Put,

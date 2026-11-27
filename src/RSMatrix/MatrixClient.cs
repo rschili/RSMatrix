@@ -72,7 +72,7 @@ public sealed class MatrixClient : IAsyncDisposable
     internal SemaphoreSlim ReactionRequests { get; } = new(4, 4);
 
     /// <summary>
-    /// Everything the client receives: new messages, edits, deletions, reactions, room changes, and problems the client keeps
+    /// Everything the client receives: new messages, edits, deletions, reactions, room changes, requests like invites, and problems the client keeps
     /// running through, like messages it could not decrypt. Read it continuously; the channel is unbounded and the sync
     /// never waits for the reader. It completes when the client is disposed and throws the error that ended the
     /// session, like <see cref="SessionEndedException"/> or <see cref="PasswordRequiredException"/>.
@@ -89,12 +89,6 @@ public sealed class MatrixClient : IAsyncDisposable
     public DateTimeOffset? LastSyncAt => Interlocked.Read(ref _lastSyncAtUnixMilliseconds) is var value and > 0
         ? DateTimeOffset.FromUnixTimeMilliseconds(value)
         : null;
-
-    /// <summary>
-    /// When true, the client will automatically join rooms when invited.
-    /// Default is false.
-    /// </summary>
-    public bool AutoJoinOnInvite { get; set; } = false;
 
     public bool IsSyncing { get; private set;}
 
@@ -782,12 +776,15 @@ public sealed class MatrixClient : IAsyncDisposable
             }
         }
 
-        // Stripped invite state can already tell us that a room is encrypted.
-        // Record it before delivering updates or making optional join requests.
-        if (response.Rooms?.Invites is { } inviteState)
+        // Stripped invite state can already tell us that a room is encrypted, so a send right after joining stays encrypted.
+        if (response.Rooms?.Invites is { } invites)
         {
-            foreach (var pair in inviteState)
+            foreach (var pair in invites)
+            {
                 HandleInviteEncryptionState(pair.Key, pair.Value);
+                if (ReadInvite(pair.Key, pair.Value) is { } invite)
+                    updates.Add((Request)invite);
+            }
         }
 
         // Malformed events are skipped at their own boundary. Delivery failures or
@@ -795,16 +792,6 @@ public sealed class MatrixClient : IAsyncDisposable
         foreach (var update in updates)
             await _updates.Writer.WriteAsync(update, cancellationToken).ConfigureAwait(false);
         _hasSynced = true;
-
-        // Optional HTTP side effects cannot discard updates already collected.
-        if (response.Rooms?.Invites is { } invites)
-        {
-            foreach (var pair in invites)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await HandleInviteReceivedAsync(pair.Key, pair.Value).ConfigureAwait(false);
-            }
-        }
 
         if (response.Rooms?.Knocks is { Count: > 0 } knocks)
             Diagnostics.ReportUnhandled(Logger, UnhandledKind.SyncSection, "rooms.knock", knocks.First().Value);
@@ -1124,66 +1111,66 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private async Task HandleInviteReceivedAsync(string roomIdString, SyncInvitedRoom? invitedRoom)
+    /// <summary>Reads the invite preview. Returns null when it doesn't hold the invite itself, so nobody can be named as inviter.</summary>
+    private RoomInvite? ReadInvite(string roomIdString, SyncInvitedRoom? invitedRoom)
     {
-        if (invitedRoom == null || !RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
+        if (!RoomId.TryParse(roomIdString, out var roomId) || roomId == null)
         {
             Logger.LogWarning("Received invite for room with invalid ID: {RoomId}", roomIdString);
-            return;
+            return null;
         }
 
-        var isDirect = false;
-        var inviterUserId = (string?)null;
-
-        if (invitedRoom.InviteState?.Events != null)
-        {
-            foreach (var ev in invitedRoom.InviteState.Events)
-            {
-                if (ev != null && ev.Type is not "m.room.member" and not "m.room.encryption")
-                    Diagnostics.ReportUnhandled(Logger, UnhandledKind.InviteStateEvent, ev.Type, ev);
-                if (ev?.Type == "m.room.member" && ev.StateKey == CurrentUser.Full)
-                {
-                    try
-                    {
-                        var memberEvent = ParseContent<RoomMemberContent>(ev.Content);
-                        if (memberEvent?.IsDirect == true)
-                            isDirect = true;
-                        inviterUserId = ev.Sender;
-                    }
-                    catch (JsonException ex)
-                    {
-                        Logger.LogWarning(ex, "Could not interpret invite state in room {RoomId}.", roomId.Full);
-                    }
-                }
-            }
-        }
-
-        Logger.LogInformation("Received invite for room {RoomId} (isDirect: {IsDirect}, inviter: {Inviter})",
-            roomId.Full, isDirect, inviterUserId ?? "unknown");
-
-        if (AutoJoinOnInvite)
+        var events = invitedRoom?.InviteState?.Events?.Where(e => e != null).ToList() ?? [];
+        T? Parse<T>(StrippedStateEvent e) where T : class
         {
             try
             {
-                await MatrixHelper.PostJoinRoomAsync(HttpClientParameters, roomId).ConfigureAwait(false);
-                var room = GetOrAddRoom(roomId);
-                lock (room)
-                {
-                    room.IsDirect = isDirect;
-                }
-                Logger.LogInformation("Auto-joined room {RoomId}", roomId.Full);
+                return ParseContent<T>(e.Content);
             }
-            catch (OperationCanceledException) when (HttpClientParameters.CancellationToken.IsCancellationRequested)
+            catch (JsonException ex)
             {
-                throw;
-            }
-            catch (Exception ex) when (ex is HttpRequestException or MatrixResponseException or JsonException or OperationCanceledException)
-            {
-                Logger.LogError(ex, "Failed to auto-join room {RoomId}", roomId.Full);
-                ReportIssue(ClientIssueKind.AutoJoinFailed, $"Could not join room {roomId.Full} after an invite: {ex.Message}",
-                    GetOrAddRoom(roomId), inviterUserId, exception: ex);
+                Logger.LogWarning(ex, "Could not interpret {Type} in the invite to room {RoomId}.", e.Type, roomId.Full);
+                return null;
             }
         }
+        StrippedStateEvent? RoomState(string type) => events.FirstOrDefault(e => e.Type == type && e.StateKey == "");
+
+        var ownMember = events.FirstOrDefault(e => e.Type == "m.room.member" && e.StateKey == CurrentUser.Full);
+        if (ownMember == null || !UserId.TryParse(ownMember.Sender, out var inviterId) || inviterId == null)
+        {
+            Logger.LogWarning("The invite to room {RoomId} doesn't say who sent it. Ignoring it.", roomId.Full);
+            return null;
+        }
+        var inviter = new RoomUser(GetOrAddUser(inviterId));
+        if (events.FirstOrDefault(e => e.Type == "m.room.member" && e.StateKey == inviterId.Full) is { } inviterMember &&
+            Parse<RoomMemberContent>(inviterMember) is { } inviterContent)
+        {
+            inviter.RoomName = string.IsNullOrWhiteSpace(inviterContent.DisplayName) ? null : inviterContent.DisplayName;
+            inviter.AvatarUrl = inviterContent.AvatarUrl;
+        }
+
+        foreach (var e in events)
+        {
+            if (e.Type is not ("m.room.member" or "m.room.encryption" or "m.room.name" or "m.room.topic" or "m.room.avatar" or "m.room.canonical_alias"))
+                Diagnostics.ReportUnhandled(Logger, UnhandledKind.InviteStateEvent, e.Type, e);
+        }
+
+        var name = RoomState("m.room.name") is { } nameEvent ? Parse<RoomNameContent>(nameEvent)?.Name : null;
+        var topic = RoomState("m.room.topic") is { } topicEvent ? Parse<RoomTopicContent>(topicEvent)?.Topic : null;
+        var avatarUrl = RoomState("m.room.avatar") is { } avatarEvent ? Parse<RoomAvatarContent>(avatarEvent)?.Url : null;
+        MatrixId? alias = null;
+        if (RoomState("m.room.canonical_alias") is { } aliasEvent)
+            RoomAlias.TryParse(Parse<CanonicalAliasContent>(aliasEvent)?.Alias, out alias);
+
+        var invite = new RoomInvite(this, roomId, inviter,
+            roomName: string.IsNullOrWhiteSpace(name) ? null : name,
+            topic: string.IsNullOrWhiteSpace(topic) ? null : topic,
+            avatarUrl: string.IsNullOrWhiteSpace(avatarUrl) ? null : avatarUrl,
+            canonicalAlias: alias,
+            isDirect: Parse<RoomMemberContent>(ownMember)?.IsDirect == true,
+            isEncrypted: RoomState("m.room.encryption") != null);
+        Logger.LogInformation("Received {Invite}", invite);
+        return invite;
     }
 
     /// <summary>Returns whether the room's members changed.</summary>

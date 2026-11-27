@@ -54,12 +54,11 @@ public class RoomEncryptionTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
-    public async Task InviteEncryption_IsRecordedBeforeJoining(bool autoJoin)
+    public async Task InviteEncryption_IsRecordedBeforeJoining(bool accept)
     {
         foreach (var content in new[] { "{\"algorithm\":\"m.megolm.v1.aes-sha2\"}", "{\"algorithm\":\"unknown\"}", "{}", "[]" })
         {
             using var context = new MatrixTestContext();
-            context.Client.AutoJoinOnInvite = autoJoin;
             context.Send = async (_, _) =>
             {
                 await Assert.That(context.Room("!invite:example.org").IsEncrypted).IsTrue();
@@ -67,12 +66,15 @@ public class RoomEncryptionTests
             };
             await context.Process("""
                 {"next_batch":"next","rooms":{"invite":{"!invite:example.org":{"invite_state":{"events":[
+                {"type":"m.room.member","state_key":"@bot:example.org","sender":"@admin:example.org","content":{"membership":"invite"}},
                 {"type":"m.room.encryption","state_key":"","sender":"@admin:example.org","content":CONTENT}]}}}}}
                 """.Replace("CONTENT", content));
+            if (accept)
+                await ((Request)context.ReadUpdates().Single().Value!).AcceptAsync();
             var room = context.Room("!invite:example.org");
             await Assert.That(room.IsEncrypted).IsTrue();
             await Assert.ThrowsAsync<NotSupportedException>(() => room.SendMessageAsync("secret"));
-            await Assert.That(context.Requests.Count).IsEqualTo(autoJoin ? 1 : 0);
+            await Assert.That(context.Requests.Count).IsEqualTo(accept ? 1 : 0);
         }
     }
 

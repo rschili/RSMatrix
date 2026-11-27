@@ -104,10 +104,14 @@ public class SyncHandlerTests
     }
 
     [Test]
-    public async Task Invite_WithoutAutoJoin_SendsAndReportsNothing()
+    public async Task Invite_ComesAsRequest_WithoutSendingAnything()
     {
         await _client.HandleSyncResponseForTestingAsync(await LoadFixtureAsync("sync_invite.json"));
 
+        await Assert.That(_client.Updates.TryRead(out var update)).IsTrue();
+        var invite = (RoomInvite)((Request)update.Value!).Value!;
+        await Assert.That(invite.DisplayName).IsEqualTo("Invited Room");
+        await Assert.That(invite.From.User.UserId.Full).IsEqualTo("@inviter:example.org");
         await Assert.That(_client.Updates.TryRead(out _)).IsFalse();
         await Assert.That(_handler.RequestCount).IsEqualTo(0);
     }

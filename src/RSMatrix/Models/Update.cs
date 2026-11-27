@@ -1,7 +1,7 @@
 namespace RSMatrix.Models;
 
 /// <summary>Everything the client receives, as one of a few small records.</summary>
-public union Update(NewMessage, MessageChanged, RoomChanged, ClientIssue);
+public union Update(NewMessage, MessageChanged, RoomChanged, Request, ClientIssue);
 
 public sealed record NewMessage(Message Message);
 

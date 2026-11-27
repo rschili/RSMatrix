@@ -20,9 +20,6 @@ public class EncryptionTests
             var bob = await server.LoginClientAsync(bobUser, Path.Combine(storeRoot, "bob"));
             var carolStore = Path.Combine(storeRoot, "carol");
             var carol = await server.LoginClientAsync(carolUser, carolStore);
-            bob.AutoJoinOnInvite = true;
-            carol.AutoJoinOnInvite = true;
-
             // Alice only sets up the room over plain HTTP; she has no encryption.
             var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new
             {
@@ -35,6 +32,7 @@ public class EncryptionTests
             });
             var roomId = created.GetProperty("room_id").GetString()!;
             var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId)}";
+            await Task.WhenAll(AcceptInviteAsync(bob, roomId, server.CancellationToken), AcceptInviteAsync(carol, roomId, server.CancellationToken));
             await WaitForJoinedMembersAsync(alice, roomPath, 3, server.CancellationToken);
 
             // A plaintext ping hands each client its Room, with encryption state already synced.
@@ -92,7 +90,6 @@ public class EncryptionTests
             // Restart Carol with the same device and store: old sessions must still work both ways.
             await carol.DisposeAsync();
             var restarted = await server.ResumeClientAsync(carolUser, carolStore);
-            restarted.AutoJoinOnInvite = true;
 
             var afterRestartId = await bobRoom.SendMessageAsync("after restart");
             var afterRestart = await ReceiveAsync(restarted, afterRestartId, server.CancellationToken);
@@ -238,15 +235,16 @@ public class EncryptionTests
         MatrixClient bob, MatrixClient[] others, object encryption, CancellationToken cancellationToken)
     {
         MatrixClient[] clients = [bob, .. others];
-        foreach (var client in clients)
-            client.AutoJoinOnInvite = true;
         var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new
         {
             preset = "private_chat",
             invite = clients.Select(c => c.CurrentUser.Full).Distinct().ToArray(),
             initial_state = new[] { new { type = "m.room.encryption", state_key = "", content = encryption } }
         });
-        var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(created.GetProperty("room_id").GetString()!)}";
+        var roomId = created.GetProperty("room_id").GetString()!;
+        var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId)}";
+        // One device per user accepts; the others may see the room joined before they see the invite.
+        await Task.WhenAll(clients.DistinctBy(c => c.CurrentUser.Full).Select(c => AcceptInviteAsync(c, roomId, cancellationToken)));
         await WaitForJoinedMembersAsync(alice, roomPath, clients.Select(c => c.CurrentUser.Full).Distinct().Count() + 1, cancellationToken);
 
         var pingId = await SendPlaintextAsync(alice, roomPath, "ping");

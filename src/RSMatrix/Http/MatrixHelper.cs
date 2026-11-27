@@ -202,18 +202,32 @@ internal static class MatrixHelper
         return await HttpClientHelper.SendAsync<EventIdResponse>(httpClientParameters, path, HttpMethod.Put, content).ConfigureAwait(false);
     }
 
-    internal static async Task<JoinRoomResponse> PostJoinRoomAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string? reason = null)
+    internal static async Task<JoinRoomResponse> PostJoinRoomAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string? reason = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
         ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
 
-        var request = new JoinRoomRequest { Reason = reason };
-        var content = JsonContent.Create(
-            request, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
-
         var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/join";
-        return await HttpClientHelper.SendAsync<JoinRoomResponse>(httpClientParameters, path, HttpMethod.Post, content).ConfigureAwait(false);
+        return await HttpClientHelper.SendAsync<JoinRoomResponse>(httpClientParameters, path, HttpMethod.Post, MembershipChangeContent(reason),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>Leaves a room, which also rejects an invite or withdraws a knock.</summary>
+    internal static async Task PostLeaveRoomAsync(HttpClientParameters httpClientParameters, MatrixId roomId, string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientParameters, nameof(httpClientParameters));
+        ArgumentNullException.ThrowIfNull(roomId, nameof(roomId));
+
+        var path = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId.Full)}/leave";
+        await HttpClientHelper.SendAsync<JsonElement>(httpClientParameters, path, HttpMethod.Post, MembershipChangeContent(reason),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    private static JsonContent MembershipChangeContent(string? reason) => JsonContent.Create(
+        new MembershipChangeRequest { Reason = reason },
+        options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 
     internal static async Task<RoomMessagesResponse> GetMessagesAsync(HttpClientParameters httpClientParameters, MatrixId roomId, MessagesParameters parameters,
         CancellationToken cancellationToken = default)

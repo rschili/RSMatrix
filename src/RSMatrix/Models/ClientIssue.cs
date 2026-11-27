@@ -8,9 +8,6 @@ public enum ClientIssueKind
     /// <summary>A device in the room did not receive the key for our encrypted messages and cannot read them.</summary>
     RoomKeyNotShared,
 
-    /// <summary>Joining a room after an invite failed.</summary>
-    AutoJoinFailed,
-
     /// <summary>A sync request failed and the client keeps retrying. Reported once per interruption.</summary>
     SyncInterrupted,
 
@@ -34,7 +31,7 @@ public sealed class ClientIssue
 
     public Room? Room { get; }
 
-    /// <summary>The user involved, like the sender of an undecryptable event or the inviter.</summary>
+    /// <summary>The user involved, like the sender of an undecryptable event.</summary>
     public RoomUser? User { get; }
 
     public string? EventId { get; }

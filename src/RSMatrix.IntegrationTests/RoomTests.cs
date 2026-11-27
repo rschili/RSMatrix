@@ -70,13 +70,11 @@ public class RoomTests
         var bobName = await server.RegisterUserAsync("bob");
         var alice = await server.LoginAsync(aliceName);
         var bob = await server.LoginClientAsync(bobName);
-        bob.AutoJoinOnInvite = true;
-        while (bob.LastSyncAt == null)
-            await Task.Delay(50, server.CancellationToken);
 
         var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post,
             new { preset = "private_chat", name = "Workshop", topic = "Tools", invite = new[] { $"@{bobName}:localhost" } });
         var roomId = created.GetProperty("room_id").GetString()!;
+        await AcceptInviteAsync(bob, roomId, server.CancellationToken);
 
         var joined = await ReceiveUpdateAsync<RoomChanged>(bob, c => c.Room.RoomId.Full == roomId, server.CancellationToken);
         await Assert.That(joined.Change).IsEqualTo(RoomChange.Members);

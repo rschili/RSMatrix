@@ -26,6 +26,14 @@ internal static class UpdateReader
         throw new InvalidOperationException($"Sync ended before receiving the expected {typeof(T).Name}.");
     }
 
+    /// <summary>Waits for the invite to the room and accepts it. The joined room comes as a later update.</summary>
+    public static async Task AcceptInviteAsync(MatrixClient client, string roomId, CancellationToken cancellationToken)
+    {
+        var request = await ReceiveUpdateAsync<Request>(client, r => r.Value is RoomInvite invite && invite.RoomId.Full == roomId,
+            cancellationToken);
+        await request.AcceptAsync(cancellationToken);
+    }
+
     /// <summary>Returns the issues reported so far and not read before.</summary>
     public static List<ClientIssue> ReadIssues(MatrixClient client)
     {

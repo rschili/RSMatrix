@@ -16,7 +16,6 @@ public class SyncResilienceTests
     public async Task MalformedEvents_DoNotDiscardOtherEventsOrRooms()
     {
         using var context = new MatrixTestContext();
-        context.Client.AutoJoinOnInvite = true;
         await context.Process("""
         {"next_batch":"next","account_data":{"events":[null]},"presence":{"events":[null,
           {"type":"m.presence","sender":"@alice:example.org","content":{"presence":"invalid"}},
@@ -31,44 +30,13 @@ public class SyncResilienceTests
              {"type":"m.room.member","state_key":"@bot:example.org","sender":"@alice:example.org","content":{"membership":"invite","is_direct":true}}]}}}}}
         """.Replace("{{Message}}", Message));
 
-        var messages = context.ReadMessages();
+        var updates = context.ReadUpdates();
+        var messages = updates.Select(u => u.Value).OfType<Models.NewMessage>().Select(u => u.Message).ToList();
         await Assert.That(messages.Count).IsEqualTo(2);
         await Assert.That(messages[0].Sender.User.Presence).IsEqualTo(Models.Presence.Online);
-        await Assert.That(context.Room("!invite:example.org").IsDirect).IsTrue();
+        var invites = updates.Select(u => u.Value).OfType<Models.Request>().Select(r => (Models.RoomInvite)r.Value!).ToList();
+        await Assert.That(string.Join(",", invites.Select(i => $"{i.RoomId.Full}:{i.IsDirect}"))).IsEqualTo("!broken:example.org:False,!invite:example.org:True");
         await Assert.That(context.Logs.Any(l => l.Level == LogLevel.Error)).IsFalse();
-    }
-
-    [Test]
-    public async Task FailedOptionalRequests_DoNotDiscardMessages_OrStopLaterInvites()
-    {
-        using var context = new MatrixTestContext();
-        context.Client.AutoJoinOnInvite = true;
-        context.Send = (request, _) => Task.FromResult(
-            Uri.UnescapeDataString(request.RequestUri!.AbsolutePath).Contains("!broken:")
-                ? MatrixTestContext.Json("""{"errcode":"M_FORBIDDEN"}""", HttpStatusCode.Forbidden)
-                : MatrixTestContext.Json("""{"room_id":"!invite:example.org"}"""));
-        await context.Process("""
-        {"next_batch":"next","rooms":{"join":{"!room:example.org":{"timeline":{"events":[{{Message}}]}}},
-        "invite":{"!broken:example.org":{},"!invite:example.org":{}}}}
-        """.Replace("{{Message}}", Message));
-        await Assert.That(context.ReadMessages().Count).IsEqualTo(1);
-        await Assert.That(context.Requests.Count(r => r.Path.EndsWith("/join"))).IsEqualTo(2);
-    }
-
-    [Test]
-    public async Task CallerCancellationDuringAutoJoin_Propagates()
-    {
-        using var context = new MatrixTestContext();
-        context.Client.AutoJoinOnInvite = true;
-        context.Send = (_, _) =>
-        {
-            context.Lifetime.Cancel();
-            // Deliberately a plain OCE, not just TaskCanceledException.
-            throw new OperationCanceledException(context.Lifetime.Token);
-        };
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
-            context.Process("""{"next_batch":"next","rooms":{"invite":{"!invite:example.org":{}}}}"""));
-        await Assert.That(context.Requests.Count).IsEqualTo(1);
     }
 
     [Test]

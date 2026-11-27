@@ -21,11 +21,12 @@ public class SessionTests
             // Alice is a shared test user, so the test must not give her a cross-signing identity.
             // The server creates the device ID, and the store keeps it.
             var first = await server.LoginClientAsync("alice", store, crossSign: false);
-            first.AutoJoinOnInvite = true;
 
             var created = await LocalHomeserver.RequestAsync(bob, "/_matrix/client/v3/createRoom", HttpMethod.Post,
                 new { preset = "private_chat", invite = new[] { "@alice:localhost" } });
-            var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(created.GetProperty("room_id").GetString()!)}";
+            var roomId = created.GetProperty("room_id").GetString()!;
+            var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId)}";
+            await AcceptInviteAsync(first, roomId, server.CancellationToken);
             var online = await SendTextAsync(bob, roomPath, "before restart");
             await ReceiveAsync(first, online, server.CancellationToken);
             await first.DisposeAsync();

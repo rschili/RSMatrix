@@ -28,7 +28,6 @@ public class RustInteropTests
         {
             var alice = await server.LoginAsync("alice");
             var bob = await server.LoginClientAsync(bobUser, Path.Combine(storeRoot, "bob"));
-            bob.AutoJoinOnInvite = true;
 
             var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new
             {
@@ -41,6 +40,7 @@ public class RustInteropTests
             });
             var roomId = created.GetProperty("room_id").GetString()!;
             var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId)}";
+            await AcceptInviteAsync(bob, roomId, server.CancellationToken);
 
             var marker = Guid.NewGuid().ToString("N");
             bool fromPeer(Message m) => m.Room.RoomId.Full == roomId && m.Sender.User.UserId.Full == $"@{peerUser}:localhost";
