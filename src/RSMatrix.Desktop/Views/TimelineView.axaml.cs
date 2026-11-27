@@ -2,11 +2,14 @@ using System.Collections.Specialized;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Avalonia.Controls.Templates;
+using RSMatrix.Desktop.Storage;
 using RSMatrix.Desktop.ViewModels;
 
 namespace RSMatrix.Desktop.Views;
@@ -17,19 +20,53 @@ namespace RSMatrix.Desktop.Views;
 /// </summary>
 public partial class TimelineView : UserControl
 {
+    public static readonly StyledProperty<MessageLayout> MessageLayoutProperty =
+        AvaloniaProperty.Register<TimelineView, MessageLayout>(nameof(MessageLayout));
+
     private const double BottomTolerance = 40;
     private const double LoadOlderThreshold = 400;
+    // Avalonia's own distance per wheel notch.
+    private const double WheelStep = 50;
+    // How quickly a wheel scroll catches up with its target, in seconds.
+    private const double WheelEaseTime = 0.05;
 
     private ConversationViewModel? _conversation;
     private bool _isAtBottom = true;
     private bool _isRestorePending;
     // The first visible message and its distance from the top of the viewport, as of the last scroll.
     private (MessageViewModel Item, double Top)? _anchor;
+    // Where a wheel scroll is heading, and the offset it set last, to notice when something else moves the view.
+    private double? _wheelTarget;
+    private double _wheelOffset;
+    private TimeSpan? _lastWheelFrame;
 
     public TimelineView()
     {
         InitializeComponent();
         Scroller.ScrollChanged += OnScrollChanged;
+        Scroller.AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
+        ApplyMessageLayout();
+    }
+
+    public MessageLayout MessageLayout
+    {
+        get => GetValue(MessageLayoutProperty);
+        set => SetValue(MessageLayoutProperty, value);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == MessageLayoutProperty)
+            ApplyMessageLayout();
+    }
+
+    // The comfortable template is the type-based one among the item templates. The classic one takes precedence when set.
+    // XAML can set the layout before InitializeComponent created the items control.
+    private void ApplyMessageLayout()
+    {
+        if (Items != null)
+            Items.ItemTemplate = MessageLayout == MessageLayout.Classic ? (IDataTemplate)Resources["ClassicMessageTemplate"]! : null;
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -56,6 +93,7 @@ public partial class TimelineView : UserControl
                 ScrollToEndAfterLayout();
             return;
         }
+        _wheelTarget = null;
         if (_isRestorePending)
             return;
         _isRestorePending = true;
@@ -109,6 +147,49 @@ public partial class TimelineView : UserControl
 
         if (offset < LoadOlderThreshold && _conversation is { HasMoreHistory: true } conversation && conversation.LoadOlderMessagesCommand.CanExecute(null))
             conversation.LoadOlderMessagesCommand.Execute(null);
+    }
+
+    // Mouse wheels jump by a whole step, so we glide there instead. Touchpads send fractional steps, which are smooth already.
+    private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        var delta = e.Delta.Y;
+        if (delta == 0 || delta != Math.Round(delta) || e.KeyModifiers.HasFlag(KeyModifiers.Shift) ||
+            TopLevel.GetTopLevel(this) is not { } topLevel)
+            return;
+        e.Handled = true;
+
+        var isAnimating = _wheelTarget != null && Math.Abs(Scroller.Offset.Y - _wheelOffset) < 0.5;
+        var maxOffset = Math.Max(0, Scroller.Extent.Height - Scroller.Viewport.Height);
+        _wheelTarget = Math.Clamp((isAnimating ? _wheelTarget!.Value : Scroller.Offset.Y) - delta * WheelStep, 0, maxOffset);
+        if (isAnimating)
+            return;
+        _wheelOffset = Scroller.Offset.Y;
+        _lastWheelFrame = null;
+        topLevel.RequestAnimationFrame(OnWheelFrame);
+    }
+
+    private void OnWheelFrame(TimeSpan time)
+    {
+        // Stops when the target was dropped or something else moved the view, like loading history or a new message.
+        if (_wheelTarget is not { } target || Math.Abs(Scroller.Offset.Y - _wheelOffset) >= 0.5)
+        {
+            _wheelTarget = null;
+            return;
+        }
+        var elapsed = _lastWheelFrame is { } last ? (time - last).TotalSeconds : 1.0 / 60;
+        _lastWheelFrame = time;
+
+        target = Math.Clamp(target, 0, Math.Max(0, Scroller.Extent.Height - Scroller.Viewport.Height));
+        var offset = _wheelOffset + (target - _wheelOffset) * (1 - Math.Exp(-elapsed / WheelEaseTime));
+        if (Math.Abs(target - offset) < 0.5)
+        {
+            offset = target;
+            _wheelTarget = null;
+        }
+        Scroller.Offset = new Vector(Scroller.Offset.X, offset);
+        _wheelOffset = Scroller.Offset.Y;
+        if (_wheelTarget != null)
+            TopLevel.GetTopLevel(this)?.RequestAnimationFrame(OnWheelFrame);
     }
 
     private void OnAddReactionClick(object? sender, RoutedEventArgs e)

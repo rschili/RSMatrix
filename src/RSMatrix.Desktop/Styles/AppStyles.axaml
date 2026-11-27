@@ -77,24 +77,65 @@
     <Setter Property="Background" Value="Transparent" />
   </Style>
 
-  <!-- Room list -->
-  <Style Selector="ListBox.rooms">
+  <!-- Lists in a sidebar: rooms, settings categories -->
+  <Style Selector="ListBox.sidebar">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Padding" Value="8,0" />
   </Style>
-  <Style Selector="ListBox.rooms ListBoxItem">
+  <Style Selector="ListBox.sidebar ListBoxItem">
     <Setter Property="Padding" Value="8,7" />
     <Setter Property="Margin" Value="0,1" />
     <Setter Property="CornerRadius" Value="8" />
   </Style>
-  <Style Selector="ListBox.rooms ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+  <Style Selector="ListBox.sidebar ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource SidebarItemHoverBrush}" />
   </Style>
-  <Style Selector="ListBox.rooms ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+  <Style Selector="ListBox.sidebar ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource SidebarItemSelectedBrush}" />
   </Style>
-  <Style Selector="ListBox.rooms ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+  <Style Selector="ListBox.sidebar ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource SidebarItemSelectedBrush}" />
+  </Style>
+
+  <!-- Settings dialog -->
+  <Style Selector="StackPanel.settingsPage">
+    <Setter Property="Margin" Value="28,20,28,24" />
+    <Setter Property="Spacing" Value="20" />
+  </Style>
+  <Style Selector="Border.dialogButtons">
+    <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+    <Setter Property="Padding" Value="16,12" />
+  </Style>
+  <!-- A radio button drawn as a selectable card around its content -->
+  <Style Selector="RadioButton.card">
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="Card" Background="Transparent" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="2" CornerRadius="10" Padding="6">
+          <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="RadioButton.card:pointerover /template/ Border#Card">
+    <Setter Property="BorderBrush" Value="{DynamicResource TextTertiaryBrush}" />
+  </Style>
+  <Style Selector="RadioButton.card:checked /template/ Border#Card">
+    <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}" />
+  </Style>
+  <Style Selector="RadioButton.card:focus-visible /template/ Border#Card">
+    <Setter Property="BorderBrush" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+  <Style Selector="RadioButton.card TextBlock">
+    <Setter Property="Margin" Value="4,0,0,2" />
+  </Style>
+  <Style Selector="Border.layoutPreview">
+    <Setter Property="Width" Value="224" />
+    <Setter Property="Height" Value="140" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
   </Style>
 
   <!-- Composer: the surrounding border draws the frame, the text box stays plain -->
@@ -178,6 +219,10 @@
   </Style>
   <Style Selector="Border.message.groupStart">
     <Setter Property="Margin" Value="0,10,0,0" />
+  </Style>
+  <Style Selector="Border.classicDivider">
+    <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+    <Setter Property="BorderThickness" Value="1,0,0,0" />
   </Style>
   <Style Selector="Border.message.pending">
     <Setter Property="Opacity" Value="0.55" />

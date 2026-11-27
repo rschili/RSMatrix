@@ -13,6 +13,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Sample\*.png" />
     <AvaloniaResource Include="Assets\icon.ico" />
+    <AvaloniaResource Include="Assets\LayoutPreviews\*.png" />
   </ItemGroup>
 
   <ItemGroup>

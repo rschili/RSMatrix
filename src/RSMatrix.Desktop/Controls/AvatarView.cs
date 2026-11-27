@@ -1,6 +1,7 @@
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Data.Converters;
 using Avalonia.Media;
 
 namespace RSMatrix.Desktop.Controls;
@@ -23,6 +24,10 @@ public sealed class AvatarView : Control
         Color.Parse("#368BD6"), Color.Parse("#AC3BA8"), Color.Parse("#0DA678"), Color.Parse("#E64F7A"),
         Color.Parse("#F07A2B"), Color.Parse("#1FA8AB"), Color.Parse("#5C56F5"), Color.Parse("#5FAD27"),
     ];
+
+    /// <summary>Turns a color seed into a brush in the avatar's color, for example to color names.</summary>
+    public static IValueConverter ColorBrushConverter { get; } =
+        new FuncValueConverter<string?, IBrush>(seed => new SolidColorBrush(GetColor(seed)));
 
     private static readonly Typeface InitialTypeface = new(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
 

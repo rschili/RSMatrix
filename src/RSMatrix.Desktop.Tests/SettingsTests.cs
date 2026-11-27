@@ -30,7 +30,7 @@ public class SettingsTests
     }
 
     [Test]
-    public async Task Settings_Change_Only_On_Confirm()
+    public async Task Settings_Change_Only_On_Save()
     {
         var results = new List<AppearanceSettings?>();
         var settings = new SettingsViewModel(new AppearanceSettings(), ["Inter", "Hack"], results.Add);
@@ -38,11 +38,31 @@ public class SettingsTests
         settings.FontFamily = "Hack";
         settings.CancelCommand.Execute(null);
         settings.ShowRoomPreviews = false;
-        settings.ConfirmCommand.Execute(null);
+        settings.IsClassicLayout = true;
+        settings.SaveCommand.Execute(null);
 
         await Assert.That(results.Count).IsEqualTo(2);
         await Assert.That(results[0]).IsNull();
-        await Assert.That(results[1]).IsEqualTo(new AppearanceSettings { FontFamily = "Hack", ShowRoomPreviews = false });
+        await Assert.That(results[1]).IsEqualTo(new AppearanceSettings { FontFamily = "Hack", ShowRoomPreviews = false, MessageLayout = MessageLayout.Classic });
+        await Assert.That(settings.IsComfortableLayout).IsFalse();
+    }
+
+    [Test]
+    public async Task Unknown_Choices_From_Another_Version_Fall_Back_To_Defaults()
+    {
+        var directory = Directory.CreateTempSubdirectory("rsmatrix-settings-tests").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "settings.json"),
+                """{ "Appearance": { "Theme": "Sepia", "MessageLayout": "Bubbles", "FontSize": 16 } }""");
+            var appearance = new LocalData(directory).LoadSettings().Appearance;
+
+            await Assert.That(appearance).IsEqualTo(new AppearanceSettings { FontSize = 16 });
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Test]

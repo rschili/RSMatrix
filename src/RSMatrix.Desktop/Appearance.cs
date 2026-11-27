@@ -38,6 +38,10 @@ internal static class Appearance
         var scale = appearance.FontSize / AppearanceSettings.DefaultFontSize;
         foreach (var (key, size) in FontSizes)
             resources[key] = Math.Round(size * scale, 1);
+        // Name column of the classic message layout
+        resources["ClassicNameWidth"] = Math.Round(120 * scale);
+
+        resources["MessageLayout"] = appearance.MessageLayout;
 
         resources["ShowRoomIcons"] = appearance.ShowRoomIcons;
         resources["ShowRoomBadgeBesideName"] = !appearance.ShowRoomIcons;

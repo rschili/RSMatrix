@@ -5,7 +5,8 @@
              xmlns:views="using:RSMatrix.Desktop.Views"
              xmlns:chat="using:RSMatrix.Desktop.Chat"
              x:Class="RSMatrix.Desktop.Views.TimelineView"
-             x:DataType="vm:ConversationViewModel">
+             x:DataType="vm:ConversationViewModel"
+             MessageLayout="{DynamicResource MessageLayout}">
   <UserControl.DataTemplates>
     <DataTemplate DataType="vm:ReactionViewModel">
       <Button Classes="reaction" Classes.mine="{Binding IncludesMe}" ToolTip.Tip="{Binding ToolTipText}"
@@ -18,6 +19,124 @@
       </Button>
     </DataTemplate>
   </UserControl.DataTemplates>
+
+  <UserControl.Resources>
+    <!-- Below the text of a message: send status, reactions and the thread summary -->
+    <DataTemplate x:Key="MessageFooter" x:DataType="vm:MessageViewModel">
+      <StackPanel Spacing="2">
+        <StackPanel Orientation="Horizontal" Spacing="8"
+                    IsVisible="{Binding StatusText, Converter={x:Static ObjectConverters.IsNotNull}}">
+          <TextBlock Classes="caption tertiary" Text="{Binding StatusText}" />
+          <Button Classes="link" FontSize="{DynamicResource FontSizeCaption}" Content="Retry" Command="{Binding RetryCommand}" CommandParameter="{Binding}"
+                  IsVisible="{Binding SendError, Converter={x:Static ObjectConverters.IsNotNull}}" ToolTip.Tip="{Binding SendError}" />
+        </StackPanel>
+        <ItemsControl Classes="reactions" ItemsSource="{Binding Reactions}" IsVisible="{Binding !!Reactions.Count}" />
+        <Button Classes="threadSummary" IsVisible="{Binding Thread.HasReplies, FallbackValue=False}"
+                Command="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).OpenThreadCommand}"
+                CommandParameter="{Binding}">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Path Classes="icon" Width="14" Height="14" Data="{StaticResource ThreadIcon}" />
+            <TextBlock Classes="replies" Text="{Binding Thread.ReplyCountText, FallbackValue={x:Null}}" />
+            <TextBlock Classes="caption tertiary" VerticalAlignment="Center" Text="{Binding Thread.LastReplyText, FallbackValue={x:Null}}" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- Who has read up to here -->
+    <DataTemplate x:Key="MessageReaders" x:DataType="vm:MessageViewModel">
+      <StackPanel Orientation="Horizontal" Background="Transparent" IsVisible="{Binding HasReaders}" ToolTip.Tip="{Binding ReadersToolTip}">
+        <ItemsControl ItemsSource="{Binding ReaderAvatars}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="-5" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="chat:ChatUser">
+              <Border Classes="reader">
+                <controls:AvatarView Width="16" Height="16" DisplayName="{Binding DisplayName}" ColorSeed="{Binding UserId}" />
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Classes="tertiary" FontSize="{DynamicResource FontSizeSmall}" VerticalAlignment="Center" Margin="3,0,0,0" Text="{Binding ReaderOverflowText}"
+                   IsVisible="{Binding ReaderOverflowText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- Shown while hovering the message -->
+    <DataTemplate x:Key="MessageActions" x:DataType="vm:MessageViewModel">
+      <Border Classes="messageActions" Classes.sent="{Binding IsSent}">
+        <StackPanel Orientation="Horizontal">
+          <ItemsControl ItemsSource="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).RecentReactions.Keys}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <Button Classes="emoji" Content="{Binding}" CommandParameter="{Binding}" ToolTip.Tip="{Binding}"
+                        Command="{Binding $parent[ItemsControl].((vm:MessageViewModel)DataContext).ToggleReactionCommand}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Classes="separator" />
+          <Button Classes="icon" ToolTip.Tip="Add reaction" Click="OnAddReactionClick">
+            <Path Classes="icon" Data="{StaticResource AddReactionIcon}" />
+          </Button>
+          <Button Classes="icon" ToolTip.Tip="Reply" CommandParameter="{Binding}"
+                  Command="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).StartReplyCommand}">
+            <Path Classes="icon" Data="{StaticResource ReplyIcon}" />
+          </Button>
+          <Button Classes="icon" ToolTip.Tip="Reply in thread" CommandParameter="{Binding}"
+                  IsVisible="{Binding !$parent[views:TimelineView].((vm:ConversationViewModel)DataContext).IsThread}"
+                  Command="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).OpenThreadCommand}">
+            <Path Classes="icon" Data="{StaticResource ThreadIcon}" />
+          </Button>
+          <Button Classes="icon" ToolTip.Tip="More" Click="OnMessageMenuClick">
+            <Path Classes="icon" Data="{StaticResource MoreIcon}" />
+          </Button>
+        </StackPanel>
+      </Border>
+    </DataTemplate>
+
+    <!-- One line per message: time, name and text in columns -->
+    <DataTemplate x:Key="ClassicMessageTemplate" x:DataType="vm:MessageViewModel">
+      <Border Classes="message classic" Classes.pending="{Binding IsPending}" Padding="24,0,18,0">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto" RowDefinitions="Auto,*">
+          <!-- The invisible widest time gives every row the same column width. Tabular digits are all equally wide. -->
+          <Panel Grid.Row="1" Margin="0,2,12,0">
+            <TextBlock Opacity="0" IsHitTestVisible="False" FontFeatures="tnum" Text="{x:Static vm:MessageViewModel.WidestTimeText}" />
+            <TextBlock Classes="tertiary" FontFeatures="tnum" Text="{Binding TimeText}" ToolTip.Tip="{Binding FullTimeText}" />
+          </Panel>
+          <TextBlock Grid.Row="1" Grid.Column="1" Width="{DynamicResource ClassicNameWidth}" Margin="0,2,10,0"
+                     FontWeight="SemiBold" TextAlignment="Right" TextTrimming="CharacterEllipsis"
+                     Foreground="{Binding Sender.UserId, Converter={x:Static controls:AvatarView.ColorBrushConverter}}"
+                     Text="{Binding Sender.DisplayName}" ToolTip.Tip="{Binding Sender.UserId}" />
+          <Border Grid.Column="2" Grid.RowSpan="2" Classes="classicDivider" />
+
+          <!-- The message this one replies to -->
+          <TextBlock Grid.Column="2" Classes="caption secondary" Margin="11,2,0,0" TextTrimming="CharacterEllipsis"
+                     IsVisible="{Binding IsReply}">
+            <Run Text="↳" />
+            <Run FontWeight="SemiBold" Text="{Binding ReplyToName}" />
+            <Run Text="{Binding ReplyToPreview}" />
+          </TextBlock>
+          <StackPanel Grid.Row="1" Grid.Column="2" Margin="11,2,0,2" Spacing="2">
+            <controls:MessageDocumentView Document="{Binding Content}" Classes.notice="{Binding IsNotice}" />
+            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource MessageFooter}" />
+          </StackPanel>
+
+          <ContentControl Grid.Row="1" Grid.Column="3" Margin="8,0,0,2" VerticalAlignment="Bottom"
+                          Content="{Binding}" ContentTemplate="{StaticResource MessageReaders}" />
+          <ContentControl Grid.RowSpan="2" Grid.ColumnSpan="4" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-20,0,0"
+                          Content="{Binding}" ContentTemplate="{StaticResource MessageActions}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
 
   <Panel>
     <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Disabled">
@@ -44,6 +163,7 @@
           </StackPanel>
         </Border>
 
+        <!-- The code-behind swaps in the classic message template when that layout is chosen -->
         <ItemsControl x:Name="Items" ItemsSource="{Binding Timeline.Items}" Padding="0,6,0,12">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -58,6 +178,8 @@
                 <Border Grid.Column="2" Height="1" Background="{DynamicResource DividerBrush}" VerticalAlignment="Center" />
               </Grid>
             </DataTemplate>
+
+            <!-- Avatar and name above the text, consecutive messages grouped -->
             <DataTemplate DataType="vm:MessageViewModel">
               <Border Classes="message" Classes.groupStart="{Binding IsGroupStart}" Classes.pending="{Binding IsPending}" Padding="24,3,18,3">
                 <Grid ColumnDefinitions="52,*,72" RowDefinitions="Auto,*">
@@ -81,80 +203,13 @@
                                  Text="{Binding TimeText}" ToolTip.Tip="{Binding FullTimeText}" />
                     </StackPanel>
                     <controls:MessageDocumentView Document="{Binding Content}" Classes.notice="{Binding IsNotice}" />
-                    <StackPanel Orientation="Horizontal" Spacing="8"
-                                IsVisible="{Binding StatusText, Converter={x:Static ObjectConverters.IsNotNull}}">
-                      <TextBlock Classes="caption tertiary" Text="{Binding StatusText}" />
-                      <Button Classes="link" FontSize="{DynamicResource FontSizeCaption}" Content="Retry" Command="{Binding RetryCommand}" CommandParameter="{Binding}"
-                              IsVisible="{Binding SendError, Converter={x:Static ObjectConverters.IsNotNull}}" ToolTip.Tip="{Binding SendError}" />
-                    </StackPanel>
-                    <ItemsControl Classes="reactions" ItemsSource="{Binding Reactions}" IsVisible="{Binding !!Reactions.Count}" />
-                    <Button Classes="threadSummary" IsVisible="{Binding Thread.HasReplies, FallbackValue=False}"
-                            Command="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).OpenThreadCommand}"
-                            CommandParameter="{Binding}">
-                      <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Path Classes="icon" Width="14" Height="14" Data="{StaticResource ThreadIcon}" />
-                        <TextBlock Classes="replies" Text="{Binding Thread.ReplyCountText, FallbackValue={x:Null}}" />
-                        <TextBlock Classes="caption tertiary" VerticalAlignment="Center" Text="{Binding Thread.LastReplyText, FallbackValue={x:Null}}" />
-                      </StackPanel>
-                    </Button>
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource MessageFooter}" />
                   </StackPanel>
 
-                  <!-- Who has read up to here -->
-                  <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                              Background="Transparent" IsVisible="{Binding HasReaders}" ToolTip.Tip="{Binding ReadersToolTip}">
-                    <ItemsControl ItemsSource="{Binding ReaderAvatars}">
-                      <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                          <StackPanel Orientation="Horizontal" Spacing="-5" />
-                        </ItemsPanelTemplate>
-                      </ItemsControl.ItemsPanel>
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="chat:ChatUser">
-                          <Border Classes="reader">
-                            <controls:AvatarView Width="16" Height="16" DisplayName="{Binding DisplayName}" ColorSeed="{Binding UserId}" />
-                          </Border>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <TextBlock Classes="tertiary" FontSize="{DynamicResource FontSizeSmall}" VerticalAlignment="Center" Margin="3,0,0,0" Text="{Binding ReaderOverflowText}"
-                               IsVisible="{Binding ReaderOverflowText, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                  </StackPanel>
-
-                  <!-- Shown while hovering the message -->
-                  <Border Grid.RowSpan="2" Grid.ColumnSpan="3" Classes="messageActions" Classes.sent="{Binding IsSent}"
-                          HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-20,0,0">
-                    <StackPanel Orientation="Horizontal">
-                      <ItemsControl ItemsSource="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).RecentReactions.Keys}">
-                        <ItemsControl.ItemsPanel>
-                          <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" />
-                          </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="x:String">
-                            <Button Classes="emoji" Content="{Binding}" CommandParameter="{Binding}" ToolTip.Tip="{Binding}"
-                                    Command="{Binding $parent[ItemsControl].((vm:MessageViewModel)DataContext).ToggleReactionCommand}" />
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-                      <Border Classes="separator" />
-                      <Button Classes="icon" ToolTip.Tip="Add reaction" Click="OnAddReactionClick">
-                        <Path Classes="icon" Data="{StaticResource AddReactionIcon}" />
-                      </Button>
-                      <Button Classes="icon" ToolTip.Tip="Reply" CommandParameter="{Binding}"
-                              Command="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).StartReplyCommand}">
-                        <Path Classes="icon" Data="{StaticResource ReplyIcon}" />
-                      </Button>
-                      <Button Classes="icon" ToolTip.Tip="Reply in thread" CommandParameter="{Binding}"
-                              IsVisible="{Binding !$parent[views:TimelineView].((vm:ConversationViewModel)DataContext).IsThread}"
-                              Command="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).OpenThreadCommand}">
-                        <Path Classes="icon" Data="{StaticResource ThreadIcon}" />
-                      </Button>
-                      <Button Classes="icon" ToolTip.Tip="More" Click="OnMessageMenuClick">
-                        <Path Classes="icon" Data="{StaticResource MoreIcon}" />
-                      </Button>
-                    </StackPanel>
-                  </Border>
+                  <ContentControl Grid.Row="1" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                  Content="{Binding}" ContentTemplate="{StaticResource MessageReaders}" />
+                  <ContentControl Grid.RowSpan="2" Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-20,0,0"
+                                  Content="{Binding}" ContentTemplate="{StaticResource MessageActions}" />
                 </Grid>
               </Border>
             </DataTemplate>

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -15,13 +16,16 @@ using RSMatrix.Desktop.Views;
 
 // Renders the desktop app without a display and writes PNG files, to review the look without running it.
 // Usage: snapshots OUTPUT_DIR [--live USER_ID PASSWORD HOMESERVER]
-if (args.Length is not (1 or 5) || (args.Length == 5 && args[1] != "--live"))
+//        snapshots --layout-previews OUTPUT_DIR   (the previews in the settings dialog)
+var isLayoutPreviews = args is ["--layout-previews", _];
+if (!isLayoutPreviews && (args.Length is not (1 or 5) || (args.Length == 5 && args[1] != "--live")))
 {
     Console.Error.WriteLine("Usage: snapshots OUTPUT_DIR [--live USER_ID PASSWORD HOMESERVER]");
+    Console.Error.WriteLine("       snapshots --layout-previews OUTPUT_DIR");
     return 2;
 }
 
-var outputDirectory = Directory.CreateDirectory(args[0]).FullName;
+var outputDirectory = Directory.CreateDirectory(isLayoutPreviews ? args[1] : args[0]).FullName;
 RSMatrix.Desktop.Program.ConfigureFonts(AppBuilder.Configure<App>())
     .UseSkia()
     .UseHarfBuzz()
@@ -36,7 +40,9 @@ window.Show();
 
 try
 {
-    if (args.Length == 5)
+    if (isLayoutPreviews)
+        RenderLayoutPreviews();
+    else if (args.Length == 5)
         await RenderLiveAsync(args[2], args[3], args[4]);
     else
         RenderSample();
@@ -70,6 +76,16 @@ void RenderSample()
     }
 
     Application.Current!.RequestedThemeVariant = ThemeVariant.Light;
+    chat.SelectedConversation = chat.Rooms.First(r => r.Name == "General");
+    foreach (var theme in new[] { ThemePreference.Light, ThemePreference.Dark })
+    {
+        Appearance.Apply(Application.Current!, new AppearanceSettings { MessageLayout = MessageLayout.Classic, Theme = theme });
+        Pump(TimeSpan.FromMilliseconds(500));
+        Save(theme == ThemePreference.Dark ? "room-general-classic-dark" : "room-general-classic");
+    }
+    Appearance.Apply(Application.Current!, new AppearanceSettings { Theme = ThemePreference.Light });
+    Pump(TimeSpan.FromMilliseconds(300));
+
     RenderMessageActions(chat);
 
     var lounge = chat.Rooms.First(r => r.Name == "Lounge");
@@ -105,6 +121,36 @@ void RenderSample()
     RenderSettings(chat);
 }
 
+// The end of the General room in each message layout and theme, as small pictures for the settings dialog.
+void RenderLayoutPreviews()
+{
+    main.OpenSession(new SampleChatSession());
+    var chat = main.Chat!;
+    chat.SelectedConversation = chat.Rooms.First(r => r.Name == "General");
+    window.Width = 900;
+    window.Height = 600;
+    Pump(TimeSpan.FromMilliseconds(500));
+    var size = new PixelSize(448, 280);
+    var timeline = window.GetVisualDescendants().OfType<TimelineView>().First();
+    window.Height += timeline.Bounds.Width * size.Height / size.Width - timeline.Bounds.Height;
+    foreach (var layout in Enum.GetValues<MessageLayout>())
+    {
+        foreach (var theme in new[] { ThemePreference.Light, ThemePreference.Dark })
+        {
+            Appearance.Apply(Application.Current!, new AppearanceSettings { MessageLayout = layout, Theme = theme });
+            Pump(TimeSpan.FromMilliseconds(500));
+            // The timeline is transparent on the window background, which a picture of the timeline alone doesn't have.
+            timeline.Background = (Avalonia.Media.IBrush)window.FindResource(Application.Current!.ActualThemeVariant, "WindowBackgroundBrush")!;
+            var dpi = 96.0 * size.Width / timeline.Bounds.Width;
+            using var bitmap = new RenderTargetBitmap(size, new Vector(dpi, dpi));
+            bitmap.Render(timeline);
+            var path = Path.Combine(outputDirectory, $"{layout}-{theme}.png".ToLowerInvariant());
+            bitmap.Save(path, new PngBitmapEncoderOptions());
+            Console.WriteLine(path);
+        }
+    }
+}
+
 // Opens the settings dialog and confirms a few appearance changes, the way a user would.
 void RenderSettings(ChatViewModel chat)
 {
@@ -112,10 +158,18 @@ void RenderSettings(ChatViewModel chat)
     main.OpenSettingsCommand.Execute(null);
     Pump(TimeSpan.FromMilliseconds(400));
     SaveDialog("settings");
+    var categories = window.OwnedWindows.Last().GetVisualDescendants().OfType<ListBox>().First(l => l.Name == "Categories");
+    foreach (var (index, name) in new[] { (1, "text"), (2, "room-list") })
+    {
+        categories.SelectedIndex = index;
+        Pump(TimeSpan.FromMilliseconds(200));
+        SaveDialog($"settings-{name}");
+    }
+    categories.SelectedIndex = 0;
 
     var settings = main.Settings!;
     settings.ShowRoomPreviews = false;
-    settings.ConfirmCommand.Execute(null);
+    settings.SaveCommand.Execute(null);
     Pump(TimeSpan.FromMilliseconds(500));
     Save("appearance-no-previews");
 
@@ -127,7 +181,7 @@ void RenderSettings(ChatViewModel chat)
     settings.Theme = settings.Themes.First(t => t.Value == ThemePreference.Dark);
     Pump(TimeSpan.FromMilliseconds(300));
     SaveDialog("settings-changed");
-    settings.ConfirmCommand.Execute(null);
+    settings.SaveCommand.Execute(null);
     Pump(TimeSpan.FromMilliseconds(500));
     Save("appearance-mono-large-dark");
 }

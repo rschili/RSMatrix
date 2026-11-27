@@ -20,11 +20,13 @@ Command line options: `--sample`, `--data-dir DIR`, `--user ID`, `--password PW`
 
 ## Settings
 
-The `⋯` menu next to the user opens the settings: theme, font, text size, and whether the room list shows icons and the latest message. They are saved in `settings.json` in the data directory and apply after OK. `Appearance` puts them into the application resources, where the views read them through `DynamicResource`. Font sizes in the views use the resource keys `FontSizeTitle`, `FontSizeCompact`, `FontSizeCaption`, `FontSizeSmall` and `FontSizeEmoji`, which scale with the chosen size.
+The `⋯` menu next to the user opens the settings, with a page per category: appearance (theme and message layout), text (font and size) and the room list (icons and the latest message). They are saved in `settings.json` in the data directory and apply after "Save changes". `Appearance` puts them into the application resources, where the views read them through `DynamicResource`. Font sizes in the views use the resource keys `FontSizeTitle`, `FontSizeCompact`, `FontSizeCaption`, `FontSizeSmall` and `FontSizeEmoji`, which scale with the chosen size.
+
+The message layouts are "Comfortable", with avatars and grouped messages, and "Classic", with time, name and text in columns. The dialog shows a small picture of each, in `Assets/LayoutPreviews`. `make desktop-layout-previews` renders them again from the sample data; run it after changing how messages look.
 
 ## Looking at it without a display
 
-`make desktop-snapshots` renders the app headless with sample data and writes PNG files to `temp/snapshots`: the signed-out window and sign-in dialog, each sample room in light and dark, the message actions, a thread, scrolling back, the composer, a narrow window, the member list in a wide and a narrow window, the settings dialog and a few appearance choices. With `--live USER_ID PASSWORD HOMESERVER` it signs in to a server instead and renders every room.
+`make desktop-snapshots` renders the app headless with sample data and writes PNG files to `temp/snapshots`: the signed-out window and sign-in dialog, each sample room in light and dark, the message actions, a thread, scrolling back, the composer, a narrow window, the member list in a wide and a narrow window, the settings dialog, the classic message layout and a few appearance choices. With `--live USER_ID PASSWORD HOMESERVER` it signs in to a server instead and renders every room.
 
 ## How it is built
 
@@ -34,7 +36,7 @@ The `⋯` menu next to the user opens the settings: theme, font, text size, and 
 - `Content/` turns message bodies into a `MessageDocument`. The HTML parser interprets only the tags and attributes the spec suggests. Links must be absolute with an allowed scheme, and images load only from `mxc://` URIs. Nothing is rendered by a browser engine.
 - `Controls/` renders documents as native Avalonia controls: selectable text with clickable links and spoilers, code blocks, quotes, lists, tables and images.
 - `ViewModels/` uses CommunityToolkit.Mvvm. A room and each of its threads are a `ConversationViewModel` with their own `RoomTimeline`, which keeps day separators, sender grouping and duplicate handling out of the views. They share one `RoomMessages`, which attaches reactions, read receipts and reply targets to their message.
-- `Views/TimelineView` keeps the reader at the newest message, and keeps the visible messages in place while older ones load above.
+- `Views/TimelineView` keeps the reader at the newest message, and keeps the visible messages in place while older ones load above. Mouse wheel steps glide instead of jumping, because Avalonia has no smooth wheel scrolling.
 
 ## What RSMatrix doesn't offer yet
 

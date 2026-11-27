@@ -92,6 +92,9 @@ public sealed partial class MessageViewModel : TimelineItemViewModel
 
     public string TimeText => Timestamp.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
 
+    /// <summary>A time about as wide as any <see cref="TimeText"/>, to size a column of times.</summary>
+    public static string WidestTimeText { get; } = new DateTime(2000, 1, 1, 10, 08, 0).ToString("t", CultureInfo.CurrentCulture);
+
     public string FullTimeText => Timestamp.ToLocalTime().ToString("f", CultureInfo.CurrentCulture);
 
     public string PreviewText => Kind == ChatMessageKind.Image ? "Image" : PlainTextParser.ToPreview(Body);

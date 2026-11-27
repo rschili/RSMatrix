@@ -51,7 +51,7 @@
         </Border>
 
         <Panel>
-          <ListBox Classes="rooms" ItemsSource="{Binding SidebarEntries}" SelectedItem="{Binding SelectedConversation}">
+          <ListBox Classes="sidebar" ItemsSource="{Binding SidebarEntries}" SelectedItem="{Binding SelectedConversation}">
             <ListBox.DataTemplates>
               <DataTemplate DataType="vm:RoomViewModel">
                 <Grid ColumnDefinitions="Auto,*,Auto">

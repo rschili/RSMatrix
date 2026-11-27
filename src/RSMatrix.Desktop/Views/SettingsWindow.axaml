@@ -5,44 +5,104 @@
         x:DataType="vm:SettingsViewModel"
         Title="Settings"
         Icon="/Assets/icon.ico"
-        Width="460" SizeToContent="Height" CanResize="False"
+        Width="760" Height="500" CanResize="False"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
-  <StackPanel Margin="24,20,24,20" Spacing="14">
-    <TextBlock Classes="title" Text="Appearance" />
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <ImageBrush x:Key="ComfortableLayoutPreview" Source="/Assets/LayoutPreviews/comfortable-light.png" />
+          <ImageBrush x:Key="ClassicLayoutPreview" Source="/Assets/LayoutPreviews/classic-light.png" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <ImageBrush x:Key="ComfortableLayoutPreview" Source="/Assets/LayoutPreviews/comfortable-dark.png" />
+          <ImageBrush x:Key="ClassicLayoutPreview" Source="/Assets/LayoutPreviews/classic-dark.png" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Window.Resources>
 
-    <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="10">
-      <TextBlock VerticalAlignment="Center" Text="Theme" />
-      <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding Themes}" SelectedItem="{Binding Theme}">
-        <ComboBox.ItemTemplate>
-          <DataTemplate x:DataType="vm:ThemeOption">
-            <TextBlock Text="{Binding Label}" />
-          </DataTemplate>
-        </ComboBox.ItemTemplate>
-      </ComboBox>
-
-      <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Font" />
-      <ComboBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" MaxDropDownHeight="360"
-                ItemsSource="{Binding FontFamilies}" SelectedItem="{Binding FontFamily}" />
-
-      <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="Text size" />
-      <ComboBox Grid.Row="2" Grid.Column="1" HorizontalAlignment="Stretch" MaxDropDownHeight="360"
-                ItemsSource="{Binding FontSizes}" SelectedItem="{Binding FontSize}" />
-    </Grid>
-
-    <Border Classes="composer" Padding="14,10">
-      <TextBlock TextWrapping="Wrap" FontFamily="{Binding PreviewFontFamily}" FontSize="{Binding FontSize}"
-                 Text="The quick brown fox jumps over the lazy dog. 0123456789" />
+  <DockPanel>
+    <Border DockPanel.Dock="Bottom" Classes="dialogButtons">
+      <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+        <Button MinWidth="88" HorizontalContentAlignment="Center" IsCancel="True" Content="Cancel" Command="{Binding CancelCommand}" />
+        <Button MinWidth="88" HorizontalContentAlignment="Center" Classes="accent" IsDefault="True" Content="Save changes"
+                Command="{Binding SaveCommand}" />
+      </StackPanel>
     </Border>
 
-    <StackPanel Spacing="2">
-      <CheckBox IsChecked="{Binding ShowRoomIcons}" Content="Show room icons" />
-      <CheckBox IsChecked="{Binding ShowRoomPreviews}" Content="Show the latest message below room names" />
-    </StackPanel>
+    <!-- Categories -->
+    <Border DockPanel.Dock="Left" Width="190" Background="{DynamicResource SidebarBackgroundBrush}">
+      <ListBox x:Name="Categories" Classes="sidebar" Margin="0,12" SelectedIndex="0">
+        <ListBoxItem Content="Appearance" />
+        <ListBoxItem Content="Text" />
+        <ListBoxItem Content="Room list" />
+      </ListBox>
+    </Border>
 
-    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,6,0,0">
-      <Button MinWidth="88" HorizontalContentAlignment="Center" IsCancel="True" Content="Cancel" Command="{Binding CancelCommand}" />
-      <Button MinWidth="88" HorizontalContentAlignment="Center" Classes="accent" IsDefault="True" Content="OK"
-              Command="{Binding ConfirmCommand}" />
-    </StackPanel>
-  </StackPanel>
+    <!-- One page per category, in the same order -->
+    <Carousel SelectedIndex="{Binding #Categories.SelectedIndex}">
+      <ScrollViewer>
+        <StackPanel Classes="settingsPage">
+          <TextBlock Classes="title" Text="Appearance" />
+          <StackPanel Spacing="6">
+            <TextBlock Text="Theme" />
+            <ComboBox Width="240" ItemsSource="{Binding Themes}" SelectedItem="{Binding Theme}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ThemeOption">
+                  <TextBlock Text="{Binding Label}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="Message layout" />
+            <StackPanel Orientation="Horizontal" Spacing="16">
+              <RadioButton Classes="card" GroupName="MessageLayout" IsChecked="{Binding IsComfortableLayout}">
+                <StackPanel Spacing="8">
+                  <Border Classes="layoutPreview" Background="{DynamicResource ComfortableLayoutPreview}" />
+                  <TextBlock Text="Comfortable" />
+                </StackPanel>
+              </RadioButton>
+              <RadioButton Classes="card" GroupName="MessageLayout" IsChecked="{Binding IsClassicLayout}">
+                <StackPanel Spacing="8">
+                  <Border Classes="layoutPreview" Background="{DynamicResource ClassicLayoutPreview}" />
+                  <TextBlock Text="Classic" />
+                </StackPanel>
+              </RadioButton>
+            </StackPanel>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer>
+        <StackPanel Classes="settingsPage">
+          <TextBlock Classes="title" Text="Text" />
+          <Grid ColumnDefinitions="Auto,240" RowDefinitions="Auto,Auto" ColumnSpacing="16" RowSpacing="10" HorizontalAlignment="Left">
+            <TextBlock VerticalAlignment="Center" Text="Font" />
+            <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" MaxDropDownHeight="360"
+                      ItemsSource="{Binding FontFamilies}" SelectedItem="{Binding FontFamily}" />
+
+            <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Text size" />
+            <ComboBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" MaxDropDownHeight="360"
+                      ItemsSource="{Binding FontSizes}" SelectedItem="{Binding FontSize}" />
+          </Grid>
+          <Border Classes="composer" Padding="14,10">
+            <TextBlock TextWrapping="Wrap" FontFamily="{Binding PreviewFontFamily}" FontSize="{Binding FontSize}"
+                       Text="The quick brown fox jumps over the lazy dog. 0123456789" />
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer>
+        <StackPanel Classes="settingsPage">
+          <TextBlock Classes="title" Text="Room list" />
+          <StackPanel Spacing="2">
+            <CheckBox IsChecked="{Binding ShowRoomIcons}" Content="Show room icons" />
+            <CheckBox IsChecked="{Binding ShowRoomPreviews}" Content="Show the latest message below room names" />
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+    </Carousel>
+  </DockPanel>
 </Window>

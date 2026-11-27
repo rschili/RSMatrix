@@ -1,4 +1,4 @@
-.PHONY: default build test ide clean-release publish matrix-up matrix-down matrix-logs matrix-status matrix-seed test-integration test-integration-disposable test-matrix-scripts desktop desktop-bob desktop-sample desktop-snapshots test-desktop
+.PHONY: default build test ide clean-release publish matrix-up matrix-down matrix-logs matrix-status matrix-seed test-integration test-integration-disposable test-matrix-scripts desktop desktop-bob desktop-sample desktop-snapshots desktop-layout-previews test-desktop
 
 MATRIX_PORT ?= 8008
 export MATRIX_PORT
@@ -53,6 +53,9 @@ desktop-sample:
 # Renders the app with sample data into PNG files, without a display.
 desktop-snapshots:
 	dotnet run --project src/RSMatrix.Desktop.Snapshots -- temp/snapshots
+
+desktop-layout-previews:
+	dotnet run --project src/RSMatrix.Desktop.Snapshots -- --layout-previews src/RSMatrix.Desktop/Assets/LayoutPreviews
 
 test-desktop:
 	dotnet run --project src/RSMatrix.Desktop.Tests

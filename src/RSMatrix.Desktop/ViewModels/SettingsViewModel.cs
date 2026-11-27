@@ -5,17 +5,18 @@ using RSMatrix.Desktop.Storage;
 
 namespace RSMatrix.Desktop.ViewModels;
 
-/// <summary>The settings dialog. Changes apply only when the user confirms with OK.</summary>
+/// <summary>The settings dialog. Changes apply only when the user saves them.</summary>
 public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly Action<AppearanceSettings?> _onClosed;
 
-    /// <param name="onClosed">Called with the new settings after OK, or null after Cancel.</param>
+    /// <param name="onClosed">Called with the new settings after Save, or null after Cancel.</param>
     public SettingsViewModel(AppearanceSettings appearance, IReadOnlyList<string> fontFamilies, Action<AppearanceSettings?> onClosed)
     {
         _onClosed = onClosed;
         FontFamilies = fontFamilies.Contains(appearance.FontFamily) ? fontFamilies : [.. fontFamilies, appearance.FontFamily];
         Theme = Themes.FirstOrDefault(t => t.Value == appearance.Theme) ?? Themes[0];
+        MessageLayout = appearance.MessageLayout;
         FontFamily = appearance.FontFamily;
         FontSize = appearance.FontSize;
         ShowRoomIcons = appearance.ShowRoomIcons;
@@ -28,6 +29,31 @@ public sealed partial class SettingsViewModel : ObservableObject
         new(ThemePreference.Light, "Light"),
         new(ThemePreference.Dark, "Dark"),
     ];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsComfortableLayout), nameof(IsClassicLayout))]
+    public partial MessageLayout MessageLayout { get; set; }
+
+    // For radio buttons: checking one selects its layout, unchecking does nothing.
+    public bool IsComfortableLayout
+    {
+        get => MessageLayout == MessageLayout.Comfortable;
+        set
+        {
+            if (value)
+                MessageLayout = MessageLayout.Comfortable;
+        }
+    }
+
+    public bool IsClassicLayout
+    {
+        get => MessageLayout == MessageLayout.Classic;
+        set
+        {
+            if (value)
+                MessageLayout = MessageLayout.Classic;
+        }
+    }
 
     public IReadOnlyList<string> FontFamilies { get; }
 
@@ -52,9 +78,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial bool ShowRoomPreviews { get; set; }
 
     [RelayCommand]
-    private void Confirm() => _onClosed(new AppearanceSettings
+    private void Save() => _onClosed(new AppearanceSettings
     {
         Theme = Theme.Value,
+        MessageLayout = MessageLayout,
         FontFamily = FontFamily,
         FontSize = FontSize,
         ShowRoomIcons = ShowRoomIcons,

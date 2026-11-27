@@ -12,6 +12,8 @@ public sealed record AppearanceSettings
 
     public ThemePreference Theme { get; init; } = ThemePreference.System;
 
+    public MessageLayout MessageLayout { get; init; } = MessageLayout.Comfortable;
+
     /// <summary>A font family name. <see cref="DefaultFontFamily"/> is the bundled Inter.</summary>
     public string FontFamily { get; init; } = DefaultFontFamily;
 
@@ -26,12 +28,13 @@ public sealed record AppearanceSettings
     public AppearanceSettings Normalized() => this with
     {
         Theme = Enum.IsDefined(Theme) ? Theme : ThemePreference.System,
+        MessageLayout = Enum.IsDefined(MessageLayout) ? MessageLayout : MessageLayout.Comfortable,
         FontFamily = string.IsNullOrWhiteSpace(FontFamily) ? DefaultFontFamily : FontFamily,
         FontSize = FontSizes.Contains(FontSize) ? FontSize : DefaultFontSize,
     };
 }
 
-[JsonConverter(typeof(ThemePreferenceConverter))]
+[JsonConverter(typeof(LenientEnumConverter<ThemePreference>))]
 public enum ThemePreference
 {
     System,
@@ -39,19 +42,29 @@ public enum ThemePreference
     Dark,
 }
 
-/// <summary>Reads themes this version doesn't know, for example from a newer version, as <see cref="ThemePreference.System"/>.</summary>
-internal sealed class ThemePreferenceConverter : JsonConverter<ThemePreference>
+[JsonConverter(typeof(LenientEnumConverter<MessageLayout>))]
+public enum MessageLayout
 {
-    public override ThemePreference Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    /// <summary>Avatar and name above the text, consecutive messages grouped.</summary>
+    Comfortable,
+
+    /// <summary>One line per message with time, name and text in columns, like IRC clients.</summary>
+    Classic,
+}
+
+/// <summary>Reads values this version doesn't know, for example from a newer version, as the first one of the enum.</summary>
+internal sealed class LenientEnumConverter<TEnum> : JsonConverter<TEnum> where TEnum : struct, Enum
+{
+    public override TEnum Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType != JsonTokenType.String)
         {
             reader.Skip();
-            return ThemePreference.System;
+            return default;
         }
-        return Enum.TryParse<ThemePreference>(reader.GetString(), out var theme) && Enum.IsDefined(theme) ? theme : ThemePreference.System;
+        return Enum.TryParse<TEnum>(reader.GetString(), out var value) && Enum.IsDefined(value) ? value : default;
     }
 
-    public override void Write(Utf8JsonWriter writer, ThemePreference value, JsonSerializerOptions options)
+    public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options)
         => writer.WriteStringValue(value.ToString());
 }
