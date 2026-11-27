@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace RSMatrix;
 
 /// <summary>Owner-only files for secrets the client keeps on disk.</summary>
@@ -23,6 +25,47 @@ internal static class PrivateFiles
         catch (IOException ex)
         {
             throw new InvalidOperationException(inUseMessage, ex);
+        }
+    }
+
+    /// <summary>
+    /// Reads a JSON file with a top-level <c>version</c>. Checks the version before reading the rest, so a file from a
+    /// newer RSMatrix gets a clear error instead of a parse error. Unreadable or damaged files throw with a message
+    /// that names the file.
+    /// </summary>
+    public static T ReadVersionedJson<T>(string path, int supportedVersion, JsonSerializerOptions options, string description)
+    {
+        string json;
+        try
+        {
+            json = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException($"The {description} {path} can't be read: {ex.Message}", ex);
+        }
+
+        try
+        {
+            int version;
+            using (var document = JsonDocument.Parse(json))
+            {
+                if (document.RootElement.ValueKind != JsonValueKind.Object
+                    || !document.RootElement.TryGetProperty("version", out var versionElement)
+                    || !versionElement.TryGetInt32(out version))
+                    throw new InvalidOperationException($"The {description} {path} is damaged: it has no version.");
+            }
+            if (version > supportedVersion)
+                throw new InvalidOperationException(
+                    $"The {description} {path} was written by a newer version of RSMatrix (format {version}). Update to use it.");
+            if (version != supportedVersion)
+                throw new InvalidOperationException($"The {description} {path} has unsupported format {version}.");
+            return JsonSerializer.Deserialize<T>(json, options)
+                ?? throw new InvalidOperationException($"The {description} {path} is empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"The {description} {path} is damaged: {ex.Message}", ex);
         }
     }
 

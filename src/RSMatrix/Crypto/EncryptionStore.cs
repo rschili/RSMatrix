@@ -7,7 +7,9 @@ namespace RSMatrix.Crypto;
 /// <summary>Everything the device needs to keep across restarts. Contains private keys.</summary>
 internal sealed class EncryptionStoreData
 {
-    public int Version { get; init; } = 1;
+    public const int CurrentVersion = 1;
+
+    public int Version { get; init; } = CurrentVersion;
     public required string UserId { get; init; }
     public required string DeviceId { get; init; }
     public required OlmAccount Account { get; init; }
@@ -46,7 +48,11 @@ internal sealed class InboundGroupSession
 internal sealed class EncryptionStore
 {
     private const string StoreFileName = "encryption.json";
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+    };
 
     private readonly string _path;
 
@@ -75,10 +81,8 @@ internal sealed class EncryptionStore
         if (!File.Exists(path))
             return Create(directory, userId, deviceId);
 
-        var data = JsonSerializer.Deserialize<EncryptionStoreData>(File.ReadAllText(path), JsonOptions)
-            ?? throw new InvalidOperationException($"The encryption store {path} is empty.");
-        if (data.Version != 1)
-            throw new InvalidOperationException($"The encryption store {path} has unsupported version {data.Version}.");
+        var data = PrivateFiles.ReadVersionedJson<EncryptionStoreData>(path, EncryptionStoreData.CurrentVersion, JsonOptions,
+            "encryption store");
         if (data.UserId != userId || data.DeviceId != deviceId)
             throw new InvalidOperationException($"The encryption store {path} belongs to {data.UserId} with device {data.DeviceId}.");
         return new EncryptionStore(path, data);

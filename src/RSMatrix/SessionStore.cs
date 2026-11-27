@@ -8,8 +8,10 @@ namespace RSMatrix;
 /// <summary>The session file. Contains the access token.</summary>
 internal sealed class SessionData
 {
+    public const int CurrentVersion = 1;
+
     [JsonPropertyName("version")]
-    public int Version { get; init; } = 1;
+    public int Version { get; init; } = CurrentVersion;
     [JsonPropertyName("user_id")]
     public required string UserId { get; init; }
     [JsonPropertyName("device_id")]
@@ -96,10 +98,7 @@ internal sealed class SessionStore : IDisposable
     {
         if (!File.Exists(path))
             return null;
-        var session = JsonSerializer.Deserialize<SessionData>(File.ReadAllText(path), JsonOptions)
-            ?? throw new InvalidOperationException($"The session file {path} is empty.");
-        if (session.Version != 1)
-            throw new InvalidOperationException($"The session file {path} has unsupported version {session.Version}.");
+        var session = PrivateFiles.ReadVersionedJson<SessionData>(path, SessionData.CurrentVersion, JsonOptions, "session file");
         if (session.UserId != userId)
             throw new InvalidOperationException($"The session file {path} belongs to {session.UserId}.");
         return session;

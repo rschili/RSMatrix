@@ -17,7 +17,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         FontFamilies = fontFamilies.Contains(appearance.FontFamily) ? fontFamilies : [.. fontFamilies, appearance.FontFamily];
         Theme = Themes.FirstOrDefault(t => t.Value == appearance.Theme) ?? Themes[0];
         FontFamily = appearance.FontFamily;
-        FontSize = FontSizes.Contains(appearance.FontSize) ? appearance.FontSize : AppearanceSettings.DefaultFontSize;
+        FontSize = appearance.FontSize;
         ShowRoomIcons = appearance.ShowRoomIcons;
         ShowRoomPreviews = appearance.ShowRoomPreviews;
     }
@@ -31,7 +31,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public IReadOnlyList<string> FontFamilies { get; }
 
-    public IReadOnlyList<double> FontSizes { get; } = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
+    public IReadOnlyList<double> FontSizes => AppearanceSettings.FontSizes;
 
     [ObservableProperty]
     public partial ThemeOption Theme { get; set; }

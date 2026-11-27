@@ -22,20 +22,26 @@ public sealed class LocalData
     public string Directory { get; }
 
     public static string DefaultDirectory
-        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RSMatrix.Desktop");
+        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "rsmatrix");
 
+    /// <summary>
+    /// Settings are cheap to lose, so a file that can't be read gives defaults, and values this version can't use are
+    /// replaced one by one.
+    /// </summary>
     public AppSettings LoadSettings()
     {
+        AppSettings? settings = null;
         try
         {
             if (File.Exists(_settingsPath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_settingsPath), JsonOptions) ?? new();
+                settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_settingsPath), JsonOptions);
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            // A damaged settings file only holds login defaults and appearance choices, so start over.
         }
-        return new();
+        settings ??= new();
+        settings.Appearance = settings.Appearance?.Normalized() ?? new();
+        return settings;
     }
 
     public void SaveSettings(AppSettings settings)
