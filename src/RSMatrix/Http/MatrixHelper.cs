@@ -97,7 +97,8 @@ internal static class MatrixHelper
         return await HttpClientHelper.SendAsync<PresenceResponse>(parameters, path).ConfigureAwait(false);
     }
 
-    public static async Task PutPresenceAsync(HttpClientParameters parameters, MatrixId userId, PresenceRequest presence)
+    public static async Task PutPresenceAsync(HttpClientParameters parameters, MatrixId userId, PresenceRequest presence,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentNullException.ThrowIfNull(userId);
@@ -106,7 +107,7 @@ internal static class MatrixHelper
         var content = JsonContent.Create(
             presence, options: new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
         string path = $"/_matrix/client/v3/presence/{Uri.EscapeDataString(userId.Full)}/status";
-        await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Put, content).ConfigureAwait(false);
+        await HttpClientHelper.SendAsync(parameters, path, HttpMethod.Put, content, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task PostReceiptAsync(HttpClientParameters parameters, MatrixId room, string eventId, string? threadId)

@@ -1,7 +1,7 @@
 namespace RSMatrix.Models;
 
 /// <summary>Everything the client receives, as one of a few small records.</summary>
-public union Update(NewMessage, MessageChanged, RoomChanged, Request, ConnectionChanged, ClientIssue);
+public union Update(NewMessage, MessageChanged, RoomChanged, PresenceChanged, Request, ConnectionChanged, ClientIssue);
 
 public sealed record NewMessage(Message Message);
 
@@ -38,6 +38,12 @@ public enum MessageChange
 /// </summary>
 /// <param name="Change">What changed. Most consumers redraw the room and don't need it.</param>
 public sealed record RoomChanged(Room Room, RoomChange Change);
+
+/// <summary>
+/// The presence, status text or <see cref="User.CurrentlyActive"/> of a user changed. <see cref="User"/> already holds the
+/// new values. Comes for the current user too, with what others see. Only with <see cref="OptionalUpdates.Presence"/>.
+/// </summary>
+public sealed record PresenceChanged(User User);
 
 public enum RoomChange
 {

@@ -140,7 +140,7 @@ public class Room
     /// </summary>
     public Task SetTypingAsync(bool isTyping, CancellationToken cancellationToken = default)
     {
-        return MatrixHelper.PutTypingAsync(Client.HttpClientParameters, RoomId, Client.CurrentUser, isTyping, cancellationToken);
+        return MatrixHelper.PutTypingAsync(Client.HttpClientParameters, RoomId, Client.CurrentUser.UserId, isTyping, cancellationToken);
     }
 
     /// <summary>
@@ -239,7 +239,7 @@ public class Room
     /// </summary>
     private Mentions ToMentions(IList<MatrixId>? mentions)
     {
-        var userIds = mentions?.Select(id => id.Full).Where(id => id != Client.CurrentUser.Full).Distinct(StringComparer.Ordinal).ToList();
+        var userIds = mentions?.Select(id => id.Full).Where(id => id != Client.CurrentUser.UserId.Full).Distinct(StringComparer.Ordinal).ToList();
         return new Mentions { UserIds = userIds is { Count: > 0 } ? userIds : null };
     }
 

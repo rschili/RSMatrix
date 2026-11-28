@@ -12,7 +12,7 @@ public class RoomEncryptionTests
         using var context = new MatrixTestContext();
         await SetEncryption(context, """{"algorithm":"m.megolm.v1.aes-sha2"}""", timeline);
         var room = context.Room();
-        var sender = context.Client.GetOrAddUser(context.Client.CurrentUser);
+        var sender = context.Client.CurrentUser;
         var message = new Message("$original", room, context.Client.GetOrAddUser(sender, room),
             DateTimeOffset.UtcNow, true, false, null, "$thread",
             new MessageContent(MessageKind.Text, "received", null, []));

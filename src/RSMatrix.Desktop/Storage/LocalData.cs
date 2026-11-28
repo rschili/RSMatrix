@@ -41,6 +41,7 @@ public sealed class LocalData
         }
         settings ??= new();
         settings.Appearance = settings.Appearance?.Normalized() ?? new();
+        settings.Presence = settings.Presence?.Normalized() ?? new();
         return settings;
     }
 
@@ -73,6 +74,8 @@ public sealed class AppSettings
     public string? LastHomeserver { get; set; }
 
     public AppearanceSettings Appearance { get; set; } = new();
+
+    public PresenceSettings Presence { get; set; } = new();
 
     public bool IsMemberListOpen { get; set; }
 }

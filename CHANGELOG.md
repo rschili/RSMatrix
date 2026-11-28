@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ConnectionChanged` updates and `MatrixClient.IsOnline`, for when the sync fails and when it works again.
 - `OptionalUpdates` on `LoginAsync` and `ResumeAsync`: bots can leave receipts, typing and presence out of the sync.
 - `Room.TypingUsers`, reported as `RoomChange.Typing`.
+- Presence: `PresenceChanged` updates, `User.StatusMessage`, `User.LastActiveAt`, and `MatrixClient.SetPresenceAsync` and `SetStatusMessageAsync`. The chosen presence goes with every sync, so it stays until changed, and a resumed session starts with it.
 - Read state: `Room.NotificationCount`, `Room.MentionCount` and `Room.HasUnread`, reported as `RoomChange.Unread`. `Room.MarkAsReadAsync()` marks the whole room as read.
 - After a soft logout, the client logs in again with the same device and keeps its sync position, while running and when resuming. Without a password it reports `PasswordRequiredException`.
 - After a hard logout, the store discards the session and the client reports `SessionEndedException`.
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `ConnectAsync` is replaced by `LoginAsync` and `ResumeAsync`. The client owns its `HttpClient` instead of taking an `IHttpClientFactory`, and is `IAsyncDisposable`: disposing stops the sync.
 - **Breaking:** the low-level HTTP and protocol types are internal.
 - **Breaking:** `IsSyncing` is replaced by `IsOnline`.
+- **Breaking:** `MatrixClient.CurrentUser` is a `User`, holding our own presence as others see it; the ID is `CurrentUser.UserId`.
 - **Breaking:** `Room.SendTypingNotificationAsync` is replaced by `Room.SetTypingAsync(bool)`, which can also stop typing.
 - Responses are no longer limited to 2 MB, so a large first sync works.
 - Requests no longer wait for a local rate limiter; the client relies on the server's rate limits.

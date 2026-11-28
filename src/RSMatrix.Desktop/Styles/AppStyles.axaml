@@ -208,6 +208,49 @@
   <Style Selector="Ellipse.status.online">
     <Setter Property="Fill" Value="{DynamicResource OnlineBrush}" />
   </Style>
+  <!-- Presence dot on the bottom right of an avatar, with a ring in the sidebar color -->
+  <Style Selector="Ellipse.presenceDot">
+    <Setter Property="Width" Value="11" />
+    <Setter Property="Height" Value="11" />
+    <Setter Property="StrokeThickness" Value="2" />
+    <Setter Property="Stroke" Value="{DynamicResource SidebarBackgroundBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Right" />
+    <Setter Property="VerticalAlignment" Value="Bottom" />
+    <Setter Property="Margin" Value="0,0,-2,-2" />
+    <Setter Property="Fill" Value="{DynamicResource TextTertiaryBrush}" />
+  </Style>
+  <Style Selector="Ellipse.presenceDot.small">
+    <Setter Property="Width" Value="10" />
+    <Setter Property="Height" Value="10" />
+  </Style>
+  <!-- A presence dot beside a label -->
+  <Style Selector="Ellipse.presenceMark">
+    <Setter Property="Width" Value="9" />
+    <Setter Property="Height" Value="9" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource TextTertiaryBrush}" />
+  </Style>
+  <Style Selector="Ellipse.presenceDot.online, Ellipse.presenceMark.online">
+    <Setter Property="Fill" Value="{DynamicResource OnlineBrush}" />
+  </Style>
+  <Style Selector="Ellipse.presenceDot.away, Ellipse.presenceMark.away">
+    <Setter Property="Fill" Value="{DynamicResource AwayBrush}" />
+  </Style>
+  <!-- The presence line below the user's name opens the presence menu. -->
+  <Style Selector="Button.presenceLine">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Button.presenceLine:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.presenceLine:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.presenceLine:pointerover TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
   <Style Selector="Border.banner">
     <Setter Property="Background" Value="{DynamicResource WarningBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />

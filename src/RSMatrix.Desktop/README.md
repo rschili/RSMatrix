@@ -24,9 +24,13 @@ The `⋯` menu next to the user opens the settings, with a page per category: ap
 
 The message layouts are "Comfortable", with avatars and grouped messages, and "Classic", with time, name and text in columns. The dialog shows a small picture of each, in `Assets/LayoutPreviews`. `make desktop-layout-previews` renders them again from the sample data; run it after changing how messages look.
 
+## Presence
+
+The line below the user's name in the bottom left shows the presence and status text; clicking it opens a menu with Online, Away and Invisible and a status field (Enter saves). Online means online while the user is active in the app and idle after the time from the settings; any mouse or keyboard input in the window, or bringing it to the front, counts as activity. Away and Invisible stay until changed. The chosen mode and idle time are saved in `settings.json`. When the server reports something else for a few seconds, usually because another device of the user is online, the line says what others see. The member list shows a presence dot on each avatar, the status text below the name, and presence with a rough last-seen time in the tooltip.
+
 ## Looking at it without a display
 
-`make desktop-snapshots` renders the app headless with sample data and writes PNG files to `temp/snapshots`: the signed-out window and sign-in dialog, each sample room in light and dark, the message actions, a thread, scrolling back, the composer, a narrow window, the member list in a wide and a narrow window, the settings dialog, the classic message layout and a few appearance choices. With `--live USER_ID PASSWORD HOMESERVER` it signs in to a server instead and renders every room.
+`make desktop-snapshots` renders the app headless with sample data and writes PNG files to `temp/snapshots`: the signed-out window and sign-in dialog, each sample room in light and dark, the message actions, a thread, scrolling back, the composer, a narrow window, the member list in a wide and a narrow window, the presence menu, the settings dialog, the classic message layout and a few appearance choices. With `--live USER_ID PASSWORD HOMESERVER` it signs in to a server instead and renders every room.
 
 ## How it is built
 

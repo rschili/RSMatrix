@@ -22,6 +22,7 @@
       <SolidColorBrush x:Key="ComposerBorderBrush" Color="#E1E4E9" />
       <SolidColorBrush x:Key="UnreadBadgeBrush" Color="#3366CC" />
       <SolidColorBrush x:Key="OnlineBrush" Color="#2E9E5B" />
+      <SolidColorBrush x:Key="AwayBrush" Color="#D69E2E" />
       <SolidColorBrush x:Key="WarningBrush" Color="#B7791F" />
       <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#FDF6E7" />
       <SolidColorBrush x:Key="ErrorBrush" Color="#C53030" />
@@ -50,6 +51,7 @@
       <SolidColorBrush x:Key="ComposerBorderBrush" Color="#2E3238" />
       <SolidColorBrush x:Key="UnreadBadgeBrush" Color="#4F7FE0" />
       <SolidColorBrush x:Key="OnlineBrush" Color="#3FB971" />
+      <SolidColorBrush x:Key="AwayBrush" Color="#E3B341" />
       <SolidColorBrush x:Key="WarningBrush" Color="#E0B252" />
       <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#2B261A" />
       <SolidColorBrush x:Key="ErrorBrush" Color="#F07070" />

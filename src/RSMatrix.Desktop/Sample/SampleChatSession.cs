@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -37,10 +38,21 @@ public sealed class SampleChatSession : IChatSession
     private readonly DateTimeOffset _now;
     private int _nextEventNumber;
     private readonly Dictionary<string, int> _historyPageByOldestEventId = [];
+    private readonly ConcurrentDictionary<string, ChatPresence> _presenceByUserId;
 
     public SampleChatSession(DateTimeOffset? now = null)
     {
         _now = now ?? DateTimeOffset.Now;
+        _presenceByUserId = new(new Dictionary<string, ChatPresence>
+        {
+            [Me.UserId] = new(PresenceState.Online, IsCurrentlyActive: true),
+            [Alice.UserId] = new(PresenceState.Online, "Reviewing the login screen", IsCurrentlyActive: true),
+            [Bob.UserId] = new(PresenceState.Away, LastActiveAt: _now.AddMinutes(-25)),
+            [Carol.UserId] = new(PresenceState.Online, "🍜 lunch", _now.AddMinutes(-2)),
+            [Dave.UserId] = new(PresenceState.Offline, LastActiveAt: _now.AddDays(-1)),
+            [Erin.UserId] = new(PresenceState.Offline, "On vacation until Monday", _now.AddDays(-9)),
+            [Builder.UserId] = new(PresenceState.Online, IsCurrentlyActive: true),
+        }, StringComparer.Ordinal);
         foreach (var chatEvent in CreateEvents())
             _events.Writer.TryWrite(chatEvent);
         _events.Writer.TryWrite(new ConnectionChanged(ConnectionState.Online, null));
@@ -50,6 +62,8 @@ public sealed class SampleChatSession : IChatSession
     }
 
     public ChatUser CurrentUser => Me;
+
+    public ChatPresence? CurrentUserPresence => _presenceByUserId[Me.UserId];
 
     public string ServerName => "sample.local";
 
@@ -123,7 +137,26 @@ public sealed class SampleChatSession : IChatSession
             _ => [Me, Alice, Bob, Carol, Dave, Erin],
         };
         var invited = roomId == General.RoomId ? new[] { Frank } : [];
-        return [.. joined.Select(u => new ChatMember(u, false)), .. invited.Select(u => new ChatMember(u, true))];
+        return [.. joined.Select(u => new ChatMember(u, false, _presenceByUserId.GetValueOrDefault(u.UserId))),
+            .. invited.Select(u => new ChatMember(u, true, _presenceByUserId.GetValueOrDefault(u.UserId)))];
+    }
+
+    public async Task SetPresenceAsync(PresenceState state, CancellationToken cancellationToken)
+    {
+        await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+        ReportOwnPresence(CurrentUserPresence! with { State = state, IsCurrentlyActive = state == PresenceState.Online });
+    }
+
+    public async Task SetStatusMessageAsync(string? statusMessage, CancellationToken cancellationToken)
+    {
+        await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+        ReportOwnPresence(CurrentUserPresence! with { StatusMessage = statusMessage });
+    }
+
+    private void ReportOwnPresence(ChatPresence presence)
+    {
+        _presenceByUserId[Me.UserId] = presence;
+        _events.Writer.TryWrite(new PresenceChanged(Me.UserId, presence));
     }
 
     public async Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken)

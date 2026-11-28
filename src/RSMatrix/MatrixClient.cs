@@ -17,7 +17,11 @@ namespace RSMatrix;
 public sealed class MatrixClient : IAsyncDisposable
 {
     internal ILogger Logger => HttpClientParameters.Logger;
-    public MatrixId CurrentUser { get; }
+    /// <summary>
+    /// The logged-in user. Its presence and status text are what the server reports, which is what others see; they can
+    /// differ from what <see cref="SetPresenceAsync"/> asked for, for example while another device of the user is online.
+    /// </summary>
+    public User CurrentUser { get; }
     internal IList<SpecVersion> SupportedSpecVersions { get; }
     internal static SpecVersion CurrentSpecVersion { get; } = new SpecVersion(1, 17, null, null);
     internal HttpClientParameters HttpClientParameters { get; private set; }
@@ -95,12 +99,54 @@ public sealed class MatrixClient : IAsyncDisposable
     /// </summary>
     public bool IsOnline => _isOnline;
 
+    /// <summary>
+    /// Sets whether others see the current user online, away or offline. The client repeats it with every sync, so it
+    /// stays until changed; with a store, a resumed session starts with it too. The server may still show something
+    /// else, see <see cref="CurrentUser"/>. Servers don't mark a syncing client as away on their own; apps that want that
+    /// call this after some idle time.
+    /// </summary>
+    public Task SetPresenceAsync(Presence presence, CancellationToken cancellationToken = default)
+    {
+        if (!Enum.IsDefined(presence))
+            throw new ArgumentOutOfRangeException(nameof(presence));
+        _requestedPresence = presence;
+        return PutPresenceAsync(cancellationToken);
+    }
+
+    /// <summary>Sets a text others see with the current user's presence, like "lunch". Null clears it.</summary>
+    public Task SetStatusMessageAsync(string? statusMessage, CancellationToken cancellationToken = default)
+    {
+        _requestedStatusMessage = string.IsNullOrEmpty(statusMessage) ? null : statusMessage;
+        return PutPresenceAsync(cancellationToken);
+    }
+
+    private async Task PutPresenceAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        // One at a time, so the last call is the one the server keeps.
+        await _presenceRequests.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var request = new PresenceRequest { Presence = _requestedPresence, StatusMsg = _requestedStatusMessage };
+            await MatrixHelper.PutPresenceAsync(HttpClientParameters, CurrentUser.UserId, request, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _presenceRequests.Release();
+        }
+    }
+
     // Completes with true when the server confirmed a logout, false when the logout failed.
     private TaskCompletionSource<bool>? _logout;
 
     // Kept to log in again after a soft logout.
     private string? _password;
     private OptionalUpdates _optionalUpdates = OptionalUpdates.All;
+    // What we ask the server to show for us. The presence goes with every sync, since each sync sets it again; both go
+    // with each PUT, since the server drops a status text the PUT leaves out.
+    private volatile Presence _requestedPresence = Presence.Online;
+    private volatile string? _requestedStatusMessage;
+    private readonly SemaphoreSlim _presenceRequests = new(1, 1);
     // Null for clients created for tests, which don't own their lifetime.
     private CancellationTokenSource? _lifetime;
     private Task? _syncTask;
@@ -115,9 +161,10 @@ public sealed class MatrixClient : IAsyncDisposable
         Capabilities capabilities)
     {
         HttpClientParameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
-        CurrentUser = userId ?? throw new ArgumentNullException(nameof(userId));
+        ArgumentNullException.ThrowIfNull(userId);
         if (userId.Kind != IdKind.User)
             throw new ArgumentException("User ID must be of type 'User'.", nameof(userId));
+        CurrentUser = GetOrAddUser(userId);
         SupportedSpecVersions = supportedSpecVersions ?? throw new ArgumentNullException(nameof(supportedSpecVersions));
         ServerCapabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
     }
@@ -338,7 +385,7 @@ public sealed class MatrixClient : IAsyncDisposable
             if (store != null)
             {
                 encryptionStore = EncryptionStore.Create(store.Directory, confirmedUserId.Full, login.DeviceId);
-                store.Save(CreateSessionData(http, confirmedUserId, login.DeviceId, syncToken: null));
+                store.Save(CreateSessionData(http, confirmedUserId, login.DeviceId, syncToken: null, presence: null));
             }
             return await CreateClientAsync(http, lifetime, confirmedUserId, login.DeviceId, password, recoveryKey, store,
                 encryptionStore, syncToken: null, optionalUpdates).ConfigureAwait(false);
@@ -384,7 +431,7 @@ public sealed class MatrixClient : IAsyncDisposable
                 http.Logger.LogWarning("The server ended the stored session but allows logging in again (soft logout). Logging in with the same device.");
                 await PasswordLoginAsync(http, userId, password, deviceId, deviceDisplayName: null, retry: true).ConfigureAwait(false);
             }
-            store.Save(CreateSessionData(http, userId, deviceId, stored.SyncToken));
+            store.Save(CreateSessionData(http, userId, deviceId, stored.SyncToken, stored.Presence));
             var encryptionStore = EncryptionStore.Open(store.Directory, userId.Full, deviceId);
             return await CreateClientAsync(http, lifetime, userId, deviceId, password, recoveryKey, store, encryptionStore,
                 stored.SyncToken, optionalUpdates).ConfigureAwait(false);
@@ -445,6 +492,7 @@ public sealed class MatrixClient : IAsyncDisposable
             _deviceId = deviceId,
             _sessionStore = sessionStore,
             _resumeSyncToken = syncToken,
+            _requestedPresence = ParsePresence(sessionStore?.Session?.Presence),
             _lifetime = lifetime,
             _optionalUpdates = optionalUpdates,
         };
@@ -585,19 +633,25 @@ public sealed class MatrixClient : IAsyncDisposable
         }
     }
 
-    private static SessionData CreateSessionData(HttpClientParameters http, MatrixId userId, string deviceId, string? syncToken) => new()
+    private static SessionData CreateSessionData(HttpClientParameters http, MatrixId userId, string deviceId, string? syncToken,
+        string? presence) => new()
     {
         UserId = userId.Full,
         DeviceId = deviceId,
         Homeserver = http.BaseUri,
         AccessToken = http.BearerToken!,
         SyncToken = syncToken,
+        Presence = presence,
     };
+
+    // Anything we don't know, like a value from a newer version, counts as online.
+    private static Presence ParsePresence(string? presence)
+        => Enum.TryParse<Presence>(presence, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed) ? parsed : Presence.Online;
 
     internal async Task<Filter> SetFilterAsync(Filter filter)
     {
         Logger.LogInformation("Setting filter new filter");
-        var filterResponse = await MatrixHelper.PostFilterAsync(HttpClientParameters, CurrentUser, filter).ConfigureAwait(false);
+        var filterResponse = await MatrixHelper.PostFilterAsync(HttpClientParameters, CurrentUser.UserId, filter).ConfigureAwait(false);
         var filterId = filterResponse.FilterId;
         if (string.IsNullOrEmpty(filterId))
         {
@@ -605,7 +659,7 @@ public sealed class MatrixClient : IAsyncDisposable
             throw new InvalidOperationException("Failed to set filter.");
         }
 
-        var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, CurrentUser, filterId).ConfigureAwait(false);
+        var updatedFilter = await MatrixHelper.GetFilterAsync(HttpClientParameters, CurrentUser.UserId, filterId).ConfigureAwait(false);
         if (updatedFilter != null)
         {
             updatedFilter.FilterId = filterId;
@@ -617,10 +671,37 @@ public sealed class MatrixClient : IAsyncDisposable
         throw new InvalidOperationException("Failed to get filter after setting it.");
     }
 
+    // Fills in our own presence before the first sync, which may not include it on a resumed session.
+    private async Task FetchOwnPresenceAsync()
+    {
+        if (!_optionalUpdates.HasFlag(OptionalUpdates.Presence))
+            return;
+        PresenceResponse response;
+        try
+        {
+            response = await MatrixHelper.GetPresenceAsync(HttpClientParameters, CurrentUser.UserId).ConfigureAwait(false);
+        }
+        catch (MatrixResponseException ex)
+        {
+            Logger.LogWarning(ex, "Could not fetch our own presence.");
+            return;
+        }
+        if (!Enum.IsDefined(response.Presence))
+            return;
+        var user = CurrentUser;
+        lock (user)
+        {
+            user.Presence = response.Presence;
+            user.StatusMessage = string.IsNullOrEmpty(response.StatusMessage) ? null : response.StatusMessage;
+            user.CurrentlyActive = response.CurrentlyActive;
+            user.LastActiveAt = response.LastActiveAgo is { } ago ? DateTimeOffset.UtcNow.AddMilliseconds(-ago) : null;
+        }
+        _requestedStatusMessage = user.StatusMessage;
+    }
+
     private async Task InitAsync()
     {
-        if (_optionalUpdates.HasFlag(OptionalUpdates.Presence))
-            await MatrixHelper.PutPresenceAsync(HttpClientParameters, CurrentUser, new PresenceRequest() {Presence = Presence.Online }).ConfigureAwait(false);
+        await FetchOwnPresenceAsync().ConfigureAwait(false);
         List<string> ephemeralNotTypes = [];
         if (!_optionalUpdates.HasFlag(OptionalUpdates.Receipts))
             ephemeralNotTypes.Add("m.receipt");
@@ -661,7 +742,6 @@ public sealed class MatrixClient : IAsyncDisposable
         {
             Since = _resumeSyncToken,
             FullState = _resumeSyncToken != null,
-            SetPresence = Presence.Online,
             Timeout = 60000,
             Filter = Filter?.FilterId
         };
@@ -674,6 +754,7 @@ public sealed class MatrixClient : IAsyncDisposable
             while (!HttpClientParameters.CancellationToken.IsCancellationRequested)
             {
                 SyncResponse response;
+                request.SetPresence = _requestedPresence;
                 try
                 {
                     response = await MatrixRetry.ExecuteAsync(HttpClientParameters, "Matrix sync",
@@ -713,7 +794,8 @@ public sealed class MatrixClient : IAsyncDisposable
         }
         catch (OperationCanceledException) when (HttpClientParameters.CancellationToken.IsCancellationRequested)
         {
-            // Normal shutdown, not a failed connection.
+            // Normal shutdown, not a failed connection. Keeps a presence set since the last sync.
+            SaveSession(request.Since);
         }
         catch (Exception ex)
         {
@@ -737,7 +819,7 @@ public sealed class MatrixClient : IAsyncDisposable
         if (_password == null)
             throw new PasswordRequiredException("The server ended the session, so logging in again needs the password. Resume with the password.", error);
         Logger.LogWarning("The server ended the session but allows logging in again (soft logout). Logging in with the same device.");
-        await PasswordLoginAsync(HttpClientParameters, CurrentUser, _password, _deviceId!, deviceDisplayName: null, retry: true).ConfigureAwait(false);
+        await PasswordLoginAsync(HttpClientParameters, CurrentUser.UserId, _password, _deviceId!, deviceDisplayName: null, retry: true).ConfigureAwait(false);
         SaveSession(request.Since);
     }
 
@@ -756,9 +838,11 @@ public sealed class MatrixClient : IAsyncDisposable
         if (_sessionStore == null)
             return;
         var stored = _sessionStore.Session;
-        if (stored != null && stored.SyncToken == syncToken && stored.AccessToken == HttpClientParameters.BearerToken)
+        var presence = _requestedPresence.ToString().ToLowerInvariant();
+        if (stored != null && stored.SyncToken == syncToken && stored.AccessToken == HttpClientParameters.BearerToken
+            && stored.Presence == presence)
             return;
-        _sessionStore.Save(CreateSessionData(HttpClientParameters, CurrentUser, _deviceId!, syncToken));
+        _sessionStore.Save(CreateSessionData(HttpClientParameters, CurrentUser.UserId, _deviceId!, syncToken, presence));
     }
 
     private async Task HandleSyncResponseAsync(SyncResponse response)
@@ -962,25 +1046,28 @@ public sealed class MatrixClient : IAsyncDisposable
                 continue;
             }
 
-            lock(user)
+            var statusMessage = string.IsNullOrEmpty(parsedPresence.StatusMsg) ? null : parsedPresence.StatusMsg;
+            bool changed;
+            lock (user)
             {
-                if(parsedPresence.CurrentlyActive != null)
-                    user.CurrentlyActive = parsedPresence.CurrentlyActive;
-
-                if(parsedPresence.AvatarUrl != null)
-                    user.AvatarUrl = parsedPresence.AvatarUrl;
-
-                if(parsedPresence.DisplayName != null)
-                    user.ProfileName = parsedPresence.DisplayName;
-
-                if(parsedPresence.CurrentlyActive != null)
-                    user.CurrentlyActive = parsedPresence.CurrentlyActive;
-
+                changed = user.Presence != parsedPresence.Presence || user.StatusMessage != statusMessage
+                    || user.CurrentlyActive != parsedPresence.CurrentlyActive;
                 user.Presence = parsedPresence.Presence;
-
-                if(parsedPresence.StatusMsg != null)
-                    user.StatusMessage = parsedPresence.StatusMsg;
+                user.StatusMessage = statusMessage;
+                user.CurrentlyActive = parsedPresence.CurrentlyActive;
+                if (parsedPresence.LastActiveAgo is { } ago)
+                    user.LastActiveAt = DateTimeOffset.UtcNow.AddMilliseconds(-ago);
+                if (parsedPresence.AvatarUrl != null)
+                    user.AvatarUrl = parsedPresence.AvatarUrl;
+                if (parsedPresence.DisplayName != null)
+                    user.ProfileName = parsedPresence.DisplayName;
             }
+
+            // Keeps a text set on another device; our next PUT would clear it otherwise.
+            if (user == CurrentUser)
+                _requestedStatusMessage = statusMessage;
+            if (changed && _hasSynced)
+                _updates.Writer.TryWrite(new PresenceChanged(user));
         }
     }
 
@@ -1008,7 +1095,7 @@ public sealed class MatrixClient : IAsyncDisposable
         foreach (var id in userIds.EnumerateArray())
         {
             if (id.ValueKind == JsonValueKind.String && UserId.TryParse(id.GetString(), out var userId) && userId != null
-                && !userId.Equals(CurrentUser))
+                && !userId.Equals(CurrentUser.UserId))
                 users.Add(GetOrAddUser(GetOrAddUser(userId), room));
         }
         room.TypingUsers = users;
@@ -1026,7 +1113,7 @@ public sealed class MatrixClient : IAsyncDisposable
             foreach (var type in target.Value.EnumerateObject())
             {
                 if (type.Name is not ("m.read" or "m.read.private") || type.Value.ValueKind != JsonValueKind.Object
-                    || !type.Value.TryGetProperty(CurrentUser.Full, out var receipt))
+                    || !type.Value.TryGetProperty(CurrentUser.UserId.Full, out var receipt))
                     continue;
                 // Receipts for a single thread don't mark the rest of the room as read.
                 if (receipt.ValueKind == JsonValueKind.Object && receipt.TryGetProperty("thread_id", out var thread)
@@ -1257,7 +1344,7 @@ public sealed class MatrixClient : IAsyncDisposable
         }
         StrippedStateEvent? RoomState(string type) => events.FirstOrDefault(e => e.Type == type && e.StateKey == "");
 
-        var ownMember = events.FirstOrDefault(e => e.Type == "m.room.member" && e.StateKey == CurrentUser.Full);
+        var ownMember = events.FirstOrDefault(e => e.Type == "m.room.member" && e.StateKey == CurrentUser.UserId.Full);
         if (ownMember == null || !UserId.TryParse(ownMember.Sender, out var inviterId) || inviterId == null)
         {
             Logger.LogWarning("The invite to room {RoomId} doesn't say who sent it. Ignoring it.", roomId.Full);
@@ -1320,7 +1407,7 @@ public sealed class MatrixClient : IAsyncDisposable
                     Logger.LogWarning("Received null timeline event in room {RoomId}.", roomId.Full);
                     continue;
                 }
-                var isOwn = e.Sender == CurrentUser.Full;
+                var isOwn = e.Sender == CurrentUser.UserId.Full;
                 var makesUnread = false;
                 try
                 {
@@ -1516,7 +1603,7 @@ public sealed class MatrixClient : IAsyncDisposable
         var replyToId = threadRootId != null && relatesTo!.IsFallingBack == true ? null : relatesTo?.InReplyTo?.EventId;
 
         var message = new MessageEntry(e.EventId, sender, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
-            sender.User.UserId.Equals(CurrentUser), isEncrypted, replyToId, threadRootId,
+            sender.User.UserId.Equals(CurrentUser.UserId), isEncrypted, replyToId, threadRootId,
             ToMessageContent(room, kind, content.Body, content.Format, content.FormattedBody, content.Mentions),
             IsDeleted: false, BundledEdit: null, BundledThread: null);
 
@@ -1539,7 +1626,7 @@ public sealed class MatrixClient : IAsyncDisposable
         if (GetRoomUser(room, e.Sender) is not { } sender)
             return null;
         return new MessageEntry(e.EventId, sender, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
-            sender.User.UserId.Equals(CurrentUser), isEncrypted, null, null, new MessageContent(MessageKind.Unknown, "", null, []),
+            sender.User.UserId.Equals(CurrentUser.UserId), isEncrypted, null, null, new MessageContent(MessageKind.Unknown, "", null, []),
             IsDeleted: true, BundledEdit: null, BundledThread: null);
     }
 

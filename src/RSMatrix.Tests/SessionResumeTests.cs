@@ -82,6 +82,30 @@ public class SessionResumeTests
     }
 
     [Test]
+    public async Task Resume_StartsWithThePresenceSetBefore()
+    {
+        var directory = NewDirectory();
+        try
+        {
+            var first = new FakeServer { HangOnSync = 2 };
+            await using (var client = await LoginAsync(first, directory))
+            {
+                await first.SyncHanging.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await client.SetPresenceAsync(Presence.Offline);
+            }
+            await Assert.That(ReadSession(directory)!.Presence).IsEqualTo("offline");
+
+            var second = new FakeServer { DeviceKeys = first.DeviceKeys };
+            await RunUntilEndAsync(ResumeAsync(second, directory));
+            await Assert.That(second.SyncQueries[0]).Contains("set_presence=offline");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
     public async Task GetStoredSession_WithoutSession_ReturnsNull()
     {
         var directory = NewDirectory();

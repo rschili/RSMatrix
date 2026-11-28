@@ -10,6 +10,9 @@ public interface IChatSession : IAsyncDisposable
 {
     ChatUser CurrentUser { get; }
 
+    /// <summary>What others see of the current user, or null while the server hasn't told. Changes come as <see cref="PresenceChanged"/>.</summary>
+    ChatPresence? CurrentUserPresence { get; }
+
     string ServerName { get; }
 
     /// <summary>Single reader. Completes when the session ends.</summary>
@@ -38,11 +41,32 @@ public interface IChatSession : IAsyncDisposable
 
     /// <summary>Returns the media content, or null when it is not available.</summary>
     Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken);
+
+    /// <summary>Sets whether others see the current user online, away or offline. It stays until changed.</summary>
+    Task SetPresenceAsync(PresenceState state, CancellationToken cancellationToken);
+
+    /// <summary>Sets the text others see with the current user's presence. Null clears it.</summary>
+    Task SetStatusMessageAsync(string? statusMessage, CancellationToken cancellationToken);
 }
 
 public sealed record ChatUser(string UserId, string DisplayName);
 
-public sealed record ChatMember(ChatUser User, bool IsInvited);
+/// <param name="Presence">Null while the server hasn't told.</param>
+public sealed record ChatMember(ChatUser User, bool IsInvited, ChatPresence? Presence = null);
+
+public enum PresenceState
+{
+    Online,
+    Away,
+    Offline,
+}
+
+/// <summary>A user's presence as the server reported it.</summary>
+/// <param name="StatusMessage">A text the user set, like "lunch".</param>
+/// <param name="LastActiveAt">When the user was last active, as of the report.</param>
+/// <param name="IsCurrentlyActive">The user is active right now, whatever <paramref name="LastActiveAt"/> says.</param>
+public sealed record ChatPresence(PresenceState State, string? StatusMessage = null, DateTimeOffset? LastActiveAt = null,
+    bool IsCurrentlyActive = false);
 
 /// <param name="Key">Usually an emoji. A user reacts at most once with the same key.</param>
 public sealed record ChatReaction(string Key, IReadOnlyList<ChatUser> Users);
@@ -114,6 +138,9 @@ public sealed record ReactionsChanged(string RoomId, string TargetEventId, IRead
 public sealed record ReceiptReceived(string RoomId, string EventId, ChatUser User) : ChatEvent;
 
 public sealed record ConnectionChanged(ConnectionState State, string? Detail) : ChatEvent;
+
+/// <summary>A user's presence or status text changed. Comes for the current user too.</summary>
+public sealed record PresenceChanged(string UserId, ChatPresence Presence) : ChatEvent;
 
 /// <summary>A problem the session keeps running through, like a message that could not be decrypted.</summary>
 public sealed record IssueReported(string Message, string? RoomId) : ChatEvent;

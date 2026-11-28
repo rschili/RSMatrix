@@ -169,7 +169,7 @@ public sealed class Message
         ArgumentException.ThrowIfNullOrEmpty(key);
         foreach (var reaction in ReactionEvents)
         {
-            if (reaction.Key == key && reaction.User.User.UserId.Equals(Room.Client.CurrentUser))
+            if (reaction.Key == key && reaction.User.User.UserId.Equals(Room.Client.CurrentUser.UserId))
                 await Room.RedactEventAsync(reaction.EventId).ConfigureAwait(false);
         }
     }

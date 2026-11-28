@@ -7,6 +7,7 @@ using RSMatrix.Desktop.Content;
 using RSMatrix.Desktop.Storage;
 using RSMatrix.Models;
 using ConnectionChanged = RSMatrix.Desktop.Chat.ConnectionChanged;
+using PresenceChanged = RSMatrix.Desktop.Chat.PresenceChanged;
 
 namespace RSMatrix.Desktop.Matrix;
 
@@ -35,8 +36,8 @@ public sealed class MatrixChatSession : IChatSession
     {
         _client = client;
         _logger = logger;
-        CurrentUser = new ChatUser(client.CurrentUser.Full, client.CurrentUser.Localpart.ToString());
-        ServerName = client.CurrentUser.Domain.ToString();
+        CurrentUser = new ChatUser(client.CurrentUser.UserId.Full, client.CurrentUser.UserId.Localpart.ToString());
+        ServerName = client.CurrentUser.UserId.Domain.ToString();
         _events.Writer.TryWrite(new ConnectionChanged(ConnectionState.Online, null));
         foreach (var room in client.Rooms)
             AddRoom(room);
@@ -44,6 +45,8 @@ public sealed class MatrixChatSession : IChatSession
     }
 
     public ChatUser CurrentUser { get; }
+
+    public ChatPresence? CurrentUserPresence => ToChatPresence(_client.CurrentUser);
 
     public string ServerName { get; }
 
@@ -121,9 +124,21 @@ public sealed class MatrixChatSession : IChatSession
     {
         var members = await GetRoom(roomId).GetMembersAsync(cancellationToken).ConfigureAwait(false);
         return members
-            .Select(u => new ChatMember(new ChatUser(u.User.UserId.Full, u.DisplayName), u.Membership == Membership.Invite))
+            .Select(u => new ChatMember(new ChatUser(u.User.UserId.Full, u.DisplayName), u.Membership == Membership.Invite,
+                ToChatPresence(u.User)))
             .ToList();
     }
+
+    public Task SetPresenceAsync(PresenceState state, CancellationToken cancellationToken)
+        => _client.SetPresenceAsync(state switch
+        {
+            PresenceState.Away => Presence.Unavailable,
+            PresenceState.Offline => Presence.Offline,
+            _ => Presence.Online,
+        }, cancellationToken);
+
+    public Task SetStatusMessageAsync(string? statusMessage, CancellationToken cancellationToken)
+        => _client.SetStatusMessageAsync(statusMessage, cancellationToken);
 
     // RSMatrix can't download media yet.
     public Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken)
@@ -174,6 +189,9 @@ public sealed class MatrixChatSession : IChatSession
                     case MessageChanged:
                         // The app does not show edits, deletions or thread changes yet.
                         break;
+                    case Models.PresenceChanged { User: var user } when ToChatPresence(user) is { } presence:
+                        _events.Writer.TryWrite(new PresenceChanged(user.UserId.Full, presence));
+                        break;
                     case RoomChanged { Room: var room } when !room.IsJoined:
                         if (_rooms.TryRemove(room.RoomId.Full, out _))
                             _events.Writer.TryWrite(new RoomLeft(room.RoomId.Full));
@@ -221,6 +239,14 @@ public sealed class MatrixChatSession : IChatSession
 
     private static List<ChatReaction> ToChatReactions(IReadOnlyList<Reaction> reactions)
         => reactions.Select(r => new ChatReaction(r.Key, r.Users.Select(ToChatUser).ToList())).ToList();
+
+    private static ChatPresence? ToChatPresence(User user)
+        => user.Presence is not { } presence ? null : new ChatPresence(presence switch
+        {
+            Presence.Unavailable => PresenceState.Away,
+            Presence.Offline => PresenceState.Offline,
+            _ => PresenceState.Online,
+        }, user.StatusMessage, user.LastActiveAt, user.CurrentlyActive == true);
 
     private static ChatUser ToChatUser(RoomUser user)
         => new(user.User.UserId.Full, user.DisplayName);

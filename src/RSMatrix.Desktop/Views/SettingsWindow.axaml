@@ -37,6 +37,7 @@
         <ListBoxItem Content="Appearance" />
         <ListBoxItem Content="Text" />
         <ListBoxItem Content="Room list" />
+        <ListBoxItem Content="Presence" />
       </ListBox>
     </Border>
 
@@ -100,6 +101,24 @@
           <StackPanel Spacing="2">
             <CheckBox IsChecked="{Binding ShowRoomIcons}" Content="Show room icons" />
             <CheckBox IsChecked="{Binding ShowRoomPreviews}" Content="Show the latest message below room names" />
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer>
+        <StackPanel Classes="settingsPage">
+          <TextBlock Classes="title" Text="Presence" />
+          <StackPanel Spacing="6">
+            <TextBlock Text="Show me as idle after" />
+            <ComboBox Width="240" ItemsSource="{Binding IdleTimes}" SelectedItem="{Binding IdleTime}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:IdleTimeOption">
+                  <TextBlock Text="{Binding Label}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBlock Classes="caption secondary" TextWrapping="Wrap" MaxWidth="460" HorizontalAlignment="Left"
+                       Text="Without mouse or keyboard input in the app for that long, others see you as away. You're back online with the next input. This only applies while your presence is set to Online." />
           </StackPanel>
         </StackPanel>
       </ScrollViewer>

@@ -26,9 +26,13 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
         _onSettingsRequested = onSettingsRequested;
         _getNow = getNow ?? (() => DateTimeOffset.Now);
         Media = new MediaLoader(session);
+        Presence = new OwnPresenceViewModel(session, _getNow, ReportIssue, _lifetime.Token);
     }
 
     public ChatUser CurrentUser => _session.CurrentUser;
+
+    /// <summary>The current user's presence and status text.</summary>
+    public OwnPresenceViewModel Presence { get; }
 
     internal IChatSession Session => _session;
 
@@ -99,7 +103,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Members of the selected room while the member list is open: joined by name, then invited.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(JoinedMemberCount))]
-    public partial IReadOnlyList<ChatMember> Members { get; private set; } = [];
+    public partial IReadOnlyList<MemberViewModel> Members { get; private set; } = [];
 
     public int JoinedMemberCount => Members.Count(m => !m.IsInvited);
 
@@ -165,6 +169,12 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 break;
             case IssueReported issue:
                 Issue = issue.Message;
+                break;
+            case PresenceChanged changed:
+                if (changed.UserId == CurrentUser.UserId)
+                    Presence.ApplyReported(changed.Presence);
+                foreach (var member in Members.Where(m => m.User.UserId == changed.UserId))
+                    member.Presence = changed.Presence;
                 break;
         }
     }
@@ -246,6 +256,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
                 return;
             Members = members.OrderBy(m => m.IsInvited)
                 .ThenBy(m => m.User.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .Select(m => new MemberViewModel(m, _getNow))
                 .ToList();
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
@@ -345,6 +356,7 @@ public sealed partial class ChatViewModel : ObservableObject, IAsyncDisposable
             {
                 foreach (var room in Rooms)
                     room.RefreshTimes();
+                Presence.CheckIdle();
             }
         }
         catch (OperationCanceledException)

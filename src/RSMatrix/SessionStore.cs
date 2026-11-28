@@ -22,6 +22,9 @@ internal sealed class SessionData
     public required string AccessToken { get; init; }
     [JsonPropertyName("sync_token")]
     public string? SyncToken { get; init; }
+    /// <summary>The presence the user chose, as in the spec (<c>online</c>, <c>unavailable</c>, <c>offline</c>).</summary>
+    [JsonPropertyName("presence")]
+    public string? Presence { get; init; }
 
     public override string ToString() => $"Session of {UserId} with device {DeviceId}";
 }

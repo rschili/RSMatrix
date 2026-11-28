@@ -12,7 +12,7 @@ public enum OptionalUpdates
     Receipts = 1,
     /// <summary>Who is typing, see <see cref="Room.TypingUsers"/>.</summary>
     Typing = 2,
-    /// <summary>Presence of other users, see <see cref="User.Presence"/>.</summary>
+    /// <summary>Presence and status texts of users, including the current one, see <see cref="PresenceChanged"/>.</summary>
     Presence = 4,
     All = Receipts | Typing | Presence,
 }

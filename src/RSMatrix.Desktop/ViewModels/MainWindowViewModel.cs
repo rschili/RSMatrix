@@ -71,10 +71,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public void OpenSession(IChatSession session)
     {
         Login = null;
+        var settings = _localData.LoadSettings();
         Chat = new ChatViewModel(session, OnSessionEnded, OpenSettings)
         {
-            IsMemberListOpen = _localData.LoadSettings().IsMemberListOpen,
+            IsMemberListOpen = settings.IsMemberListOpen,
         };
+        Chat.Presence.Start(settings.Presence);
         _ = Chat.RunAsync();
     }
 
@@ -92,25 +94,37 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenSettings()
-        => Settings ??= new SettingsViewModel(_localData.LoadSettings().Appearance, Appearance.GetFontFamilies(), CloseSettings);
+    {
+        var settings = _localData.LoadSettings();
+        Settings ??= new SettingsViewModel(settings.Appearance, settings.Presence.IdleMinutes, Appearance.GetFontFamilies(), CloseSettings);
+    }
 
-    private void CloseSettings(AppearanceSettings? appearance)
+    private void CloseSettings(SettingsDialogResult? result)
     {
         Settings = null;
-        if (appearance == null)
+        if (result == null)
             return;
         var settings = _localData.LoadSettings();
-        settings.Appearance = appearance;
+        settings.Appearance = result.Appearance;
+        settings.Presence = settings.Presence with { IdleMinutes = result.IdleMinutes };
         _localData.SaveSettings(settings);
-        Appearance.Apply(Application.Current!, appearance);
+        Appearance.Apply(Application.Current!, result.Appearance);
+        if (Chat != null)
+            Chat.Presence.IdleMinutes = result.IdleMinutes;
     }
 
     partial void OnChatChanged(ChatViewModel? oldValue, ChatViewModel? newValue)
     {
         if (oldValue != null)
+        {
             oldValue.PropertyChanged -= OnChatPropertyChanged;
+            oldValue.Presence.PropertyChanged -= OnPresencePropertyChanged;
+        }
         if (newValue != null)
+        {
             newValue.PropertyChanged += OnChatPropertyChanged;
+            newValue.Presence.PropertyChanged += OnPresencePropertyChanged;
+        }
     }
 
     private void OnChatPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -125,6 +139,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
             settings.IsMemberListOpen = chat.IsMemberListOpen;
             _localData.SaveSettings(settings);
         }
+    }
+
+    private void OnPresencePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(OwnPresenceViewModel.Mode) || sender is not OwnPresenceViewModel presence)
+            return;
+        var settings = _localData.LoadSettings();
+        settings.Presence = settings.Presence with { Mode = presence.Mode };
+        _localData.SaveSettings(settings);
     }
 
     /// <param name="error">Why the session ended, or null when the user disconnected.</param>

@@ -239,14 +239,14 @@ public class EncryptionTests
         var created = await LocalHomeserver.RequestAsync(alice, "/_matrix/client/v3/createRoom", HttpMethod.Post, new
         {
             preset = "private_chat",
-            invite = clients.Select(c => c.CurrentUser.Full).Distinct().ToArray(),
+            invite = clients.Select(c => c.CurrentUser.UserId.Full).Distinct().ToArray(),
             initial_state = new[] { new { type = "m.room.encryption", state_key = "", content = encryption } }
         });
         var roomId = created.GetProperty("room_id").GetString()!;
         var roomPath = $"/_matrix/client/v3/rooms/{Uri.EscapeDataString(roomId)}";
         // One device per user accepts; the others may see the room joined before they see the invite.
-        await Task.WhenAll(clients.DistinctBy(c => c.CurrentUser.Full).Select(c => AcceptInviteAsync(c, roomId, cancellationToken)));
-        await WaitForJoinedMembersAsync(alice, roomPath, clients.Select(c => c.CurrentUser.Full).Distinct().Count() + 1, cancellationToken);
+        await Task.WhenAll(clients.DistinctBy(c => c.CurrentUser.UserId.Full).Select(c => AcceptInviteAsync(c, roomId, cancellationToken)));
+        await WaitForJoinedMembersAsync(alice, roomPath, clients.Select(c => c.CurrentUser.UserId.Full).Distinct().Count() + 1, cancellationToken);
 
         var pingId = await SendPlaintextAsync(alice, roomPath, "ping");
         Room? bobRoom = null;

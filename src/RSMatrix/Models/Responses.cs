@@ -359,7 +359,7 @@ internal class PresenceResponse
     public bool? CurrentlyActive { get; set; }
 
     [JsonPropertyName("last_active_ago")]
-    public int? LastActiveAgo { get; set; }
+    public long? LastActiveAgo { get; set; }
 
     [JsonPropertyName("presence")]
     [JsonConverter(typeof(JsonStringEnumConverter))]

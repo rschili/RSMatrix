@@ -116,6 +116,8 @@ void RenderSample()
     Pump(TimeSpan.FromMilliseconds(400));
     Save("members-narrow");
     window.Width = 1180;
+
+    RenderPresence(chat);
     chat.ToggleMemberListCommand.Execute(null);
 
     RenderSettings(chat);
@@ -159,7 +161,7 @@ void RenderSettings(ChatViewModel chat)
     Pump(TimeSpan.FromMilliseconds(400));
     SaveDialog("settings");
     var categories = window.OwnedWindows.Last().GetVisualDescendants().OfType<ListBox>().First(l => l.Name == "Categories");
-    foreach (var (index, name) in new[] { (1, "text"), (2, "room-list") })
+    foreach (var (index, name) in new[] { (1, "text"), (2, "room-list"), (3, "presence") })
     {
         categories.SelectedIndex = index;
         Pump(TimeSpan.FromMilliseconds(200));
@@ -184,6 +186,27 @@ void RenderSettings(ChatViewModel chat)
     settings.SaveCommand.Execute(null);
     Pump(TimeSpan.FromMilliseconds(500));
     Save("appearance-mono-large-dark");
+}
+
+// Opens the presence menu below the user's name, sets a status text and goes away.
+void RenderPresence(ChatViewModel chat)
+{
+    var button = window.GetVisualDescendants().OfType<Button>().First(b => b.Name == "PresenceButton");
+    Click(button);
+    Pump(TimeSpan.FromMilliseconds(300));
+    // Popups are separate top levels here.
+    var menu = TopLevel.GetTopLevel((Control)((Flyout)button.Flyout!).Content!) ?? throw new InvalidOperationException("The menu didn't open.");
+    Save("presence-menu", menu);
+    button.Flyout!.Hide();
+
+    chat.Presence.StatusDraft = "🍜 lunch";
+    chat.Presence.SaveStatusCommand.Execute(null);
+    chat.Presence.IsAwayMode = true;
+    Pump(TimeSpan.FromMilliseconds(500));
+    Save("presence-away");
+    chat.Presence.ClearStatusCommand.Execute(null);
+    chat.Presence.IsOnlineMode = true;
+    Pump(TimeSpan.FromMilliseconds(300));
 }
 
 async Task RenderLiveAsync(string userId, string password, string homeserver)
@@ -325,7 +348,7 @@ void Pump(TimeSpan duration)
 // Dialogs are their own windows, owned by the main window.
 void SaveDialog(string name) => Save(name, window.OwnedWindows.Last());
 
-void Save(string name, Window? target = null)
+void Save(string name, TopLevel? target = null)
 {
     Dispatcher.UIThread.RunJobs();
     var frame = (target ?? window).CaptureRenderedFrame() ?? throw new InvalidOperationException("Nothing was rendered.");
