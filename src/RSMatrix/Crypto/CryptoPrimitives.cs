@@ -106,22 +106,9 @@ internal static class CryptoPrimitives
     /// <summary>AES-256-CTR with a 128-bit big-endian counter starting at <paramref name="iv"/>. Encrypts and decrypts.</summary>
     public static byte[] AesCtr(byte[] key, byte[] iv, ReadOnlySpan<byte> input)
     {
-        using var aes = Aes.Create();
-        aes.Key = key;
-        var counter = (byte[])iv.Clone();
-        var keyStream = new byte[16];
+        using var cipher = new AesCtrCipher(key, iv);
         var output = new byte[input.Length];
-        for (var offset = 0; offset < input.Length; offset += 16)
-        {
-            aes.EncryptEcb(counter, keyStream, PaddingMode.None);
-            for (var i = 0; i < 16 && offset + i < input.Length; i++)
-                output[offset + i] = (byte)(input[offset + i] ^ keyStream[i]);
-            for (var i = 15; i >= 0; i--)
-            {
-                if (++counter[i] != 0)
-                    break;
-            }
-        }
+        cipher.Transform(input, output);
         return output;
     }
 
@@ -142,6 +129,60 @@ internal static class CryptoPrimitives
             trimmed = trimmed[..^1] + Base64Alphabet[index & ~((1 << unusedBits) - 1)];
         return Convert.FromBase64String(trimmed + new string('=', (4 - trimmed.Length % 4) % 4));
     }
+}
+
+/// <summary>
+/// AES-256-CTR with a 128-bit big-endian counter starting at the IV, for data that arrives in pieces.
+/// Encrypts and decrypts; each call continues where the previous one stopped.
+/// </summary>
+internal sealed class AesCtrCipher : IDisposable
+{
+    private const int BlockSize = 16;
+    private const int BlocksPerBatch = 256;
+    private readonly Aes _aes;
+    private readonly byte[] _counter;
+    private readonly byte[] _counterBlocks = new byte[BlockSize * BlocksPerBatch];
+    private readonly byte[] _keyStream = new byte[BlockSize * BlocksPerBatch];
+    private int _keyStreamPosition = BlockSize * BlocksPerBatch;
+
+    public AesCtrCipher(byte[] key, byte[] iv)
+    {
+        if (iv.Length != BlockSize)
+            throw new ArgumentException("The IV must be 16 bytes.", nameof(iv));
+        _aes = Aes.Create();
+        _aes.Key = key;
+        _counter = (byte[])iv.Clone();
+    }
+
+    public void Transform(ReadOnlySpan<byte> input, Span<byte> output)
+    {
+        if (output.Length < input.Length)
+            throw new ArgumentException("The output is shorter than the input.", nameof(output));
+        for (var i = 0; i < input.Length; i++)
+        {
+            if (_keyStreamPosition == _keyStream.Length)
+                FillKeyStream();
+            output[i] = (byte)(input[i] ^ _keyStream[_keyStreamPosition++]);
+        }
+    }
+
+    /// <summary>Encrypts a batch of counter blocks at once; one ECB call per block would be slow for large files.</summary>
+    private void FillKeyStream()
+    {
+        for (var block = 0; block < BlocksPerBatch; block++)
+        {
+            _counter.CopyTo(_counterBlocks, block * BlockSize);
+            for (var i = BlockSize - 1; i >= 0; i--)
+            {
+                if (++_counter[i] != 0)
+                    break;
+            }
+        }
+        _aes.EncryptEcb(_counterBlocks, _keyStream, PaddingMode.None);
+        _keyStreamPosition = 0;
+    }
+
+    public void Dispose() => _aes.Dispose();
 }
 
 /// <summary>

@@ -5,9 +5,13 @@ public enum MessageKind
     Text,
     Notice,
     Emote,
+    /// <summary>An image, see <see cref="Message.Attachment"/>.</summary>
     Image,
+    /// <summary>Any file, see <see cref="Message.Attachment"/>.</summary>
     File,
+    /// <summary>An audio file, see <see cref="Message.Attachment"/>.</summary>
     Audio,
+    /// <summary>A video, see <see cref="Message.Attachment"/>.</summary>
     Video,
     /// <summary>A message type RSMatrix doesn't know. <see cref="Message.Body"/> holds the sender's text fallback.</summary>
     Unknown
@@ -49,11 +53,23 @@ public sealed class Message
 
     public MessageKind Kind => _content.Kind;
 
-    /// <summary>The text of the message with the latest edit applied. Empty once deleted.</summary>
+    /// <summary>
+    /// The text of the message with the latest edit applied. For attachments, the caption, empty without one.
+    /// Empty once deleted.
+    /// </summary>
     public string Body => _content.Body;
 
-    /// <summary>The HTML version of <see cref="Body"/>, if the sender provided one.</summary>
+    /// <summary>
+    /// The HTML version of <see cref="Body"/>, if the sender provided one. It is passed through as the sender wrote it;
+    /// render only the tags the spec allows.
+    /// </summary>
     public string? Html => _content.Html;
+
+    /// <summary>
+    /// The file of an image, file, audio or video message, following the latest edit. Null for other kinds, and for
+    /// attachments without a file the client can use; those keep the sender's text in <see cref="Body"/>.
+    /// </summary>
+    public Attachment? Attachment => _content.Attachment;
 
     public IReadOnlyList<RoomUser> Mentions => _content.Mentions;
 
@@ -199,7 +215,10 @@ public sealed class Message
     public override string ToString() => $"{Sender}: {Body}";
 }
 
-internal sealed record MessageContent(MessageKind Kind, string Body, string? Html, IReadOnlyList<RoomUser> Mentions);
+internal sealed record MessageContent(MessageKind Kind, string Body, string? Html, IReadOnlyList<RoomUser> Mentions, Attachment? Attachment = null)
+{
+    public static MessageContent Deleted { get; } = new(MessageKind.Unknown, "", null, []);
+}
 
 internal sealed record MessageEdit(string EventId, DateTimeOffset Timestamp, MessageContent Content);
 

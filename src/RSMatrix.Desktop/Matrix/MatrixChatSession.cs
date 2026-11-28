@@ -232,8 +232,10 @@ public sealed class MatrixChatSession : IChatSession
     {
         var kind = message.Kind == MessageKind.Notice ? ChatMessageKind.Notice : ChatMessageKind.Text;
         var sender = ToChatUser(message.Sender);
+        // Until the timeline shows attachments, they appear as their file name.
+        var body = message is { Body: "", Attachment: { } attachment } ? attachment.FileName : message.Body;
         return new ChatMessage(message.Room.RoomId.Full, message.Id, sender, message.Timestamp, kind,
-            message.Body, PlainTextParser.Parse(message.Body), message.IsEncrypted, message.ThreadRootId, message.ReplyToId,
+            body, PlainTextParser.Parse(body), message.IsEncrypted, message.ThreadRootId, message.ReplyToId,
             Reactions: ToChatReactions(message.Reactions));
     }
 

@@ -557,6 +557,43 @@ public sealed class MatrixClient : IAsyncDisposable
         _sessionStore?.Delete();
     }
 
+    /// <summary>
+    /// A smaller version of an image by its mxc:// URI, like a room or member avatar. The server scales it to at least
+    /// the given size, unless the original is smaller. Null if the URI is missing or invalid, or the server has no
+    /// thumbnail for it.
+    /// </summary>
+    /// <param name="width">The width in pixels the image is shown at. Servers keep 32×32, 96×96, 320×240, 640×480 and 800×600 ready.</param>
+    /// <param name="height">The height in pixels the image is shown at.</param>
+    /// <param name="crop">Cuts the image to the given aspect ratio, for example square for avatars. Otherwise the aspect ratio stays.</param>
+    public Task<byte[]?> DownloadThumbnailAsync(string? mxcUri, int width, int height, bool crop = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
+        if (!MatrixContentUri.TryParse(mxcUri, out var uri))
+            return Task.FromResult<byte[]?>(null);
+        return MediaHelper.TryDownloadThumbnailAsync(HttpClientParameters, uri, width, height, crop, cancellationToken);
+    }
+
+    /// <summary>
+    /// A whole file by its mxc:// URI, like an image in a message's HTML. Null if the URI is missing or invalid, or the
+    /// server doesn't have the file. Files of image, file, audio and video messages come from <see cref="Message.Attachment"/>,
+    /// which also decrypts them.
+    /// </summary>
+    public async Task<MediaFile?> DownloadAsync(string? mxcUri, CancellationToken cancellationToken = default)
+    {
+        if (!MatrixContentUri.TryParse(mxcUri, out var uri))
+            return null;
+        try
+        {
+            var (content, info) = await MediaHelper.DownloadAsync(HttpClientParameters, new MediaSource(uri, null), cancellationToken).ConfigureAwait(false);
+            return new MediaFile(content, info.ContentType, info.FileName);
+        }
+        catch (MatrixResponseException ex) when (MediaHelper.IsNotFound(ex))
+        {
+            return null;
+        }
+    }
+
     private static async Task<string> DiscoverHomeserverAsync(HttpClientParameters http, MatrixId userId)
     {
         var logger = http.Logger;
@@ -1604,7 +1641,7 @@ public sealed class MatrixClient : IAsyncDisposable
 
         var message = new MessageEntry(e.EventId, sender, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
             sender.User.UserId.Equals(CurrentUser.UserId), isEncrypted, replyToId, threadRootId,
-            ToMessageContent(room, kind, content.Body, content.Format, content.FormattedBody, content.Mentions),
+            ToMessageContent(room, e, content),
             IsDeleted: false, BundledEdit: null, BundledThread: null);
 
         if (e.Unsigned?.Relations?.Replace is { } bundledEdit && ReadBundledEdit(room, bundledEdit) is { } edit && edit.TargetId == message.EventId
@@ -1626,7 +1663,7 @@ public sealed class MatrixClient : IAsyncDisposable
         if (GetRoomUser(room, e.Sender) is not { } sender)
             return null;
         return new MessageEntry(e.EventId, sender, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
-            sender.User.UserId.Equals(CurrentUser.UserId), isEncrypted, null, null, new MessageContent(MessageKind.Unknown, "", null, []),
+            sender.User.UserId.Equals(CurrentUser.UserId), isEncrypted, null, null, MessageContent.Deleted,
             IsDeleted: true, BundledEdit: null, BundledThread: null);
     }
 
@@ -1655,7 +1692,7 @@ public sealed class MatrixClient : IAsyncDisposable
             return null;
         }
         return new EditEntry(e.EventId, targetId, e.Sender, isEncrypted, new MessageEdit(e.EventId, DateTimeOffset.FromUnixTimeMilliseconds(e.OriginServerTs),
-            ToMessageContent(room, ToMessageKind(newContent.MsgType), newContent.Body, newContent.Format, newContent.FormattedBody, newContent.Mentions)));
+            ToMessageContent(room, e, newContent)));
     }
 
     private ReactionEntry? ReadReaction(Room room, RoomEvent e, ReactionContent? content)
@@ -1678,14 +1715,32 @@ public sealed class MatrixClient : IAsyncDisposable
         return GetRoomUser(room, e.Sender) is { } redactedBy ? new RedactionEntry(e.EventId, redactedId, redactedBy) : null;
     }
 
-    private MessageContent ToMessageContent(Room room, MessageKind kind, string body, string? format, string? formattedBody, Mentions? mentions)
+    /// <param name="e">The message or edit event the content belongs to, for logging.</param>
+    private MessageContent ToMessageContent(Room room, RoomEvent e, MessageBodyContent content)
     {
-        var html = format == "org.matrix.custom.html" ? formattedBody : null;
-        var mentionedUsers = mentions?.UserIds?
+        var kind = ToMessageKind(content.MsgType);
+        var body = content.Body;
+        var html = content.Format == "org.matrix.custom.html" ? content.FormattedBody : null;
+        Attachment? attachment = null;
+        if (kind is MessageKind.Image or MessageKind.File or MessageKind.Audio or MessageKind.Video)
+        {
+            attachment = Attachment.FromContent(this, kind, content);
+            if (attachment == null)
+            {
+                Logger.LogWarning("Message {EventId} in room {RoomId} is a {MsgType} without a usable file.", e.EventId, room.RoomId.Full, content.MsgType);
+            }
+            else if (string.IsNullOrEmpty(content.FileName) || content.FileName == body)
+            {
+                // Without a separate file name, the body holds the file name and there is no caption.
+                body = "";
+                html = null;
+            }
+        }
+        var mentionedUsers = content.Mentions?.UserIds?
             .Select(id => GetRoomUser(room, id))
             .OfType<RoomUser>()
             .ToList() ?? [];
-        return new MessageContent(kind, body, html, mentionedUsers);
+        return new MessageContent(kind, body, html, mentionedUsers, attachment);
     }
 
     private static MessageKind ToMessageKind(string msgType) => msgType switch

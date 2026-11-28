@@ -89,11 +89,19 @@ internal static class HttpClientHelper
         }
     }
 
-    private static CancellationTokenSource? Link(HttpClientParameters parameters, CancellationToken cancellationToken)
+    /// <summary>
+    /// Sends a GET and returns as soon as the response headers arrived, for bodies that aren't JSON and may be large.
+    /// The caller reads the body and disposes the response. Pass a token from <see cref="Link"/>, since it must
+    /// stay valid while the body is read.
+    /// </summary>
+    public static Task<HttpResponseMessage> GetStreamingAsync(HttpClientParameters parameters, string path, CancellationToken cancellationToken)
+        => SendRequestAsync(parameters, path, HttpMethod.Get, null, cancellationToken, streamBody: true);
+
+    internal static CancellationTokenSource? Link(HttpClientParameters parameters, CancellationToken cancellationToken)
         => cancellationToken.CanBeCanceled ? CancellationTokenSource.CreateLinkedTokenSource(parameters.CancellationToken, cancellationToken) : null;
 
     private static async Task<HttpResponseMessage> SendRequestAsync(HttpClientParameters parameters, string relativePath, HttpMethod? method, HttpContent? content,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool streamBody = false)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         ArgumentException.ThrowIfNullOrEmpty(relativePath);
@@ -117,7 +125,8 @@ internal static class HttpClientHelper
             cancellationToken.ThrowIfCancellationRequested();
 
             using var request = new HttpRequestMessage(requestMethod, fullPath);
-            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
+            if (!streamBody)
+                request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
             if (!string.IsNullOrWhiteSpace(parameters.BearerToken))
                 request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", parameters.BearerToken);
             if (body != null)
@@ -128,7 +137,8 @@ internal static class HttpClientHelper
             }
 
             parameters.Logger.LogInformation("Sending request {Path}", debugPath);
-            var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var response = await client.SendAsync(request,
+                streamBody ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
             parameters.Logger.LogInformation("Request '{Path}' completed with status code {Status}", debugPath, response.StatusCode);
             if (response.IsSuccessStatusCode)
                 return response; // caller owns/disposes successful responses, including empty ones

@@ -211,6 +211,8 @@ public class Room
     {
         ArgumentException.ThrowIfNullOrEmpty(originalEventId);
         ArgumentException.ThrowIfNullOrEmpty(newBody);
+        if (kind is MessageKind.Image or MessageKind.File or MessageKind.Audio or MessageKind.Video)
+            throw new NotSupportedException("Editing the caption of an attachment isn't supported yet.");
         var msgType = kind switch { MessageKind.Notice => "m.notice", MessageKind.Emote => "m.emote", _ => "m.text" };
         var newContent = new NewMessageContent { MsgType = msgType, Body = newBody, Mentions = ToMentions(mentions) };
         var previous = previousMentions?.Select(user => user.User.UserId.Full).ToHashSet(StringComparer.Ordinal);

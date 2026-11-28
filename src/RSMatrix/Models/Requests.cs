@@ -92,24 +92,6 @@ internal class TypingRequest
     public uint? Timeout { get; set; }
 }
 
-internal class NewMessageContent
-{
-    [JsonPropertyName("msgtype")]
-    public required string MsgType { get; set; }
-
-    [JsonPropertyName("body")]
-    public required string Body { get; set; }
-
-    [JsonPropertyName("format")]
-    public string? Format { get; set; }
-
-    [JsonPropertyName("formatted_body")]
-    public string? FormattedBody { get; set; }
-
-    [JsonPropertyName("m.mentions")]
-    public Mentions? Mentions { get; set; }
-}
-
 internal class RedactionRequest
 {
     [JsonPropertyName("reason")]

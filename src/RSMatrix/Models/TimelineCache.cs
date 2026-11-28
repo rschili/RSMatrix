@@ -190,7 +190,7 @@ internal sealed class TimelineCache(Room room, bool holdsNewest)
         if (message.IsDeleted || related.Any(r => r is RedactionEntry))
         {
             return new Message(message.EventId, room, message.Sender, message.Timestamp, message.IsOwn, message.IsEncrypted, null, null,
-                new MessageContent(MessageKind.Unknown, "", null, []), isDeleted: true, hasAllReactions: holdsNewest);
+                MessageContent.Deleted, isDeleted: true, hasAllReactions: holdsNewest);
         }
 
         var edits = related.OfType<EditEntry>().Where(e => IsValidEdit(message, e) && !IsDeleted(e.EventId)).Select(e => e.Edit);

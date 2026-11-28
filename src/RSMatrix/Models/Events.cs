@@ -235,11 +235,13 @@ internal class BundledThread
 
 
 
-internal class RoomMessageContent
+/// <summary>The fields m.room.message shares with the m.new_content of an edit.</summary>
+internal class MessageBodyContent
 {
     [JsonPropertyName("msgtype")]
     public required string MsgType { get; set; }
 
+    /// <summary>The text. For attachments, the file name, or a caption when <see cref="FileName"/> is set and differs.</summary>
     [JsonPropertyName("body")]
     public required string Body { get; set; }
 
@@ -255,11 +257,146 @@ internal class RoomMessageContent
     [JsonPropertyName("m.mentions")]
     public Mentions? Mentions { get; set; }
 
+    [JsonPropertyName("filename")]
+    public string? FileName { get; set; }
+
+    /// <summary>The mxc:// URI of an unencrypted file.</summary>
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    /// <summary>Replaces <see cref="Url"/> for encrypted files.</summary>
+    [JsonPropertyName("file")]
+    public EncryptedFileContent? File { get; set; }
+
+    [JsonPropertyName("info")]
+    public MediaInfoContent? Info { get; set; }
+}
+
+internal class RoomMessageContent : MessageBodyContent
+{
     [JsonPropertyName("m.relates_to")]
     public RelatesTo? RelatesTo { get; set; }
 
     [JsonPropertyName("m.new_content")]
     public NewMessageContent? NewContent { get; set; }
+}
+
+internal class NewMessageContent : MessageBodyContent;
+
+/// <summary>
+/// The info of m.image, m.file, m.audio and m.video. Numbers are read leniently: some clients send them as strings or
+/// with decimals, and a broken size shouldn't cost the whole message.
+/// </summary>
+internal class MediaInfoContent
+{
+    [JsonPropertyName("mimetype")]
+    public string? MimeType { get; set; }
+
+    [JsonPropertyName("size"), JsonConverter(typeof(LenientIntegerConverter))]
+    public long? Size { get; set; }
+
+    [JsonPropertyName("w"), JsonConverter(typeof(LenientIntegerConverter))]
+    public long? Width { get; set; }
+
+    [JsonPropertyName("h"), JsonConverter(typeof(LenientIntegerConverter))]
+    public long? Height { get; set; }
+
+    /// <summary>Milliseconds, for audio and video.</summary>
+    [JsonPropertyName("duration"), JsonConverter(typeof(LenientIntegerConverter))]
+    public long? Duration { get; set; }
+
+    [JsonPropertyName("thumbnail_url")]
+    public string? ThumbnailUrl { get; set; }
+
+    [JsonPropertyName("thumbnail_file")]
+    public EncryptedFileContent? ThumbnailFile { get; set; }
+
+    [JsonPropertyName("thumbnail_info")]
+    public ThumbnailInfoContent? ThumbnailInfo { get; set; }
+}
+
+internal class ThumbnailInfoContent
+{
+    [JsonPropertyName("mimetype")]
+    public string? MimeType { get; set; }
+
+    [JsonPropertyName("size"), JsonConverter(typeof(LenientIntegerConverter))]
+    public long? Size { get; set; }
+
+    [JsonPropertyName("w"), JsonConverter(typeof(LenientIntegerConverter))]
+    public long? Width { get; set; }
+
+    [JsonPropertyName("h"), JsonConverter(typeof(LenientIntegerConverter))]
+    public long? Height { get; set; }
+}
+
+/// <summary>An encrypted file: where it is, its AES-CTR key and IV, and the SHA-256 hash of the encrypted bytes.</summary>
+internal class EncryptedFileContent
+{
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("key")]
+    public JsonWebKeyContent? Key { get; set; }
+
+    [JsonPropertyName("iv")]
+    public string? Iv { get; set; }
+
+    [JsonPropertyName("hashes")]
+    public Dictionary<string, string>? Hashes { get; set; }
+
+    [JsonPropertyName("v")]
+    public string? Version { get; set; }
+}
+
+internal class JsonWebKeyContent
+{
+    [JsonPropertyName("kty")]
+    public string? KeyType { get; set; }
+
+    [JsonPropertyName("key_ops")]
+    public List<string>? KeyOperations { get; set; }
+
+    [JsonPropertyName("alg")]
+    public string? Algorithm { get; set; }
+
+    /// <summary>The key in URL-safe unpadded base64.</summary>
+    [JsonPropertyName("k")]
+    public string? Key { get; set; }
+
+    [JsonPropertyName("ext")]
+    public bool? Extractable { get; set; }
+}
+
+/// <summary>Reads integers that arrive as numbers with decimals or as strings, and anything else as null.</summary>
+internal sealed class LenientIntegerConverter : JsonConverter<long?>
+{
+    public override bool HandleNull => true;
+
+    public override long? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.Number when reader.TryGetInt64(out var integer):
+                return integer;
+            case JsonTokenType.Number when reader.TryGetDouble(out var number) && double.IsFinite(number) && Math.Abs(number) < long.MaxValue:
+                return (long)Math.Round(number);
+            case JsonTokenType.String when long.TryParse(reader.GetString(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsed):
+                return parsed;
+            default:
+                reader.Skip();
+                return null;
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, long? value, JsonSerializerOptions options)
+    {
+        if (value is { } integer)
+            writer.WriteNumberValue(integer);
+        else
+            writer.WriteNullValue();
+    }
 }
 
 internal class RelatesTo

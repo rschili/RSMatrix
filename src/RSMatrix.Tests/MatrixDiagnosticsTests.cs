@@ -97,7 +97,6 @@ public class MatrixDiagnosticsTests
         await Assert.That(warnings).IsEquivalentTo([
             "Unhandled AccountData: m.push_rules",
             "Unhandled TimelineEvent: m.sticker",
-            "Unhandled Field: RoomMessageContent.url",
             "Unhandled MsgType: org.example.custom",
             "Unhandled Relation: m.reference",
             "Unhandled StateEvent: m.room.server_acl",
