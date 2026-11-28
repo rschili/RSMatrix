@@ -55,7 +55,7 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="chat:ChatUser">
               <Border Classes="reader">
-                <controls:AvatarView Width="16" Height="16" DisplayName="{Binding DisplayName}" ColorSeed="{Binding UserId}" />
+                <controls:AvatarView Width="16" Height="16" DisplayName="{Binding DisplayName}" ColorSeed="{Binding UserId}" AvatarUrl="{Binding AvatarUrl}" />
               </Border>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
@@ -147,7 +147,7 @@
             <Grid ColumnDefinitions="52,*" DataContext="{Binding ThreadRoot}" x:DataType="vm:MessageViewModel"
                   IsVisible="{Binding $parent[views:TimelineView].((vm:ConversationViewModel)DataContext).ThreadRoot, Converter={x:Static ObjectConverters.IsNotNull}}">
               <controls:AvatarView Width="36" Height="36" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
-                                   DisplayName="{Binding Sender.DisplayName}" ColorSeed="{Binding Sender.UserId}" />
+                                   DisplayName="{Binding Sender.DisplayName}" ColorSeed="{Binding Sender.UserId}" AvatarUrl="{Binding Sender.AvatarUrl}" />
               <StackPanel Grid.Column="1" Spacing="2">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <TextBlock FontWeight="SemiBold" Text="{Binding Sender.DisplayName}" ToolTip.Tip="{Binding Sender.UserId}" />
@@ -193,7 +193,7 @@
 
                   <controls:AvatarView Grid.Row="1" Width="36" Height="36" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
                                        IsVisible="{Binding IsGroupStart}"
-                                       DisplayName="{Binding Sender.DisplayName}" ColorSeed="{Binding Sender.UserId}" />
+                                       DisplayName="{Binding Sender.DisplayName}" ColorSeed="{Binding Sender.UserId}" AvatarUrl="{Binding Sender.AvatarUrl}" />
                   <TextBlock Grid.Row="1" Classes="hoverTime tertiary" FontSize="{DynamicResource FontSizeSmall}" VerticalAlignment="Top" Margin="0,3,0,0"
                              IsVisible="{Binding !IsGroupStart}" Text="{Binding TimeText}" ToolTip.Tip="{Binding FullTimeText}" />
                   <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">

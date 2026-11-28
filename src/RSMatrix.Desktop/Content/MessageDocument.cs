@@ -31,6 +31,11 @@ public sealed record RuleBlock : MessageBlock;
 
 public sealed record ImageBlock(MediaReference Image) : MessageBlock;
 
+/// <summary>A file attached to a message, shown as a row to save it.</summary>
+/// <param name="FileName">The name the sender gave. Strip directories before using it as a path.</param>
+/// <param name="Size">The size in bytes the sender stated, if any.</param>
+public sealed record FileBlock(string MxcUri, string FileName, long? Size) : MessageBlock;
+
 public abstract record MessageInline;
 
 /// <param name="Link">Target for links. Only absolute URLs with an allowed scheme get here.</param>

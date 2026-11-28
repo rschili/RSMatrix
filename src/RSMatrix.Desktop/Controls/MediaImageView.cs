@@ -1,5 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -26,7 +28,15 @@ public sealed class MediaImageView : Border
     public static readonly StyledProperty<double> MaxImageHeightProperty =
         AvaloniaProperty.Register<MediaImageView, double>(nameof(MaxImageHeight), double.PositiveInfinity);
 
+    /// <summary>Raised when the user clicks a loaded image whose <see cref="OpensViewer"/> is set.</summary>
+    public static readonly RoutedEvent<RoutedEventArgs> ViewRequestedEvent =
+        RoutedEvent.Register<MediaImageView, RoutedEventArgs>("ViewRequested", RoutingStrategies.Bubble);
+
+    public static readonly StyledProperty<bool> OpensViewerProperty =
+        AvaloniaProperty.Register<MediaImageView, bool>(nameof(OpensViewer));
+
     private readonly Image _image = new() { Stretch = Stretch.Uniform };
+    private bool _isLoaded;
     private int _loadVersion;
 
     public static MediaLoader? GetLoader(Control control) => control.GetValue(LoaderProperty);
@@ -38,6 +48,17 @@ public sealed class MediaImageView : Border
         HorizontalAlignment = HorizontalAlignment.Left;
         ClipToBounds = true;
         Child = _image;
+        Tapped += (_, _) =>
+        {
+            if (OpensViewer && _isLoaded)
+                RaiseEvent(new RoutedEventArgs(ViewRequestedEvent, this));
+        };
+    }
+
+    public bool OpensViewer
+    {
+        get => GetValue(OpensViewerProperty);
+        set => SetValue(OpensViewerProperty, value);
     }
 
     public MediaReference? Media
@@ -69,6 +90,7 @@ public sealed class MediaImageView : Border
     private async void Load()
     {
         var version = ++_loadVersion;
+        SetLoaded(false);
         _image.Source = null;
         Child = _image;
         var media = Media;
@@ -88,6 +110,13 @@ public sealed class MediaImageView : Border
         }
         _image.Source = bitmap;
         ApplySize(bitmap.Size.Width, bitmap.Size.Height);
+        SetLoaded(true);
+    }
+
+    private void SetLoaded(bool isLoaded)
+    {
+        _isLoaded = isLoaded;
+        Cursor = isLoaded && OpensViewer ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
     }
 
     private void ApplySize(double? width, double? height)

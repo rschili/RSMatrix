@@ -100,7 +100,7 @@
                   <!-- The unread badge sits on the room icon, or beside the name when icons are hidden. -->
                   <Panel Margin="0,0,10,0" VerticalAlignment="Center" IsVisible="{DynamicResource ShowRoomIcons}">
                     <controls:AvatarView Width="28" Height="28" IsSquare="{Binding !IsDirect}"
-                                         DisplayName="{Binding Name}" ColorSeed="{Binding RoomId}" />
+                                         DisplayName="{Binding Name}" ColorSeed="{Binding RoomId}" AvatarUrl="{Binding AvatarUrl}" />
                     <Border Classes="badge overlay" IsVisible="{Binding HasUnread}">
                       <TextBlock Text="{Binding UnreadCount}" />
                     </Border>
@@ -229,7 +229,8 @@
                 <DataTemplate x:DataType="vm:MemberViewModel">
                   <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" Margin="8,5" Background="Transparent" ToolTip.Tip="{Binding ToolTipText}">
                     <Panel VerticalAlignment="Center">
-                      <controls:AvatarView Width="24" Height="24" DisplayName="{Binding User.DisplayName}" ColorSeed="{Binding User.UserId}" />
+                      <controls:AvatarView Width="24" Height="24" DisplayName="{Binding User.DisplayName}" ColorSeed="{Binding User.UserId}"
+                                           AvatarUrl="{Binding User.AvatarUrl}" />
                       <Ellipse Classes="presenceDot small" IsVisible="{Binding HasPresence}"
                                Classes.online="{Binding IsOnline}" Classes.away="{Binding IsAway}" />
                     </Panel>
@@ -247,5 +248,7 @@
         </DockPanel>
       </Border>
     </Panel>
+
+    <views:ImageViewer x:Name="Viewer" Grid.ColumnSpan="3" />
   </Grid>
 </UserControl>

@@ -3,12 +3,20 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 
 namespace RSMatrix.Desktop.Controls;
 
-/// <summary>A colored circle or rounded square with the first letter of a name.</summary>
+/// <summary>
+/// A picture in a circle or rounded square. Without a picture, or while it loads, a colored badge with the first
+/// letter of the name. Pictures come from the <see cref="MediaImageView.LoaderProperty"/> the chat view sets.
+/// </summary>
 public sealed class AvatarView : Control
 {
+    /// <summary>The picture as an mxc:// URI, or null for the letter badge.</summary>
+    public static readonly StyledProperty<string?> AvatarUrlProperty =
+        AvaloniaProperty.Register<AvatarView, string?>(nameof(AvatarUrl));
+
     public static readonly StyledProperty<string?> DisplayNameProperty =
         AvaloniaProperty.Register<AvatarView, string?>(nameof(DisplayName));
 
@@ -30,6 +38,9 @@ public sealed class AvatarView : Control
         new FuncValueConverter<string?, IBrush>(seed => new SolidColorBrush(GetColor(seed)));
 
     private static readonly Typeface InitialTypeface = new(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
+
+    private Bitmap? _picture;
+    private int _loadVersion;
 
     static AvatarView()
     {
@@ -54,14 +65,52 @@ public sealed class AvatarView : Control
         set => SetValue(IsSquareProperty, value);
     }
 
+    public string? AvatarUrl
+    {
+        get => GetValue(AvatarUrlProperty);
+        set => SetValue(AvatarUrlProperty, value);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == AvatarUrlProperty || change.Property == MediaImageView.LoaderProperty)
+            LoadPicture();
+    }
+
+    private async void LoadPicture()
+    {
+        var version = ++_loadVersion;
+        _picture = null;
+        InvalidateVisual();
+        if (AvatarUrl is not { } url || MediaImageView.GetLoader(this) is not { } loader)
+            return;
+        // The loader owns the bitmap and keeps it for the session.
+        var picture = await loader.LoadAvatarAsync(url);
+        if (version != _loadVersion)
+            return;
+        _picture = picture;
+        InvalidateVisual();
+    }
+
     public override void Render(DrawingContext context)
     {
         var size = Math.Min(Bounds.Width, Bounds.Height);
         if (size <= 0)
             return;
         var rect = new Rect(0, 0, size, size);
-        var background = new SolidColorBrush(GetColor(ColorSeed ?? DisplayName));
         var radius = IsSquare ? size * 0.28 : size / 2;
+        if (_picture is { } picture)
+        {
+            // Servers cut avatar thumbnails square; other pictures lose their edges.
+            var side = Math.Min(picture.Size.Width, picture.Size.Height);
+            var source = new Rect((picture.Size.Width - side) / 2, (picture.Size.Height - side) / 2, side, side);
+            using (context.PushClip(new RoundedRect(rect, radius)))
+                context.DrawImage(picture, source, rect);
+            return;
+        }
+
+        var background = new SolidColorBrush(GetColor(ColorSeed ?? DisplayName));
         context.DrawRectangle(background, null, new RoundedRect(rect, radius));
 
         var initial = GetInitial(DisplayName);

@@ -31,6 +31,8 @@ public sealed class MatrixChatSession : IChatSession
     private readonly ConcurrentDictionary<string, Room> _rooms = new(StringComparer.Ordinal);
     // RSMatrix doesn't deliver reactions, so only the ones sent here are known, and only they can be taken back.
     private readonly ConcurrentDictionary<(string RoomId, string TargetEventId, string Key), string> _sentReactionIds = new();
+    // The UI refers to media by mxc:// URI. Files of messages download through their attachment, which can decrypt them.
+    private readonly ConcurrentDictionary<string, Attachment> _attachmentsByUri = new(StringComparer.Ordinal);
 
     private MatrixChatSession(MatrixClient client, ILogger logger)
     {
@@ -124,7 +126,7 @@ public sealed class MatrixChatSession : IChatSession
     {
         var members = await GetRoom(roomId).GetMembersAsync(cancellationToken).ConfigureAwait(false);
         return members
-            .Select(u => new ChatMember(new ChatUser(u.User.UserId.Full, u.DisplayName), u.Membership == Membership.Invite,
+            .Select(u => new ChatMember(ToChatUser(u), u.Membership == Membership.Invite,
                 ToChatPresence(u.User)))
             .ToList();
     }
@@ -140,9 +142,27 @@ public sealed class MatrixChatSession : IChatSession
     public Task SetStatusMessageAsync(string? statusMessage, CancellationToken cancellationToken)
         => _client.SetStatusMessageAsync(statusMessage, cancellationToken);
 
-    // RSMatrix can't download media yet.
-    public Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken)
-        => Task.FromResult<byte[]?>(null);
+    public async Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken)
+        => _attachmentsByUri.TryGetValue(mxcUri, out var attachment)
+            ? await attachment.DownloadAsync(cancellationToken).ConfigureAwait(false)
+            : (await _client.DownloadAsync(mxcUri, cancellationToken).ConfigureAwait(false))?.Content;
+
+    public async Task DownloadMediaAsync(string mxcUri, Stream destination, CancellationToken cancellationToken)
+    {
+        if (_attachmentsByUri.TryGetValue(mxcUri, out var attachment))
+        {
+            await attachment.DownloadAsync(destination, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        var file = await _client.DownloadAsync(mxcUri, cancellationToken).ConfigureAwait(false)
+            ?? throw new FileNotFoundException("The server doesn't have this file.");
+        await destination.WriteAsync(file.Content, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<byte[]?> DownloadThumbnailAsync(string mxcUri, int width, int height, bool crop, CancellationToken cancellationToken)
+        => _attachmentsByUri.TryGetValue(mxcUri, out var attachment)
+            ? attachment.DownloadThumbnailAsync(width, height, cancellationToken)
+            : _client.DownloadThumbnailAsync(mxcUri, width, height, crop, cancellationToken);
 
     public async ValueTask DisposeAsync()
     {
@@ -225,18 +245,42 @@ public sealed class MatrixChatSession : IChatSession
         _events.Writer.TryWrite(new RoomJoined(ToRoomInfo(room), latest));
     }
 
-    private static ChatRoomInfo ToRoomInfo(Room room)
-        => new(room.RoomId.Full, room.DisplayName, room.IsEncrypted, room.IsDirect);
+    private ChatRoomInfo ToRoomInfo(Room room)
+        => new(room.RoomId.Full, room.DisplayName, room.IsEncrypted, room.IsDirect, GetRoomAvatarUrl(room));
 
-    private static ChatMessage ToChatMessage(Message message)
+    /// <summary>Direct chats rarely have a picture of their own; like other clients, show the other person's instead.</summary>
+    private string? GetRoomAvatarUrl(Room room)
     {
-        var kind = message.Kind == MessageKind.Notice ? ChatMessageKind.Notice : ChatMessageKind.Text;
+        if (room.AvatarUrl != null || !room.IsDirect)
+            return room.AvatarUrl;
+        return room.Users.Values
+            .Where(u => u.Membership == Membership.Join && !u.User.UserId.Equals(_client.CurrentUser.UserId))
+            .Select(u => u.AvatarUrl)
+            .FirstOrDefault(url => url != null);
+    }
+
+    private ChatMessage ToChatMessage(Message message)
+    {
         var sender = ToChatUser(message.Sender);
-        // Until the timeline shows attachments, they appear as their file name.
-        var body = message is { Body: "", Attachment: { } attachment } ? attachment.FileName : message.Body;
-        return new ChatMessage(message.Room.RoomId.Full, message.Id, sender, message.Timestamp, kind,
-            body, PlainTextParser.Parse(body), message.IsEncrypted, message.ThreadRootId, message.ReplyToId,
+        var chatMessage = new ChatMessage(message.Room.RoomId.Full, message.Id, sender, message.Timestamp,
+            message.Kind == MessageKind.Notice ? ChatMessageKind.Notice : ChatMessageKind.Text,
+            message.Body, PlainTextParser.Parse(message.Body), message.IsEncrypted, message.ThreadRootId, message.ReplyToId,
             Reactions: ToChatReactions(message.Reactions));
+        if (message.Attachment is not { } attachment)
+            return chatMessage;
+        _attachmentsByUri[attachment.MxcUri] = attachment;
+        var caption = chatMessage.Content.Blocks;
+        if (message.Kind == MessageKind.Image)
+        {
+            var picture = new ImageBlock(new MediaReference(attachment.MxcUri, attachment.FileName, attachment.Width, attachment.Height));
+            return chatMessage with { Kind = ChatMessageKind.Image, Content = new MessageDocument([picture, .. caption]) };
+        }
+        // Files, audio and video. The file name stands in for a missing caption in previews.
+        return chatMessage with
+        {
+            Body = message.Body.Length > 0 ? message.Body : attachment.FileName,
+            Content = new MessageDocument([new FileBlock(attachment.MxcUri, attachment.FileName, attachment.Size), .. caption]),
+        };
     }
 
     private static List<ChatReaction> ToChatReactions(IReadOnlyList<Reaction> reactions)
@@ -251,5 +295,5 @@ public sealed class MatrixChatSession : IChatSession
         }, user.StatusMessage, user.LastActiveAt, user.CurrentlyActive == true);
 
     private static ChatUser ToChatUser(RoomUser user)
-        => new(user.User.UserId.Full, user.DisplayName);
+        => new(user.User.UserId.Full, user.DisplayName, user.AvatarUrl);
 }

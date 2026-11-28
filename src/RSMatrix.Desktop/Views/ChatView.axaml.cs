@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using RSMatrix.Desktop.Controls;
 using RSMatrix.Desktop.ViewModels;
 
 namespace RSMatrix.Desktop.Views;
@@ -22,6 +23,13 @@ public partial class ChatView : UserControl
         AddHandler(PointerPressedEvent, OnActivity, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerWheelChangedEvent, OnActivity, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(KeyDownEvent, OnActivity, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(MediaImageView.ViewRequestedEvent, OnImageViewRequested);
+    }
+
+    private void OnImageViewRequested(object? sender, RoutedEventArgs e)
+    {
+        if (e.Source is MediaImageView { Media: { } media } && MediaImageView.GetLoader(this) is { } loader)
+            Viewer.Open(media, loader);
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)

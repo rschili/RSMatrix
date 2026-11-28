@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -8,6 +10,7 @@ using Avalonia.VisualTree;
 using Microsoft.Extensions.Logging.Abstractions;
 using RSMatrix.Desktop;
 using RSMatrix.Desktop.Chat;
+using RSMatrix.Desktop.Controls;
 using RSMatrix.Desktop.Matrix;
 using RSMatrix.Desktop.Sample;
 using RSMatrix.Desktop.Storage;
@@ -87,6 +90,7 @@ void RenderSample()
     Pump(TimeSpan.FromMilliseconds(300));
 
     RenderMessageActions(chat);
+    RenderImageViewer(chat);
 
     var lounge = chat.Rooms.First(r => r.Name == "Lounge");
     chat.SelectedConversation = lounge;
@@ -248,6 +252,27 @@ async Task RenderLiveAsync(string userId, string password, string homeserver)
 }
 
 // Hovers a message, reacts through the picker, takes the reaction back, opens the menu, replies and opens a thread.
+void RenderImageViewer(ChatViewModel chat)
+{
+    chat.SelectedConversation = chat.Rooms.First(r => r.Name == "Design");
+    Pump(TimeSpan.FromMilliseconds(500));
+    var image = window.GetVisualDescendants().OfType<MediaImageView>().First(i => i.OpensViewer);
+    image.RaiseEvent(new RoutedEventArgs(MediaImageView.ViewRequestedEvent, image));
+    Pump(TimeSpan.FromMilliseconds(500));
+    Save("viewer");
+
+    var viewer = window.GetVisualDescendants().OfType<ImageViewer>().Single();
+    foreach (var key in new[] { Key.OemPlus, Key.OemPlus, Key.OemPlus, Key.OemPlus })
+        viewer.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = key });
+    Pump(TimeSpan.FromMilliseconds(300));
+    Save("viewer-zoomed");
+
+    viewer.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
+    Pump(TimeSpan.FromMilliseconds(200));
+    if (viewer.IsVisible)
+        throw new InvalidOperationException("Esc should close the image viewer.");
+}
+
 void RenderMessageActions(ChatViewModel chat)
 {
     chat.SelectedConversation = chat.Rooms.First(r => r.Name == "General");

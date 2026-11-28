@@ -16,6 +16,7 @@ public sealed class SampleChatSession : IChatSession
 {
     private const string LandscapeUri = "mxc://sample.local/landscape";
     private const string EmojiUri = "mxc://sample.local/emoji-smile";
+    private const string LandscapeFileUri = "mxc://sample.local/landscape-original";
     private static readonly JsonSerializerOptions SourceJsonOptions =
         new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -159,11 +160,15 @@ public sealed class SampleChatSession : IChatSession
         _events.Writer.TryWrite(new PresenceChanged(Me.UserId, presence));
     }
 
+    // The sample images are small enough to serve as their own thumbnails.
+    public Task<byte[]?> DownloadThumbnailAsync(string mxcUri, int width, int height, bool crop, CancellationToken cancellationToken)
+        => DownloadMediaAsync(mxcUri, cancellationToken);
+
     public async Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken)
     {
         var name = mxcUri switch
         {
-            LandscapeUri => "landscape.png",
+            LandscapeUri or LandscapeFileUri => "landscape.png",
             EmojiUri => "emoji-smile.png",
             _ => null,
         };
@@ -175,6 +180,18 @@ public sealed class SampleChatSession : IChatSession
         using var memory = new MemoryStream();
         await stream.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
         return memory.ToArray();
+    }
+
+    public async Task DownloadMediaAsync(string mxcUri, Stream destination, CancellationToken cancellationToken)
+    {
+        var content = await DownloadMediaAsync(mxcUri, cancellationToken).ConfigureAwait(false)
+            ?? throw new FileNotFoundException("The sample has no such file.");
+        // Slow enough to see the progress bar.
+        for (var offset = 0; offset < content.Length; offset += 4096)
+        {
+            await destination.WriteAsync(content.AsMemory(offset, Math.Min(4096, content.Length - offset)), cancellationToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(40), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public ValueTask DisposeAsync()
@@ -276,6 +293,8 @@ public sealed class SampleChatSession : IChatSession
         yield return React(landscape, "😍", Me);
         yield return InThread(landscape, Me, today.AddMinutes(-15), "Is that from the Alps?");
         yield return InThread(landscape, Carol, today.AddMinutes(-14), "The Dolomites, last summer.");
+        yield return new MessageReceived(Design, CreateMessage(Design, Carol, today.AddMinutes(-13), ChatMessageKind.Text,
+            "landscape-original.png", file: new FileBlock(LandscapeFileUri, "landscape-original.png", 33699)));
         var calmColors = Text(Design, Me, today.AddMinutes(-10), "Calm colors, I like it. Keep the chrome minimal.");
         yield return calmColors;
         yield return Read(calmColors, Carol);
@@ -304,10 +323,12 @@ public sealed class SampleChatSession : IChatSession
     }
 
     private ChatMessage CreateMessage(ChatRoomInfo room, ChatUser sender, DateTimeOffset timestamp, ChatMessageKind kind,
-        string body, string? html = null, MediaReference? image = null, string? threadRootId = null, string? replyToEventId = null)
+        string body, string? html = null, MediaReference? image = null, string? threadRootId = null, string? replyToEventId = null,
+        FileBlock? file = null)
     {
         var eventId = $"$sample{Interlocked.Increment(ref _nextEventNumber)}";
         var document = image != null ? new MessageDocument([new ImageBlock(image)])
+            : file != null ? new MessageDocument([file])
             : html != null ? MatrixHtmlParser.Parse(html)
             : PlainTextParser.Parse(body);
 
@@ -318,6 +339,7 @@ public sealed class SampleChatSession : IChatSession
                 ChatMessageKind.Notice => "m.notice",
                 ChatMessageKind.Emote => "m.emote",
                 ChatMessageKind.Image => "m.image",
+                _ when file != null => "m.file",
                 _ => "m.text",
             },
             ["body"] = body,
@@ -331,6 +353,11 @@ public sealed class SampleChatSession : IChatSession
         {
             content["url"] = image.MxcUri;
             content["info"] = new JsonObject { ["w"] = image.Width, ["h"] = image.Height };
+        }
+        if (file != null)
+        {
+            content["url"] = file.MxcUri;
+            content["info"] = new JsonObject { ["mimetype"] = "image/png", ["size"] = file.Size };
         }
         if (threadRootId != null)
             content["m.relates_to"] = new JsonObject { ["rel_type"] = "m.thread", ["event_id"] = threadRootId };

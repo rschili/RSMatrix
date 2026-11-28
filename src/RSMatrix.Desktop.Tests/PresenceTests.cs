@@ -148,6 +148,9 @@ public class PresenceTests
         public Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken)
             => throw new NotSupportedException();
         public Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<byte[]?> DownloadThumbnailAsync(string mxcUri, int width, int height, bool crop, CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+        public Task DownloadMediaAsync(string mxcUri, Stream destination, CancellationToken cancellationToken) => throw new NotSupportedException();
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

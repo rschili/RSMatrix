@@ -39,8 +39,21 @@ public interface IChatSession : IAsyncDisposable
     /// <summary>Joined and invited members of the room, in no particular order.</summary>
     Task<IReadOnlyList<ChatMember>> GetMembersAsync(string roomId, CancellationToken cancellationToken);
 
-    /// <summary>Returns the media content, or null when it is not available.</summary>
+    /// <summary>Returns the whole file, or null when it is not available.</summary>
     Task<byte[]?> DownloadMediaAsync(string mxcUri, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Writes the whole file into <paramref name="destination"/>, for files too large to hold in memory. Throws when
+    /// the file is not available or turns out damaged, possibly after writing part of it.
+    /// </summary>
+    Task DownloadMediaAsync(string mxcUri, Stream destination, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns a smaller version of an image for display, or null when there is none. It can be smaller or larger
+    /// than asked, for example when the sender made it.
+    /// </summary>
+    /// <param name="crop">Cuts the image to the aspect ratio of <paramref name="width"/> and <paramref name="height"/>, for avatars.</param>
+    Task<byte[]?> DownloadThumbnailAsync(string mxcUri, int width, int height, bool crop, CancellationToken cancellationToken);
 
     /// <summary>Sets whether others see the current user online, away or offline. It stays until changed.</summary>
     Task SetPresenceAsync(PresenceState state, CancellationToken cancellationToken);
@@ -49,7 +62,8 @@ public interface IChatSession : IAsyncDisposable
     Task SetStatusMessageAsync(string? statusMessage, CancellationToken cancellationToken);
 }
 
-public sealed record ChatUser(string UserId, string DisplayName);
+/// <param name="AvatarUrl">The user's picture as an mxc:// URI, or null to show a letter.</param>
+public sealed record ChatUser(string UserId, string DisplayName, string? AvatarUrl = null);
 
 /// <param name="Presence">Null while the server hasn't told.</param>
 public sealed record ChatMember(ChatUser User, bool IsInvited, ChatPresence? Presence = null);
@@ -71,7 +85,8 @@ public sealed record ChatPresence(PresenceState State, string? StatusMessage = n
 /// <param name="Key">Usually an emoji. A user reacts at most once with the same key.</param>
 public sealed record ChatReaction(string Key, IReadOnlyList<ChatUser> Users);
 
-public sealed record ChatRoomInfo(string RoomId, string Name, bool IsEncrypted, bool IsDirect);
+/// <param name="AvatarUrl">The room's picture as an mxc:// URI, or null to show a letter.</param>
+public sealed record ChatRoomInfo(string RoomId, string Name, bool IsEncrypted, bool IsDirect, string? AvatarUrl = null);
 
 public enum ChatMessageKind
 {

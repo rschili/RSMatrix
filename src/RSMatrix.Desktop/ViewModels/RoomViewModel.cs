@@ -39,6 +39,10 @@ public sealed partial class RoomViewModel : ConversationViewModel
     [ObservableProperty]
     public partial bool IsDirect { get; private set; }
 
+    /// <summary>The room's picture as an mxc:// URI, or null for the letter badge.</summary>
+    [ObservableProperty]
+    public partial string? AvatarUrl { get; private set; }
+
     [ObservableProperty]
     public partial string LastMessagePreview { get; private set; } = "";
 
@@ -57,6 +61,7 @@ public sealed partial class RoomViewModel : ConversationViewModel
         Name = info.Name;
         IsEncrypted = info.IsEncrypted;
         IsDirect = info.IsDirect;
+        AvatarUrl = info.AvatarUrl;
         OnPropertyChanged(nameof(ComposerPlaceholder));
     }
 

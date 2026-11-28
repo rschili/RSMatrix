@@ -1,0 +1,49 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="RSMatrix.Desktop.Views.ImageViewer"
+             Classes="imageViewer" IsVisible="False" Focusable="True">
+  <UserControl.Styles>
+    <!-- The backdrop is dark in both themes, so the icons are light in both. -->
+    <Style Selector=".imageViewer Path.icon">
+      <Setter Property="Stroke" Value="#D8DADF" />
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Height" Value="18" />
+    </Style>
+    <Style Selector=".imageViewer Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#33FFFFFF" />
+    </Style>
+    <Style Selector=".imageViewer Button.icon:pointerover Path.icon">
+      <Setter Property="Stroke" Value="White" />
+    </Style>
+    <Style Selector=".imageViewer Button.icon:disabled Path.icon">
+      <Setter Property="Stroke" Value="#6B6F78" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*" Background="#E6101114">
+    <Grid ColumnDefinitions="*,Auto,*" Margin="16,8">
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+        <TextBlock x:Name="Title" Foreground="White" TextTrimming="CharacterEllipsis" MaxWidth="600" />
+        <TextBlock x:Name="Status" Foreground="#A0A4AC" />
+      </StackPanel>
+      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+        <Button x:Name="ZoomOutButton" Classes="icon" ToolTip.Tip="Zoom out (-)">
+          <Path Classes="icon" Data="{StaticResource ZoomOutIcon}" />
+        </Button>
+        <Button x:Name="ZoomInButton" Classes="icon" ToolTip.Tip="Zoom in (+)">
+          <Path Classes="icon" Data="{StaticResource ZoomInIcon}" />
+        </Button>
+        <Button x:Name="SaveButton" Classes="icon" ToolTip.Tip="Save" IsEnabled="False">
+          <Path Classes="icon" Data="{StaticResource DownloadIcon}" />
+        </Button>
+        <Button x:Name="CloseButton" Classes="icon" ToolTip.Tip="Close (Esc)">
+          <Path Classes="icon" Data="{StaticResource CloseIcon}" />
+        </Button>
+      </StackPanel>
+    </Grid>
+    <ScrollViewer x:Name="Scroller" Grid.Row="1" Background="Transparent"
+                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+      <Image x:Name="Picture" Stretch="Fill" RenderOptions.BitmapInterpolationMode="HighQuality" HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </ScrollViewer>
+  </Grid>
+</UserControl>

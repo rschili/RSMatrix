@@ -59,6 +59,7 @@ public sealed class MessageDocumentView : StackPanel
         TableBlock table => CreateTable(table),
         RuleBlock => CreateRule(),
         ImageBlock image => CreateImage(image),
+        FileBlock file => new FileRowView(file),
         _ => new Control(),
     };
 
@@ -199,5 +200,6 @@ public sealed class MessageDocumentView : StackPanel
         MaxImageHeight = MaxImageHeight,
         CornerRadius = new CornerRadius(8),
         Margin = new Thickness(0, 2),
+        OpensViewer = true,
     };
 }
